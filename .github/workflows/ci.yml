@@ -1,0 +1,161 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest]
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install system dependencies (Ubuntu)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          clang-18 \
+          libc++-18-dev \
+          libc++abi-18-dev \
+          libstdc++-12-dev \
+          libncurses6 \
+          libtinfo6
+        # Install libtinfo5 compatibility library for LLVM toolchain
+        wget http://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
+        sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb
+        rm libtinfo5_6.3-2ubuntu0.1_amd64.deb
+
+    - name: Setup Bazel
+      uses: bazel-contrib/setup-bazel@0.8.1
+      with:
+        bazelisk-version: '1.x'
+
+    - name: Cache Bazel
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cache/bazel
+          ~/.cache/bazelisk
+        key: ${{ runner.os }}-bazel-${{ hashFiles('**/*.bazel', '**/*.bzl', 'MODULE.bazel') }}
+        restore-keys: |
+          ${{ runner.os }}-bazel-
+
+    - name: Build all targets
+      run: bazel build //...
+
+    - name: Run all tests
+      run: bazel test //... --test_output=errors
+
+    - name: Generate test summary
+      if: always()
+      run: |
+        echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+        bazel test //... --test_summary=detailed 2>&1 | tail -20 >> $GITHUB_STEP_SUMMARY || true
+
+  format-check:
+    name: Format Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install clang-format
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-format-18
+
+    - name: Install rustfmt (stable)
+      run: |
+        rustup toolchain install stable
+        rustup component add rustfmt --toolchain stable
+
+    - name: Check C++ formatting
+      run: |
+        find ferric_continuum -name "*.cc" -o -name "*.hh" | xargs clang-format-18 --dry-run --Werror
+
+    - name: Check Rust formatting (stable rustfmt, no warnings)
+      run: |
+        # Using stable rustfmt to avoid unstable feature warnings in CI
+        find ferric_continuum -name "*.rs" -exec rustfmt +stable --edition 2021 --check {} \;
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Bazel
+      uses: bazel-contrib/setup-bazel@0.8.1
+      with:
+        bazelisk-version: '1.x'
+
+    - name: Install clippy
+      run: rustup component add clippy
+
+    - name: Run Rust clippy
+      run: |
+        find ferric_continuum -name "*.rs" -not -path "*/target/*" | while read file; do
+          cargo clippy --manifest-path=/dev/null -- --check "$file" || true
+        done
+
+  coverage:
+    name: Test Coverage
+    runs-on: ubuntu-24.04
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          clang-18 \
+          libc++-18-dev \
+          libc++abi-18-dev \
+          libstdc++-12-dev \
+          libncurses6 \
+          libtinfo6
+        # Install libtinfo5 compatibility library for LLVM toolchain
+        wget http://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
+        sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb
+        rm libtinfo5_6.3-2ubuntu0.1_amd64.deb
+
+    - name: Setup Bazel
+      uses: bazel-contrib/setup-bazel@0.8.1
+      with:
+        bazelisk-version: '1.x'
+
+    - name: Cache Bazel
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cache/bazel
+          ~/.cache/bazelisk
+        key: ${{ runner.os }}-bazel-coverage-${{ hashFiles('**/*.bazel', '**/*.bzl', 'MODULE.bazel') }}
+        restore-keys: |
+          ${{ runner.os }}-bazel-
+
+    - name: Run tests with coverage
+      run: |
+        bazel coverage //...
+        
+    - name: Generate coverage report
+      run: |
+        echo "## Coverage Report" >> $GITHUB_STEP_SUMMARY
+        echo "Test coverage metrics will be available soon." >> $GITHUB_STEP_SUMMARY

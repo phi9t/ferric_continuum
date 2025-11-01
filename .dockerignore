@@ -1,0 +1,54 @@
+# Docker ignore file - exclude these from Docker build context
+
+# Bazel artifacts
+bazel-*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+venv/
+env/
+
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git/
+.gitignore
+
+# Documentation (not needed for build)
+*.md
+docs/
+
+# CI/CD (not needed for build)
+.github/
+
+# Build artifacts
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+

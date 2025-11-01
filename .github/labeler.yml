@@ -1,0 +1,81 @@
+# Configuration for PR labeler
+# https://github.com/actions/labeler
+
+# C++ code
+'C++':
+  - '**/*.cc'
+  - '**/*.hh'
+  - '**/*.cpp'
+  - '**/*.hpp'
+
+# Rust code
+'Rust':
+  - '**/*.rs'
+  - '**/Cargo.toml'
+  - '**/Cargo.lock'
+
+# Python code
+'Python':
+  - '**/*.py'
+  - '**/requirements*.txt'
+  - '**/setup.py'
+  - '**/pyproject.toml'
+
+# Bazel build system
+'Bazel':
+  - '**/*.bazel'
+  - '**/*.bzl'
+  - '**/BUILD'
+  - '**/BUILD.bazel'
+  - '**/WORKSPACE'
+  - '**/WORKSPACE.bazel'
+  - '**/MODULE.bazel'
+
+# Documentation
+'Documentation':
+  - '**/*.md'
+  - '**/docs/**/*'
+  - '**/*.rst'
+
+# Tests
+'Tests':
+  - '**/*_test.cc'
+  - '**/*_test.rs'
+  - '**/*_test.py'
+  - '**/test_*.py'
+
+# CI/CD
+'CI/CD':
+  - '.github/workflows/**'
+  - '.github/actions/**'
+  - '**/ci/**'
+
+# Configuration
+'Configuration':
+  - '**/*.toml'
+  - '**/*.yaml'
+  - '**/*.yml'
+  - '**/*.json'
+  - '**/.clang-format'
+  - '**/rustfmt.toml'
+  - '**/clippy.toml'
+
+# Dependencies
+'Dependencies':
+  - '**/MODULE.bazel'
+  - '**/requirements*.txt'
+  - '**/Cargo.toml'
+
+# Foundation libraries
+'Foundation':
+  - 'ferric_continuum/foundation/**'
+
+# Agents
+'Agents':
+  - 'agents/**'
+
+# Examples
+'Examples':
+  - 'examples/**'
+  - 'ferric_continuum/hello/**'
+

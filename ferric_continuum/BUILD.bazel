@@ -1,0 +1,7 @@
+# Core libraries directory
+
+# This is a placeholder BUILD file for the lib/ directory
+# Individual subdirectories contain their own BUILD files
+
+exports_files(["README.md"])
+

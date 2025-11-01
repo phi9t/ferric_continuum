@@ -1,0 +1,44 @@
+# This file defines code owners for Ferric Continuum
+# Learn more: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything in the repo
+* @USERNAME
+
+# Bazel build configuration
+*.bazel @USERNAME
+*.bzl @USERNAME
+MODULE.bazel @USERNAME
+BUILD.bazel @USERNAME
+WORKSPACE @USERNAME
+
+# C++ code
+*.cc @USERNAME
+*.hh @USERNAME
+
+# Rust code
+*.rs @USERNAME
+Cargo.toml @USERNAME
+
+# Python code
+*.py @USERNAME
+requirements*.txt @USERNAME
+
+# Documentation
+*.md @USERNAME
+/docs/ @USERNAME
+
+# CI/CD
+/.github/ @USERNAME
+/.github/workflows/ @USERNAME
+
+# Agents
+/agents/ @USERNAME
+
+# Foundation libraries
+/ferric_continuum/foundation/ @USERNAME
+
+# Configuration files
+/.clang-format @USERNAME
+/rustfmt.toml @USERNAME
+/clippy.toml @USERNAME
+

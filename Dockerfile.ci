@@ -1,0 +1,42 @@
+# Dockerfile.ci - Mimics GitHub Actions Ubuntu 24.04 CI environment
+FROM ubuntu:24.04
+
+# Set working directory
+WORKDIR /workspace
+
+# Install system dependencies (matching CI workflow)
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        build-essential \
+        clang-18 \
+        libc++-18-dev \
+        libc++abi-18-dev \
+        libstdc++-12-dev \
+        libncurses6 \
+        libtinfo6 \
+        wget \
+        curl \
+        git \
+        python3 \
+        python3-pip \
+        unzip \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Bazelisk (manages Bazel version automatically)
+RUN wget -O /usr/local/bin/bazel https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-linux-amd64 \
+    && chmod +x /usr/local/bin/bazel
+
+# Install Rust (for local development)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    && . $HOME/.cargo/env \
+    && rustup component add rustfmt clippy
+
+# Add Rust to PATH
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Set up Bazel cache directory
+RUN mkdir -p /root/.cache/bazel
+
+# Default command
+CMD ["/bin/bash"]
+

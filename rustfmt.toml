@@ -1,0 +1,106 @@
+# Ferric Continuum Rust Formatting Configuration
+# Using rustfmt for consistent Rust code style
+# See: https://rust-lang.github.io/rustfmt/
+
+# ============================================================================
+# STABLE CONFIGURATION (compatible with stable Rust and CI/CD)
+# ============================================================================
+# This configuration uses ONLY stable rustfmt features to avoid warnings
+# in CI/CD pipelines and ensure compatibility with stable Rust toolchain.
+
+# Edition
+edition = "2021"
+
+# Line width
+max_width = 100
+
+# Indentation
+tab_spaces = 4
+hard_tabs = false
+
+# Imports - basic reordering (stable feature)
+reorder_imports = true
+
+# Use field initialization shorthand
+use_field_init_shorthand = true
+
+# Use small heuristics for formatting decisions
+use_small_heuristics = "Default"
+
+# Newline style (Unix)
+newline_style = "Unix"
+
+# ============================================================================
+# UNSTABLE FEATURES (require nightly Rust)
+# ============================================================================
+# The following features are available in nightly Rust but will cause
+# warnings with stable Rust. To use these features:
+#
+# 1. Install nightly Rust:
+#    rustup toolchain install nightly
+#
+# 2. Set nightly as override for this project:
+#    cd /path/to/ferric_continuum
+#    rustup override set nightly
+#
+# 3. Uncomment desired features below
+#
+# For CI/CD, we use stable Rust to avoid dependency on nightly features.
+# ============================================================================
+
+# Advanced import grouping
+# imports_granularity = "Crate"
+# group_imports = "StdExternalCrate"
+
+# Comment formatting
+# comment_width = 100
+# normalize_comments = true
+# normalize_doc_attributes = true
+# wrap_comments = true
+# format_code_in_doc_comments = true
+
+# String formatting
+# format_strings = true
+
+# Macro formatting
+# format_macro_matchers = true
+# format_macro_bodies = true
+
+# Function formatting
+# fn_single_line = false
+# fn_params_layout = "Tall"
+
+# Brace style
+# brace_style = "SameLineWhere"
+# control_brace_style = "AlwaysSameLine"
+
+# Control flow
+# match_arm_blocks = true
+# match_block_trailing_comma = false
+# overflow_delimited_expr = true
+
+# Trailing elements
+# trailing_comma = "Vertical"
+# trailing_semicolon = true
+
+# Whitespace
+# blank_lines_lower_bound = 0
+# blank_lines_upper_bound = 1
+# space_after_colon = true
+# space_before_colon = false
+
+# Chains and methods
+# chain_width = 60
+# single_line_if_else_max_width = 50
+# short_array_element_width_threshold = 10
+
+# Ordering
+# reorder_impl_items = true
+
+# ============================================================================
+# NOTES
+# ============================================================================
+# - This config prioritizes CI/CD compatibility over advanced formatting
+# - All Rust code will still be formatted consistently
+# - Advanced features can be enabled locally with nightly if desired
+# - GitHub Actions CI uses stable Rust, so warnings are avoided
