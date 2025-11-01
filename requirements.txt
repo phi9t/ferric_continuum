@@ -6,7 +6,7 @@ spack==1.0.2
 
 # CLI and configuration
 click==8.1.7
-pyyaml==6.0.1
+pyyaml==6.0.3
 toml==0.10.2
 
 # HTTP/REST for ContinuumSupervisor
