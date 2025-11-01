@@ -15,7 +15,7 @@ uvicorn[standard]==0.31.0
 httpx==0.27.2
 
 # Data processing and metrics
-pandas==2.2.3
+pandas==2.3.3
 numpy==2.1.2
 polars==1.23.0
 
