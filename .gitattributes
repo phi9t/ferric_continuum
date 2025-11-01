@@ -1,0 +1,72 @@
+# Git Attributes for Ferric Continuum
+
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Source code
+*.cc text diff=cpp
+*.hh text diff=cpp
+*.rs text diff=rust
+*.py text diff=python
+*.bzl text
+*.bazel text
+
+# Bazel
+BUILD text
+BUILD.bazel text
+WORKSPACE text
+WORKSPACE.bazel text
+MODULE.bazel text
+*.lock linguist-generated=true
+
+# Documentation
+*.md text
+*.txt text
+LICENSE text
+
+# Scripts
+*.sh text eol=lf
+*.bash text eol=lf
+*.zsh text eol=lf
+
+# Configuration files
+*.json text
+*.toml text
+*.yaml text
+*.yml text
+*.xml text
+*.cfg text
+*.conf text
+*.config text
+
+# Archives
+*.tar binary
+*.gz binary
+*.zip binary
+*.7z binary
+
+# Images
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.svg text
+
+# Fonts
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+
+# Generated files
+bazel-* linguist-generated=true
+*.pb.cc linguist-generated=true
+*.pb.h linguist-generated=true
+*.pb.rs linguist-generated=true
+
+# Export ignore (files not included in git archive)
+.gitignore export-ignore
+.gitattributes export-ignore
+.github/ export-ignore
+

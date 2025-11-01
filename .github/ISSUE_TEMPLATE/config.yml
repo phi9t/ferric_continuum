@@ -1,0 +1,12 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 GitHub Discussions
+    url: https://github.com/USERNAME/ferric_continuum/discussions
+    about: Ask questions, share ideas, and discuss with the community
+  - name: 📚 Documentation
+    url: https://github.com/USERNAME/ferric_continuum/blob/main/README.md
+    about: Read the documentation for help and guides
+  - name: 🔒 Security Issue
+    url: https://github.com/USERNAME/ferric_continuum/blob/main/SECURITY.md
+    about: Report security vulnerabilities privately (DO NOT use public issues)
+
