@@ -1,0 +1,69 @@
+# Hello World Example - C++ and Rust collocated
+
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+
+###############################################################################
+# C++ Targets
+###############################################################################
+
+cc_binary(
+    name = "hello_cc",
+    srcs = ["hello.cc"],
+    deps = [
+        ":hello_lib_cc",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:initialize",
+        "@abseil-cpp//absl/log:globals",
+    ],
+)
+
+cc_library(
+    name = "hello_lib_cc",
+    srcs = ["hello_lib.cc"],
+    hdrs = ["hello_lib.hh"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/strings:str_format",
+    ],
+)
+
+cc_test(
+    name = "hello_lib_cc_test",
+    srcs = ["hello_lib_test.cc"],
+    deps = [
+        ":hello_lib_cc",
+        "@googletest//:gtest_main",
+    ],
+)
+
+###############################################################################
+# Rust Targets
+###############################################################################
+
+rust_binary(
+    name = "hello_rs",
+    srcs = ["hello.rs"],
+    edition = "2021",
+    deps = [
+        ":hello_lib_rs",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
+    ],
+)
+
+rust_library(
+    name = "hello_lib_rs",
+    srcs = ["hello_lib.rs"],
+    crate_name = "hello_lib_rs",
+    edition = "2021",
+    visibility = ["//visibility:public"],
+)
+
+rust_test(
+    name = "hello_lib_rs_test",
+    crate = ":hello_lib_rs",
+    edition = "2021",
+)
+

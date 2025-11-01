@@ -1,0 +1,255 @@
+# Foundation - Demonstrating Core Concepts in Small, Digestible Examples
+# Each example focuses on ONE specific concept for clarity
+
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+
+###############################################################################
+# Example 1: Value Semantics
+###############################################################################
+
+cc_library(
+    name = "value_semantics_cc",
+    srcs = ["value_semantics.cc"],
+    hdrs = ["value_semantics.hh"],
+    deps = ["@abseil-cpp//absl/strings:str_format"],
+)
+
+cc_binary(
+    name = "value_semantics_demo_cc",
+    srcs = ["value_semantics_demo.cc"],
+    deps = [
+        ":value_semantics_cc",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:initialize",
+        "@abseil-cpp//absl/log:globals",
+    ],
+)
+
+cc_test(
+    name = "value_semantics_test_cc",
+    srcs = ["value_semantics_test.cc"],
+    deps = [
+        ":value_semantics_cc",
+        "@googletest//:gtest_main",
+    ],
+)
+
+rust_library(
+    name = "value_semantics_rs",
+    srcs = ["value_semantics.rs"],
+    crate_name = "value_semantics",
+    edition = "2021",
+)
+
+rust_binary(
+    name = "value_semantics_demo_rs",
+    srcs = ["value_semantics_demo.rs"],
+    edition = "2021",
+    deps = [
+        ":value_semantics_rs",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
+    ],
+)
+
+rust_test(
+    name = "value_semantics_test_rs",
+    crate = ":value_semantics_rs",
+    edition = "2021",
+)
+
+###############################################################################
+# Example 2: Move Semantics
+###############################################################################
+
+cc_library(
+    name = "move_semantics_cc",
+    srcs = ["move_semantics.cc"],
+    hdrs = ["move_semantics.hh"],
+    deps = ["@abseil-cpp//absl/strings"],
+)
+
+cc_binary(
+    name = "move_semantics_demo_cc",
+    srcs = ["move_semantics_demo.cc"],
+    deps = [
+        ":move_semantics_cc",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:initialize",
+        "@abseil-cpp//absl/log:globals",
+    ],
+)
+
+cc_test(
+    name = "move_semantics_test_cc",
+    srcs = ["move_semantics_test.cc"],
+    deps = [
+        ":move_semantics_cc",
+        "@googletest//:gtest_main",
+    ],
+)
+
+rust_library(
+    name = "move_semantics_rs",
+    srcs = ["move_semantics.rs"],
+    crate_name = "move_semantics",
+    edition = "2021",
+)
+
+rust_binary(
+    name = "move_semantics_demo_rs",
+    srcs = ["move_semantics_demo.rs"],
+    edition = "2021",
+    deps = [
+        ":move_semantics_rs",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
+    ],
+)
+
+rust_test(
+    name = "move_semantics_test_rs",
+    crate = ":move_semantics_rs",
+    edition = "2021",
+)
+
+###############################################################################
+# Example 3: Parameter Passing
+###############################################################################
+
+cc_library(
+    name = "parameter_passing_cc",
+    srcs = ["parameter_passing.cc"],
+    hdrs = ["parameter_passing.hh"],
+    deps = ["@abseil-cpp//absl/strings:str_format"],
+)
+
+cc_binary(
+    name = "parameter_passing_demo_cc",
+    srcs = ["parameter_passing_demo.cc"],
+    deps = [
+        ":parameter_passing_cc",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:initialize",
+        "@abseil-cpp//absl/log:globals",
+    ],
+)
+
+cc_test(
+    name = "parameter_passing_test_cc",
+    srcs = ["parameter_passing_test.cc"],
+    deps = [
+        ":parameter_passing_cc",
+        "@googletest//:gtest_main",
+    ],
+)
+
+rust_library(
+    name = "parameter_passing_rs",
+    srcs = ["parameter_passing.rs"],
+    crate_name = "parameter_passing",
+    edition = "2021",
+)
+
+rust_binary(
+    name = "parameter_passing_demo_rs",
+    srcs = ["parameter_passing_demo.rs"],
+    edition = "2021",
+    deps = [
+        ":parameter_passing_rs",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
+    ],
+)
+
+rust_test(
+    name = "parameter_passing_test_rs",
+    crate = ":parameter_passing_rs",
+    edition = "2021",
+)
+
+###############################################################################
+# Example 4: Smart Pointers & RAII
+###############################################################################
+
+cc_library(
+    name = "smart_pointers_cc",
+    srcs = ["smart_pointers.cc"],
+    hdrs = ["smart_pointers.hh"],
+)
+
+cc_binary(
+    name = "smart_pointers_demo_cc",
+    srcs = ["smart_pointers_demo.cc"],
+    deps = [
+        ":smart_pointers_cc",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:initialize",
+        "@abseil-cpp//absl/log:globals",
+    ],
+)
+
+cc_test(
+    name = "smart_pointers_test_cc",
+    srcs = ["smart_pointers_test.cc"],
+    deps = [
+        ":smart_pointers_cc",
+        "@googletest//:gtest_main",
+    ],
+)
+
+rust_library(
+    name = "smart_pointers_rs",
+    srcs = ["smart_pointers.rs"],
+    crate_name = "smart_pointers",
+    edition = "2021",
+)
+
+rust_binary(
+    name = "smart_pointers_demo_rs",
+    srcs = ["smart_pointers_demo.rs"],
+    edition = "2021",
+    deps = [
+        ":smart_pointers_rs",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
+    ],
+)
+
+rust_test(
+    name = "smart_pointers_test_rs",
+    crate = ":smart_pointers_rs",
+    edition = "2021",
+)
+
+###############################################################################
+# Constructor Rules (Rule of Five)
+###############################################################################
+
+cc_library(
+    name = "constructor_rules_cc",
+    srcs = ["constructor_rules.cc"],
+    hdrs = ["constructor_rules.hh"],
+)
+
+cc_binary(
+    name = "constructor_rules_demo_cc",
+    srcs = ["constructor_rules_demo.cc"],
+    deps = [
+        ":constructor_rules_cc",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:initialize",
+        "@abseil-cpp//absl/log:globals",
+    ],
+)
+
+cc_test(
+    name = "constructor_rules_test_cc",
+    srcs = ["constructor_rules_test.cc"],
+    deps = [
+        ":constructor_rules_cc",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main",
+    ],
+)

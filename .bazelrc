@@ -1,0 +1,157 @@
+# Ferric Continuum Bazel Configuration
+
+###############################################################################
+# Common flags
+###############################################################################
+
+# Use Bzlmod (modern module system)
+common --enable_bzlmod
+
+# Enable platform-specific config
+build --enable_platform_specific_config
+
+# Use a static value for PATH and LD_LIBRARY_PATH
+build --incompatible_strict_action_env
+
+# Output details
+build --verbose_failures
+build --show_timestamps
+
+# Performance optimizations
+build --jobs=auto
+build --local_cpu_resources=HOST_CPUS*.75
+
+###############################################################################
+# C++ Configuration
+###############################################################################
+
+# C++ standard
+build --cxxopt=-std=c++20
+build --host_cxxopt=-std=c++20
+
+# Compiler warnings
+build --copt=-Wall
+build --copt=-Wextra
+build --host_copt=-Wall
+build --host_copt=-Wextra
+
+# Color diagnostics
+build --copt=-fdiagnostics-color=always
+build --host_copt=-fdiagnostics-color=always
+
+# Optimization flags
+build:opt --compilation_mode=opt
+build:opt --copt=-O3
+build:opt --copt=-DNDEBUG
+
+# Debug configuration
+build:debug --compilation_mode=dbg
+build:debug --copt=-g
+build:debug --strip=never
+
+# Fast build configuration
+build:fastbuild --compilation_mode=fastbuild
+
+# Address sanitizer
+build:asan --strip=never
+build:asan --copt=-fsanitize=address
+build:asan --copt=-DADDRESS_SANITIZER
+build:asan --copt=-O1
+build:asan --copt=-g
+build:asan --copt=-fno-omit-frame-pointer
+build:asan --linkopt=-fsanitize=address
+
+# Thread sanitizer
+build:tsan --strip=never
+build:tsan --copt=-fsanitize=thread
+build:tsan --copt=-DTHREAD_SANITIZER
+build:tsan --copt=-O1
+build:tsan --copt=-g
+build:tsan --copt=-fno-omit-frame-pointer
+build:tsan --linkopt=-fsanitize=thread
+
+###############################################################################
+# Rust Configuration
+###############################################################################
+
+# Rust optimization
+build:opt --@rules_rust//:rustc_opt_level=3
+
+# Rust debug
+build:debug --@rules_rust//:rustc_opt_level=0
+build:debug --@rules_rust//:rustc_debug=true
+
+# Clippy (Rust linter)
+build:clippy --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect
+build:clippy --output_groups=+clippy_checks
+
+# Rustfmt
+build:rustfmt --aspects=@rules_rust//rust:defs.bzl%rustfmt_aspect
+build:rustfmt --output_groups=+rustfmt_checks
+
+###############################################################################
+# Code Quality - Clang-Tidy Configuration
+###############################################################################
+
+# Clang-tidy (requires @bazel_clang_tidy in MODULE.bazel or WORKSPACE)
+# Uncomment when clang-tidy aspect is set up:
+# build:clang-tidy --aspects=@bazel_clang_tidy//clang_tidy:clang_tidy.bzl%clang_tidy_aspect
+# build:clang-tidy --output_groups=report
+
+###############################################################################
+# CI/CD Configuration
+###############################################################################
+
+# CI build - treat warnings as errors
+build:ci --copt=-Werror
+build:ci --host_copt=-Werror
+build:ci --compilation_mode=opt
+
+###############################################################################
+# Python Configuration
+###############################################################################
+
+# Use Python 3.12 by default
+build --@rules_python//python/config_settings:python_version=3.12
+
+###############################################################################
+# Testing Configuration
+###############################################################################
+
+# Test output
+test --test_output=errors
+test --test_summary=detailed
+
+# Test environment
+test --test_env=RUST_BACKTRACE=1
+
+# Coverage
+coverage --combined_report=lcov
+coverage --experimental_generate_llvm_lcov
+
+###############################################################################
+# Platform-Specific Configuration
+###############################################################################
+
+# macOS
+build:macos --cxxopt=-stdlib=libc++
+build:macos --linkopt=-lc++
+
+# Linux
+build:linux --cxxopt=-stdlib=libstdc++
+
+###############################################################################
+# Remote Execution / Caching (disabled by default)
+###############################################################################
+
+# Uncomment and configure for remote build execution
+# build:remote --remote_executor=grpc://your-remote-executor:port
+# build:remote --remote_cache=grpc://your-cache:port
+
+###############################################################################
+# User overrides
+###############################################################################
+
+# Load user-specific Bazel configuration if it exists
+try-import %workspace%/.bazelrc.user
+

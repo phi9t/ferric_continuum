@@ -1,0 +1,29 @@
+# Ferric Continuum Clippy Configuration
+# Rust linting preferences for the project
+
+# Complexity thresholds
+cognitive-complexity-threshold = 15
+too-many-arguments-threshold = 7
+type-complexity-threshold = 250
+single-char-binding-names-threshold = 4
+
+# Documentation
+missing-docs-in-crate-items = false
+
+# Allow certain lint groups/lints that might be too strict
+# These can be uncommented to enable stricter checking
+
+# Pedantic lints (very strict, enable selectively)
+# avoid-breaking-exported-api = true
+
+# Performance
+# Consider enabling these for HPC/performance-critical code
+vec-box-size-threshold = 4096
+trivial-copy-size-limit = 128
+
+# Disallowed names (consider adding project-specific ones)
+disallowed-names = ["foo", "bar", "baz", "test"]
+
+# Allowed unsafe blocks per item (0 = disallow all unsafe)
+# Set to 0 to require justification for every unsafe block
+# unsafe-blocks-allowed = 0

@@ -1,0 +1,19 @@
+# Root BUILD file for Ferric Continuum
+
+load("@rules_python//python:pip.bzl", "compile_pip_requirements")
+
+# Python requirements management
+compile_pip_requirements(
+    name = "requirements",
+    requirements_in = "requirements.txt",
+    requirements_txt = "requirements_lock.txt",
+)
+
+# Export files for visibility
+exports_files([
+    "requirements.txt",
+    "requirements_lock.txt",
+    ".bazelrc",
+    ".bazelversion",
+])
+

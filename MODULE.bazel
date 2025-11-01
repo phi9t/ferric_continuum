@@ -1,0 +1,137 @@
+"""
+Ferric Continuum - High-Performance C++ and Rust HPC System
+Bazel Module Configuration (Bzlmod)
+"""
+
+module(
+    name = "ferric_continuum",
+    version = "0.1.0",
+    repo_name = "ferric_continuum",
+)
+
+# Core Bazel rules and tools
+bazel_dep(name = "rules_cc", version = "0.0.9")
+bazel_dep(name = "platforms", version = "0.0.10")
+bazel_dep(name = "bazel_skylib", version = "1.7.1")
+
+# Rust support
+bazel_dep(name = "rules_rust", version = "0.52.2")
+
+# Python support
+bazel_dep(name = "rules_python", version = "0.36.0")
+
+# Protocol Buffers and gRPC (for distributed systems)
+bazel_dep(name = "protobuf", version = "28.3")
+# gRPC will be added later when needed for distributed systems
+# bazel_dep(name = "grpc", version = "1.65.5")
+
+# Testing frameworks
+bazel_dep(name = "googletest", version = "1.15.2")
+
+# Abseil - Google's C++ library with useful utilities
+bazel_dep(name = "abseil-cpp", version = "20240722.0")
+
+# Hermetic C++ toolchain (optional, for reproducible builds)
+bazel_dep(name = "toolchains_llvm", version = "1.2.0")
+
+###############################################################################
+# Rust Configuration
+###############################################################################
+
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+
+# Register Rust toolchains - using stable channel
+rust.toolchain(
+    edition = "2021",
+    versions = ["1.81.0"],
+)
+
+use_repo(rust, "rust_toolchains")
+
+register_toolchains("@rust_toolchains//:all")
+
+# Rust crate dependencies using crates_repository
+crate = use_extension("@rules_rust//crate_universe:extension.bzl", "crate")
+
+# Core async runtime and utilities
+crate.spec(package = "tokio", features = ["full"], version = "1.40.0")
+crate.spec(package = "tokio-util", version = "0.7.12")
+
+# gRPC/Tonic for distributed systems
+crate.spec(package = "tonic", version = "0.12.3")
+crate.spec(package = "tonic-build", version = "0.12.3")
+crate.spec(package = "prost", version = "0.13.3")
+crate.spec(package = "prost-types", version = "0.13.3")
+
+# Serialization
+crate.spec(package = "serde", features = ["derive"], version = "1.0.210")
+crate.spec(package = "serde_json", version = "1.0.128")
+
+# Benchmarking with Criterion
+crate.spec(package = "criterion", version = "0.5.1")
+
+# Logging and tracing
+crate.spec(package = "tracing", version = "0.1.40")
+crate.spec(package = "tracing-subscriber", features = ["env-filter"], version = "0.3.18")
+
+# CLI utilities
+crate.spec(package = "clap", features = ["derive"], version = "4.5.20")
+
+# Error handling
+crate.spec(package = "anyhow", version = "1.0.89")
+crate.spec(package = "thiserror", version = "1.0.64")
+
+# Numeric computing
+crate.spec(package = "ndarray", version = "0.16.1")
+crate.spec(package = "num", version = "0.4.3")
+
+# Rayon for data parallelism
+crate.spec(package = "rayon", version = "1.10.0")
+
+crate.from_specs()
+
+use_repo(crate, "crates")
+
+###############################################################################
+# Python Configuration
+###############################################################################
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+
+python.toolchain(
+    python_version = "3.12",
+    is_default = True,
+)
+
+python.toolchain(
+    python_version = "3.11",
+)
+
+use_repo(python, "python_3_11", "python_3_12", "python_versions")
+
+# Python package dependencies
+pip = use_extension("@rules_python//python/extensions:pip.bzl", "pip")
+
+pip.parse(
+    hub_name = "pip_deps",
+    python_version = "3.12",
+    requirements_lock = "//:requirements_lock.txt",
+)
+
+use_repo(pip, "pip_deps")
+
+###############################################################################
+# C++ Toolchain Configuration (LLVM/Clang)
+###############################################################################
+
+llvm = use_extension("@toolchains_llvm//toolchain/extensions:llvm.bzl", "llvm")
+
+# Configure LLVM toolchain for multiple platforms
+llvm.toolchain(
+    llvm_version = "18.1.8",
+)
+
+use_repo(llvm, "llvm_toolchain")
+
+register_toolchains("@llvm_toolchain//:all")
+

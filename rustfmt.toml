@@ -1,0 +1,72 @@
+# Ferric Continuum Rust Formatting Configuration
+# Based on standard Rust style with project preferences
+
+# Edition
+edition = "2021"
+
+# Line width
+max_width = 100
+comment_width = 100
+
+# Indentation
+tab_spaces = 4
+hard_tabs = false
+
+# Imports
+imports_granularity = "Crate"
+group_imports = "StdExternalCrate"
+reorder_imports = true
+
+# Function formatting
+fn_single_line = false
+fn_params_layout = "Tall"
+brace_style = "SameLineWhere"
+
+# Control flow
+control_brace_style = "AlwaysSameLine"
+match_arm_blocks = true
+match_block_trailing_comma = false
+overflow_delimited_expr = true
+
+# Trailing elements
+trailing_comma = "Vertical"
+trailing_semicolon = true
+
+# Whitespace
+blank_lines_lower_bound = 0
+blank_lines_upper_bound = 1
+space_after_colon = true
+space_before_colon = false
+
+# Chains and methods
+chain_width = 60
+single_line_if_else_max_width = 50
+short_array_element_width_threshold = 10
+
+# Use field initialization shorthand
+use_field_init_shorthand = true
+
+# Use small heuristics for formatting decisions
+use_small_heuristics = "Default"
+
+# Format strings
+format_strings = true
+format_code_in_doc_comments = true
+
+# Ordering
+reorder_impl_items = true
+
+# Comments
+normalize_comments = true
+normalize_doc_attributes = true
+wrap_comments = true
+
+# Macros
+format_macro_matchers = true
+format_macro_bodies = true
+
+# Unstable features (requires nightly, commented out for stable)
+# Uncomment these if using nightly Rust
+# unstable_features = true
+# imports_granularity = "Module"
+# group_imports = "StdExternalCrate"

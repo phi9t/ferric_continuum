@@ -1,0 +1,211 @@
+# Ferric Continuum - Git Ignore Rules
+
+###############################################################################
+# Bazel
+###############################################################################
+/bazel-*
+bazel-bin
+bazel-out
+bazel-testlogs
+bazel-ferric_continuum
+.bazel-cache
+
+# Bazel user configuration (may contain sensitive info)
+.bazelrc.user
+
+###############################################################################
+# Python
+###############################################################################
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# PyCharm
+.idea/
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+.hypothesis/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+###############################################################################
+# Rust
+###############################################################################
+target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# Criterion benchmark results
+criterion/
+
+###############################################################################
+# C++
+###############################################################################
+*.o
+*.obj
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Core dumps
+core
+core.*
+
+###############################################################################
+# Editors
+###############################################################################
+# Vim
+*.swp
+*.swo
+*~
+.*.swp
+.*.swo
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# JetBrains IDEs
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+###############################################################################
+# Operating System
+###############################################################################
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+.nfs*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+###############################################################################
+# Spack
+###############################################################################
+.spack/
+spack-*
+
+###############################################################################
+# Logs and Databases
+###############################################################################
+*.log
+*.sql
+*.sqlite
+*.db
+
+###############################################################################
+# Temporary Files
+###############################################################################
+*.tmp
+*.temp
+*.bak
+*.backup
+*.cache
+
+###############################################################################
+# Documentation Build Outputs
+###############################################################################
+docs/_build/
+site/
+
+###############################################################################
+# Profiling and Benchmarking
+###############################################################################
+*.prof
+*.perf
+perf.data
+perf.data.old
+flamegraph.svg
+
+###############################################################################
+# CI/CD
+###############################################################################
+.ci-cache/
+.test-results/
+coverage.xml
+
