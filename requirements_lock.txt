@@ -295,9 +295,9 @@ polars==1.23.0 \
     --hash=sha256:b774f04d77ed4153d9539e546db5ad6ff4757c79dfe981e22400eb59299c5493 \
     --hash=sha256:d9d344958cb9bfe1bd42c1af910cb000c0dfa2892b849f2cd35649e0bcd10fab
     # via -r requirements.txt
-pytest==8.3.3 \
-    --hash=sha256:70b98107bd648308a7952b06e6ca9a50bc660be218d53c257cc1fc94fda10181 \
-    --hash=sha256:a6853c7375b2663155079443d2e45de913a911a11d669df02a50814944db57b2
+pytest==9.0.0 \
+    --hash=sha256:8f44522eafe4137b0f35c9ce3072931a788a21ee40a2ed279e817d3cc16ed21e \
+    --hash=sha256:e5ccdf10b0bac554970ee88fc1a4ad0ee5d221f8ef22321f9b7e4584e19d7f96
     # via
     #   -r requirements.txt
     #   pytest-asyncio
