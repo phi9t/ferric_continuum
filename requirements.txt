@@ -9,7 +9,7 @@ toml==0.10.2
 # Data processing and metrics
 pandas==2.2.3
 numpy==2.1.2
-polars==1.23.0
+polars==1.35.2
 
 # Logging and observability
 structlog==24.4.0
