@@ -1,0 +1,41 @@
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+load("@pybind11_bazel//:build_defs.bzl", "pybind11_extension")
+
+package(default_visibility = ["//visibility:public"])
+
+pybind11_extension(
+    name = "_muon_cc",
+    srcs = ["muon_optimizer.cc"],
+    cxxopts = ["-std=c++20"],
+    deps = [
+        "@eigen//:eigen",
+        "@pybind11_bazel//:pybind11",
+    ],
+)
+
+py_library(
+    name = "muon_py",
+    srcs = [
+        "__init__.py",
+        "muon.py",
+    ],
+    data = [":_muon_cc"],
+    deps = ["@pip_deps//:numpy"],
+)
+
+py_binary(
+    name = "muon_demo",
+    srcs = ["demo.py"],
+    deps = [":muon_py"],
+)
+
+py_test(
+    name = "muon_py_test",
+    srcs = ["muon_test.py"],
+    deps = [
+        ":muon_py",
+        "@pip_deps//:numpy",
+        "@pip_deps//:pytest",
+    ],
+)
+
