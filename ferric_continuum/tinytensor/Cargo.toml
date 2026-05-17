@@ -1,0 +1,12 @@
+[package]
+name = "tinytensor"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "tinytensor_demo"
+path = "src/main.rs"
+
+[lib]
+name = "tinytensor"
+path = "src/lib.rs"

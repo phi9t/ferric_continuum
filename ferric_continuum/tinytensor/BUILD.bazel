@@ -1,0 +1,23 @@
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+
+rust_library(
+    name = "tinytensor",
+    srcs = glob(["src/**/*.rs"], exclude = ["src/main.rs"]),
+    crate_name = "tinytensor",
+    edition = "2021",
+    visibility = ["//visibility:public"],
+)
+
+rust_binary(
+    name = "tinytensor_demo",
+    srcs = ["src/main.rs"],
+    edition = "2021",
+    deps = [":tinytensor"],
+)
+
+rust_test(
+    name = "tinytensor_tests",
+    srcs = ["tests/autograd_test.rs"],
+    edition = "2021",
+    deps = [":tinytensor"],
+)
