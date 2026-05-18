@@ -17,7 +17,13 @@ fn raw_cross_entropy_forward(logits: &TensorValue, targets: &[usize]) -> (Tensor
     let ld = &logits.shape.0;
     let v = *ld.last().unwrap();
     let n: usize = ld[..ld.len() - 1].iter().product();
-    assert_eq!(n, targets.len(), "cross_entropy: n={} but targets.len()={}", n, targets.len());
+    assert_eq!(
+        n,
+        targets.len(),
+        "cross_entropy: n={} but targets.len()={}",
+        n,
+        targets.len()
+    );
 
     let lr = logits.data.as_ref();
     let mut loss_sum = 0.0f32;
@@ -32,7 +38,10 @@ fn raw_cross_entropy_forward(logits: &TensorValue, targets: &[usize]) -> (Tensor
     }
 
     let loss = loss_sum / n as f32;
-    (TensorValue::from_vec(Shape(vec![1]), vec![loss]), softmax_cache)
+    (
+        TensorValue::from_vec(Shape(vec![1]), vec![loss]),
+        softmax_cache,
+    )
 }
 
 fn raw_cross_entropy_backward(
@@ -73,7 +82,10 @@ impl BackwardRecipe for CrossEntropyBackward {
             &self.targets,
             &self.logits_shape,
         );
-        vec![GradEdge { target: self.logits_target.clone(), grad: dlogits }]
+        vec![GradEdge {
+            target: self.logits_target.clone(),
+            grad: dlogits,
+        }]
     }
 }
 

@@ -84,25 +84,37 @@ impl BackwardRecipe for AttentionScoresBackward {
         let k = ctx.unpack(&self.k);
         let (dq, dk) = raw_attention_scores_backward(dscores, &q, &k, self.scale);
         vec![
-            GradEdge { target: self.q_target.clone(), grad: dq },
-            GradEdge { target: self.k_target.clone(), grad: dk },
+            GradEdge {
+                target: self.q_target.clone(),
+                grad: dq,
+            },
+            GradEdge {
+                target: self.k_target.clone(),
+                grad: dk,
+            },
         ]
     }
 }
 
 pub fn attention_scores(q: &Tensor, k: &Tensor, scale: f32, name: &str) -> Tensor {
-    let out_value = raw_attention_scores(
-        &q.inner.borrow().value,
-        &k.inner.borrow().value,
-        scale,
-    );
+    let out_value = raw_attention_scores(&q.inner.borrow().value, &k.inner.borrow().value, scale);
 
     let need = crate::grad_mode::is_enabled_and_any_requires_grad(&[q, k])
         || crate::checkpoint::is_recording_recompute_saves();
 
     let (recipe, debug_saved) = if need {
-        let q_site = SaveSite::new(OpKind::AttentionScores, format!("{name}.q"), SaveRole::Activation, q);
-        let k_site = SaveSite::new(OpKind::AttentionScores, format!("{name}.k"), SaveRole::Activation, k);
+        let q_site = SaveSite::new(
+            OpKind::AttentionScores,
+            format!("{name}.q"),
+            SaveRole::Activation,
+            q,
+        );
+        let k_site = SaveSite::new(
+            OpKind::AttentionScores,
+            format!("{name}.k"),
+            SaveRole::Activation,
+            k,
+        );
         let saved_q = SavedTensor::save(q, q_site.clone());
         let saved_k = SavedTensor::save(k, k_site.clone());
         let r: Box<dyn BackwardRecipe> = Box::new(AttentionScoresBackward {
@@ -196,7 +208,12 @@ pub fn softmax_last_dim(x: &Tensor, name: &str) -> Tensor {
 
     let (recipe, debug_saved) = if need {
         // Save output (p), not input, since backward only needs p
-        let site = SaveSite::new(OpKind::Softmax, format!("{name}.output"), SaveRole::Activation, x);
+        let site = SaveSite::new(
+            OpKind::Softmax,
+            format!("{name}.output"),
+            SaveRole::Activation,
+            x,
+        );
         // We need to save the output, but we're computing from x. Create a temp tensor for the output.
         let out_tensor = Tensor::from_value_no_grad(out_value.clone());
         let saved_p = SavedTensor::save(&out_tensor, site.clone());
@@ -290,8 +307,14 @@ impl BackwardRecipe for AttentionMixBackward {
         let v = ctx.unpack(&self.v);
         let (dp, dv) = raw_attention_mix_backward(dout, &p, &v);
         vec![
-            GradEdge { target: self.p_target.clone(), grad: dp },
-            GradEdge { target: self.v_target.clone(), grad: dv },
+            GradEdge {
+                target: self.p_target.clone(),
+                grad: dp,
+            },
+            GradEdge {
+                target: self.v_target.clone(),
+                grad: dv,
+            },
         ]
     }
 }
@@ -303,8 +326,18 @@ pub fn attention_mix(p: &Tensor, v: &Tensor, name: &str) -> Tensor {
         || crate::checkpoint::is_recording_recompute_saves();
 
     let (recipe, debug_saved) = if need {
-        let p_site = SaveSite::new(OpKind::AttentionMix, format!("{name}.p"), SaveRole::Activation, p);
-        let v_site = SaveSite::new(OpKind::AttentionMix, format!("{name}.v"), SaveRole::Activation, v);
+        let p_site = SaveSite::new(
+            OpKind::AttentionMix,
+            format!("{name}.p"),
+            SaveRole::Activation,
+            p,
+        );
+        let v_site = SaveSite::new(
+            OpKind::AttentionMix,
+            format!("{name}.v"),
+            SaveRole::Activation,
+            v,
+        );
         let saved_p = SavedTensor::save(p, p_site.clone());
         let saved_v = SavedTensor::save(v, v_site.clone());
         let r: Box<dyn BackwardRecipe> = Box::new(AttentionMixBackward {
@@ -357,7 +390,9 @@ pub fn causal_mask(scores: &Tensor, name: &str) -> Tensor {
     // exp(-inf)=0 so their gradient is naturally zero through softmax)
     let recipe: Option<Box<dyn BackwardRecipe>> =
         if crate::grad_mode::is_enabled_and_any_requires_grad(&[scores]) {
-            Some(Box::new(IdentityBackward { target: scores.grad_target() }))
+            Some(Box::new(IdentityBackward {
+                target: scores.grad_target(),
+            }))
         } else {
             None
         };

@@ -12,13 +12,23 @@ pub fn raw_add_values(a: &TensorValue, b: &TensorValue) -> TensorValue {
         "add shape mismatch: {:?} vs {:?}",
         a.shape, b.shape
     );
-    let data: Vec<f32> = a.data.iter().zip(b.data.iter()).map(|(x, y)| x + y).collect();
+    let data: Vec<f32> = a
+        .data
+        .iter()
+        .zip(b.data.iter())
+        .map(|(x, y)| x + y)
+        .collect();
     TensorValue::from_vec(a.shape.clone(), data)
 }
 
 pub fn raw_mul_values(a: &TensorValue, b: &TensorValue) -> TensorValue {
     assert_eq!(a.shape, b.shape, "mul shape mismatch");
-    let data: Vec<f32> = a.data.iter().zip(b.data.iter()).map(|(x, y)| x * y).collect();
+    let data: Vec<f32> = a
+        .data
+        .iter()
+        .zip(b.data.iter())
+        .map(|(x, y)| x * y)
+        .collect();
     TensorValue::from_vec(a.shape.clone(), data)
 }
 
@@ -45,8 +55,14 @@ impl BackwardRecipe for AddBackward {
     fn backward(&self, grad_outputs: &[TensorValue], _ctx: &mut BackwardCtx) -> Vec<GradEdge> {
         let dy = grad_outputs[0].clone();
         vec![
-            GradEdge { target: self.x_target.clone(), grad: dy.clone() },
-            GradEdge { target: self.y_target.clone(), grad: dy },
+            GradEdge {
+                target: self.x_target.clone(),
+                grad: dy.clone(),
+            },
+            GradEdge {
+                target: self.y_target.clone(),
+                grad: dy,
+            },
         ]
     }
 }
@@ -82,8 +98,14 @@ impl BackwardRecipe for MulBackward {
         let x = ctx.unpack(&self.x);
         let y = ctx.unpack(&self.y);
         vec![
-            GradEdge { target: self.x_target.clone(), grad: raw_mul_values(dout, &y) },
-            GradEdge { target: self.y_target.clone(), grad: raw_mul_values(dout, &x) },
+            GradEdge {
+                target: self.x_target.clone(),
+                grad: raw_mul_values(dout, &y),
+            },
+            GradEdge {
+                target: self.y_target.clone(),
+                grad: raw_mul_values(dout, &x),
+            },
         ]
     }
 }
@@ -126,7 +148,10 @@ struct ScaleBackward {
 impl BackwardRecipe for ScaleBackward {
     fn backward(&self, grad_outputs: &[TensorValue], _ctx: &mut BackwardCtx) -> Vec<GradEdge> {
         let dx = raw_scale_value(&grad_outputs[0], self.scale);
-        vec![GradEdge { target: self.x_target.clone(), grad: dx }]
+        vec![GradEdge {
+            target: self.x_target.clone(),
+            grad: dx,
+        }]
     }
 }
 
@@ -134,7 +159,10 @@ pub fn scale(x: &Tensor, s: f32, name: &str) -> Tensor {
     let out_value = raw_scale_value(&x.inner.borrow().value, s);
     let recipe: Option<Box<dyn BackwardRecipe>> =
         if crate::grad_mode::is_enabled_and_any_requires_grad(&[x]) {
-            Some(Box::new(ScaleBackward { scale: s, x_target: x.grad_target() }))
+            Some(Box::new(ScaleBackward {
+                scale: s,
+                x_target: x.grad_target(),
+            }))
         } else {
             None
         };
@@ -155,7 +183,10 @@ impl BackwardRecipe for SumBackward {
         let shape = self.x_target.shape.clone();
         let n = shape.numel();
         let dx = TensorValue::from_vec(shape, vec![g; n]);
-        vec![GradEdge { target: self.x_target.clone(), grad: dx }]
+        vec![GradEdge {
+            target: self.x_target.clone(),
+            grad: dx,
+        }]
     }
 }
 
@@ -163,7 +194,9 @@ pub fn sum(x: &Tensor, name: &str) -> Tensor {
     let out_value = raw_sum_value(&x.inner.borrow().value);
     let recipe: Option<Box<dyn BackwardRecipe>> =
         if crate::grad_mode::is_enabled_and_any_requires_grad(&[x]) {
-            Some(Box::new(SumBackward { x_target: x.grad_target() }))
+            Some(Box::new(SumBackward {
+                x_target: x.grad_target(),
+            }))
         } else {
             None
         };

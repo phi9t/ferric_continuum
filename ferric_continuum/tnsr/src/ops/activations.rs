@@ -20,12 +20,14 @@ fn gelu_prime(x: f32) -> f32 {
     0.5 * (1.0 + erf_approx(x / SQRT2)) + x * phi
 }
 
+#[allow(clippy::excessive_precision)]
 fn erf_approx(x: f32) -> f32 {
     // Abramowitz & Stegun approximation, max error ~1.5e-7
     let t = 1.0 / (1.0 + 0.3275911 * x.abs());
-    let poly = t * (0.254_829_592
-        + t * (-0.284_496_736
-            + t * (1.421_413_741 + t * (-1.453_152_027 + t * 1.061_405_429))));
+    let poly = t
+        * (0.254_829_592
+            + t * (-0.284_496_736
+                + t * (1.421_413_741 + t * (-1.453_152_027 + t * 1.061_405_429))));
     let sign = if x < 0.0 { -1.0 } else { 1.0 };
     sign * (1.0 - poly * (-x * x).exp())
 }
@@ -68,7 +70,12 @@ pub fn gelu(x: &Tensor, name: &str) -> Tensor {
         || crate::checkpoint::is_recording_recompute_saves();
 
     let (recipe, debug_saved) = if need {
-        let site = SaveSite::new(OpKind::Gelu, format!("{name}.input"), SaveRole::Activation, x);
+        let site = SaveSite::new(
+            OpKind::Gelu,
+            format!("{name}.input"),
+            SaveRole::Activation,
+            x,
+        );
         let saved = SavedTensor::save(x, site.clone());
         let r: Box<dyn BackwardRecipe> = Box::new(GeluBackward {
             x: saved,
@@ -137,7 +144,12 @@ pub fn silu(x: &Tensor, name: &str) -> Tensor {
         || crate::checkpoint::is_recording_recompute_saves();
 
     let (recipe, debug_saved) = if need {
-        let site = SaveSite::new(OpKind::Silu, format!("{name}.input"), SaveRole::Activation, x);
+        let site = SaveSite::new(
+            OpKind::Silu,
+            format!("{name}.input"),
+            SaveRole::Activation,
+            x,
+        );
         let saved = SavedTensor::save(x, site.clone());
         let r: Box<dyn BackwardRecipe> = Box::new(SiluBackward {
             x: saved,
@@ -158,7 +170,10 @@ pub fn silu(x: &Tensor, name: &str) -> Tensor {
 
 fn raw_swiglu_forward(x: &TensorValue) -> TensorValue {
     let shape = &x.shape.0;
-    assert!(*shape.last().unwrap() % 2 == 0, "swiglu: last dim must be even");
+    assert!(
+        (*shape.last().unwrap()).is_multiple_of(2),
+        "swiglu: last dim must be even"
+    );
     let d = shape.last().unwrap() / 2;
     let batch: usize = shape[..shape.len() - 1].iter().product();
 
@@ -226,7 +241,12 @@ pub fn swiglu(x: &Tensor, name: &str) -> Tensor {
         || crate::checkpoint::is_recording_recompute_saves();
 
     let (recipe, debug_saved) = if need {
-        let site = SaveSite::new(OpKind::SwiGlu, format!("{name}.input"), SaveRole::Activation, x);
+        let site = SaveSite::new(
+            OpKind::SwiGlu,
+            format!("{name}.input"),
+            SaveRole::Activation,
+            x,
+        );
         let saved = SavedTensor::save(x, site.clone());
         let r: Box<dyn BackwardRecipe> = Box::new(SwiGluBackward {
             x: saved,

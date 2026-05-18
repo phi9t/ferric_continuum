@@ -136,7 +136,7 @@ impl CheckpointContext {
 
 thread_local! {
     static CHECKPOINT_STACK: RefCell<Vec<Rc<RefCell<CheckpointContext>>>> =
-        RefCell::new(vec![]);
+        const { RefCell::new(vec![]) };
 
     static CHECKPOINT_REGISTRY: RefCell<HashMap<usize, Rc<RefCell<CheckpointContext>>>> =
         RefCell::new(HashMap::new());
@@ -251,7 +251,9 @@ pub fn save_tensor_through_current_policy(t: &Tensor, site: SaveSite) -> SavedTe
                         if site.role == SaveRole::Parameter {
                             default_save(t, site, &debug)
                         } else {
-                            ctx_ref.borrow_mut().record_original_save(t, site, decision, &debug)
+                            ctx_ref
+                                .borrow_mut()
+                                .record_original_save(t, site, decision, &debug)
                         }
                     }
                 }

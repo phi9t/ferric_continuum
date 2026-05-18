@@ -7,9 +7,11 @@ use tnsr::{
     tensor::Tensor,
     transformer::{TransformerBlock, TransformerConfig},
 };
+use tracing::{info, Level};
 
 fn main() {
-    println!("=== tnsr: transformer autograd + checkpointing demo ===\n");
+    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
+    info!("tnsr: transformer autograd + checkpointing demo");
 
     let cfg = TransformerConfig::tiny_4_7_29();
     let block = Rc::new(TransformerBlock::new(cfg));
@@ -18,7 +20,7 @@ fn main() {
     // 1. Baseline: no checkpointing
     // Engine::new() must be called BEFORE forward to capture save events.
     // -----------------------------------------------------------------------
-    println!("--- [1] No checkpoint ---");
+    info!("[1] No checkpoint");
     {
         let mut engine = Engine::new();
         let x = Tensor::randn(&[4, 7, 29]).requires_grad();
@@ -27,17 +29,22 @@ fn main() {
         engine.backward(&loss);
 
         engine.print_op_table();
-        println!();
 
         if let Some(stats) = x.grad_stats() {
-            println!("x.grad: min={:.4} max={:.4} mean={:.4} std={:.4}", stats.min, stats.max, stats.mean, stats.std);
+            info!(
+                min = %format!("{:.4}", stats.min),
+                max = %format!("{:.4}", stats.max),
+                mean = %format!("{:.4}", stats.mean),
+                std = %format!("{:.4}", stats.std),
+                "x.grad stats"
+            );
         }
     }
 
     // -----------------------------------------------------------------------
     // 2. Whole-block checkpoint
     // -----------------------------------------------------------------------
-    println!("\n--- [2] Whole-block checkpoint ---");
+    info!("[2] Whole-block checkpoint");
     {
         let cfg2 = TransformerConfig::tiny_4_7_29();
         let block2 = Rc::new(TransformerBlock::new(cfg2));
@@ -46,7 +53,7 @@ fn main() {
         let x = Tensor::randn(&[4, 7, 29]).requires_grad();
         let policy = Rc::new(WholeBlockCheckpoint);
 
-        let y = checkpoint("block0", policy, &[x.clone()], {
+        let y = checkpoint("block0", policy, std::slice::from_ref(&x), {
             let block2 = block2.clone();
             move |xs| block2.forward(&xs[0])
         });
@@ -56,17 +63,22 @@ fn main() {
 
         engine.print_checkpoint_report();
         engine.print_saved_tensor_table();
-        println!();
 
         if let Some(stats) = x.grad_stats() {
-            println!("x.grad: min={:.4} max={:.4} mean={:.4} std={:.4}", stats.min, stats.max, stats.mean, stats.std);
+            info!(
+                min = %format!("{:.4}", stats.min),
+                max = %format!("{:.4}", stats.max),
+                mean = %format!("{:.4}", stats.mean),
+                std = %format!("{:.4}", stats.std),
+                "x.grad stats"
+            );
         }
     }
 
     // -----------------------------------------------------------------------
     // 3. Selective checkpoint
     // -----------------------------------------------------------------------
-    println!("\n--- [3] Selective checkpoint ---");
+    info!("[3] Selective checkpoint");
     {
         let cfg3 = TransformerConfig::tiny_4_7_29();
         let block3 = Rc::new(TransformerBlock::new(cfg3));
@@ -78,7 +90,7 @@ fn main() {
             recompute_activation_over_bytes: 8192,
         });
 
-        let y = checkpoint("block0_selective", policy, &[x.clone()], {
+        let y = checkpoint("block0_selective", policy, std::slice::from_ref(&x), {
             let block3 = block3.clone();
             move |xs| block3.forward(&xs[0])
         });
@@ -88,17 +100,22 @@ fn main() {
 
         engine.print_checkpoint_report();
         engine.print_saved_tensor_table();
-        println!();
 
         if let Some(stats) = x.grad_stats() {
-            println!("x.grad: min={:.4} max={:.4} mean={:.4} std={:.4}", stats.min, stats.max, stats.mean, stats.std);
+            info!(
+                min = %format!("{:.4}", stats.min),
+                max = %format!("{:.4}", stats.max),
+                mean = %format!("{:.4}", stats.mean),
+                std = %format!("{:.4}", stats.std),
+                "x.grad stats"
+            );
         }
     }
 
     // -----------------------------------------------------------------------
     // 4. DOT graph
     // -----------------------------------------------------------------------
-    println!("\n--- [4] DOT graph output ---");
+    info!("[4] DOT graph output");
     {
         let cfg4 = TransformerConfig::tiny_4_7_29();
         let block4 = Rc::new(TransformerBlock::new(cfg4));
@@ -108,6 +125,6 @@ fn main() {
         let loss = basic::sum(&y, "loss");
         engine.backward(&loss);
         engine.write_dot("/tmp/block.dot");
-        println!("Written /tmp/block.dot");
+        info!("Written /tmp/block.dot");
     }
 }

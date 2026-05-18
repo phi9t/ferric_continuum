@@ -61,7 +61,10 @@ impl BackwardRecipe for EmbeddingBackward {
     fn backward(&self, grad_outputs: &[TensorValue], _ctx: &mut BackwardCtx) -> Vec<GradEdge> {
         let dout = &grad_outputs[0];
         let dw = raw_embedding_backward(dout, &self.ids, self.vocab, self.b, self.t, self.d);
-        vec![GradEdge { target: self.w_target.clone(), grad: dw }]
+        vec![GradEdge {
+            target: self.w_target.clone(),
+            grad: dw,
+        }]
     }
 }
 
@@ -90,5 +93,12 @@ pub fn embedding(ids: &[usize], b: usize, t: usize, weight: &Tensor, name: &str)
             None
         };
 
-    crate::ops::finish_op(OpKind::Embedding, name, &[weight], out_value, recipe, vec![])
+    crate::ops::finish_op(
+        OpKind::Embedding,
+        name,
+        &[weight],
+        out_value,
+        recipe,
+        vec![],
+    )
 }

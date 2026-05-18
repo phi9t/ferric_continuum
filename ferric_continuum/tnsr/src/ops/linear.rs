@@ -17,7 +17,11 @@ pub fn raw_linear_forward(x: &TensorValue, w: &TensorValue) -> TensorValue {
 
     let din = *xd.last().unwrap();
     let dout = wd[1];
-    assert_eq!(wd[0], din, "linear: Din mismatch: x has {} but w has {}", din, wd[0]);
+    assert_eq!(
+        wd[0], din,
+        "linear: Din mismatch: x has {} but w has {}",
+        din, wd[0]
+    );
 
     let batch: usize = xd[..xd.len() - 1].iter().product();
     let mut out_shape = xd[..xd.len() - 1].to_vec();
@@ -114,8 +118,14 @@ impl BackwardRecipe for LinearBackward {
         let dw = raw_linear_dw(&x, dy);
 
         vec![
-            GradEdge { target: self.x_target.clone(), grad: dx },
-            GradEdge { target: self.w_target.clone(), grad: dw },
+            GradEdge {
+                target: self.x_target.clone(),
+                grad: dx,
+            },
+            GradEdge {
+                target: self.w_target.clone(),
+                grad: dw,
+            },
         ]
     }
 }
@@ -127,8 +137,18 @@ pub fn linear(x: &Tensor, w: &Tensor, name: &str) -> Tensor {
         || crate::checkpoint::is_recording_recompute_saves();
 
     let (recipe, debug_saved) = if need {
-        let x_site = SaveSite::new(OpKind::Linear, format!("{name}.input"), SaveRole::Activation, x);
-        let w_site = SaveSite::new(OpKind::Linear, format!("{name}.weight"), SaveRole::Parameter, w);
+        let x_site = SaveSite::new(
+            OpKind::Linear,
+            format!("{name}.input"),
+            SaveRole::Activation,
+            x,
+        );
+        let w_site = SaveSite::new(
+            OpKind::Linear,
+            format!("{name}.weight"),
+            SaveRole::Parameter,
+            w,
+        );
         let saved_x = SavedTensor::save(x, x_site.clone());
         let saved_w = SavedTensor::save(w, w_site.clone());
 
@@ -143,5 +163,12 @@ pub fn linear(x: &Tensor, w: &Tensor, name: &str) -> Tensor {
         (None, vec![])
     };
 
-    crate::ops::finish_op(OpKind::Linear, name, &[x, w], out_value, recipe, debug_saved)
+    crate::ops::finish_op(
+        OpKind::Linear,
+        name,
+        &[x, w],
+        out_value,
+        recipe,
+        debug_saved,
+    )
 }

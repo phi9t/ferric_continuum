@@ -6,7 +6,6 @@ use crate::debug::DebugRecorder;
 use crate::saved::SavedTensor;
 use crate::tensor::{Shape, Tensor, TensorId, TensorInner, TensorValue};
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OpKind {
     Add,
@@ -77,6 +76,12 @@ pub struct Engine {
     pub topo: Vec<OpCallRef>,
 }
 
+impl Default for Engine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Engine {
     pub fn new() -> Self {
         let debug = DebugRecorder::new();
@@ -112,9 +117,9 @@ impl Engine {
                 .iter()
                 .enumerate()
                 .map(|(i, id)| {
-                    self.grads.remove(id).unwrap_or_else(|| {
-                        TensorValue::zeros(call.output_shapes[i].clone())
-                    })
+                    self.grads
+                        .remove(id)
+                        .unwrap_or_else(|| TensorValue::zeros(call.output_shapes[i].clone()))
                 })
                 .collect();
 

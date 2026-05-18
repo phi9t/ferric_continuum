@@ -18,7 +18,11 @@ pub struct LayerNormStats {
     pub x_hat: TensorValue, // same shape as x
 }
 
-fn layer_norm_forward(x: &TensorValue, gamma: &TensorValue, beta: &TensorValue) -> (TensorValue, LayerNormStats) {
+fn layer_norm_forward(
+    x: &TensorValue,
+    gamma: &TensorValue,
+    beta: &TensorValue,
+) -> (TensorValue, LayerNormStats) {
     let xd = &x.shape.0;
     let d = *xd.last().unwrap();
     let batch: usize = xd[..xd.len() - 1].iter().product();
@@ -96,7 +100,8 @@ fn layer_norm_backward(
         let dvar = -0.5 * dvar_sum * std_inv.powi(3);
 
         let dmean_sum: f32 = dx_hat.iter().sum::<f32>();
-        let dmean = -std_inv * dmean_sum + dvar * (-2.0 / d as f32) * (0..d).map(|i| xr[b * d + i] - mean).sum::<f32>();
+        let dmean = -std_inv * dmean_sum
+            + dvar * (-2.0 / d as f32) * (0..d).map(|i| xr[b * d + i] - mean).sum::<f32>();
 
         for i in 0..d {
             dx[b * d + i] = dx_hat[i] * std_inv
@@ -143,9 +148,18 @@ impl BackwardRecipe for LayerNormBackward {
         let (dx, dgamma, dbeta) = layer_norm_backward(dy, &x, &gamma, &stats);
 
         vec![
-            GradEdge { target: self.x_target.clone(), grad: dx },
-            GradEdge { target: self.gamma_target.clone(), grad: dgamma },
-            GradEdge { target: self.beta_target.clone(), grad: dbeta },
+            GradEdge {
+                target: self.x_target.clone(),
+                grad: dx,
+            },
+            GradEdge {
+                target: self.gamma_target.clone(),
+                grad: dgamma,
+            },
+            GradEdge {
+                target: self.beta_target.clone(),
+                grad: dbeta,
+            },
         ]
     }
 }
@@ -162,9 +176,24 @@ pub fn layer_norm(x: &Tensor, gamma: &Tensor, beta: &Tensor, name: &str) -> Tens
         || crate::checkpoint::is_recording_recompute_saves();
 
     let (recipe, debug_saved) = if need {
-        let x_site = SaveSite::new(OpKind::LayerNorm, format!("{name}.input"), SaveRole::Activation, x);
-        let g_site = SaveSite::new(OpKind::LayerNorm, format!("{name}.gamma"), SaveRole::Parameter, gamma);
-        let xh_site = SaveSite::new(OpKind::LayerNorm, format!("{name}.x_hat"), SaveRole::AuxStat, x);
+        let x_site = SaveSite::new(
+            OpKind::LayerNorm,
+            format!("{name}.input"),
+            SaveRole::Activation,
+            x,
+        );
+        let g_site = SaveSite::new(
+            OpKind::LayerNorm,
+            format!("{name}.gamma"),
+            SaveRole::Parameter,
+            gamma,
+        );
+        let xh_site = SaveSite::new(
+            OpKind::LayerNorm,
+            format!("{name}.x_hat"),
+            SaveRole::AuxStat,
+            x,
+        );
 
         let saved_x = SavedTensor::save(x, x_site.clone());
         let saved_g = SavedTensor::save(gamma, g_site.clone());
@@ -278,8 +307,14 @@ impl BackwardRecipe for RmsNormBackward {
         let gamma = ctx.unpack(&self.gamma);
         let (dx, dgamma) = rms_norm_backward(dy, &x, &gamma, &self.rms_inv);
         vec![
-            GradEdge { target: self.x_target.clone(), grad: dx },
-            GradEdge { target: self.gamma_target.clone(), grad: dgamma },
+            GradEdge {
+                target: self.x_target.clone(),
+                grad: dx,
+            },
+            GradEdge {
+                target: self.gamma_target.clone(),
+                grad: dgamma,
+            },
         ]
     }
 }
@@ -295,8 +330,18 @@ pub fn rms_norm(x: &Tensor, gamma: &Tensor, name: &str) -> Tensor {
         || crate::checkpoint::is_recording_recompute_saves();
 
     let (recipe, debug_saved) = if need {
-        let x_site = SaveSite::new(OpKind::RmsNorm, format!("{name}.input"), SaveRole::Activation, x);
-        let g_site = SaveSite::new(OpKind::RmsNorm, format!("{name}.gamma"), SaveRole::Parameter, gamma);
+        let x_site = SaveSite::new(
+            OpKind::RmsNorm,
+            format!("{name}.input"),
+            SaveRole::Activation,
+            x,
+        );
+        let g_site = SaveSite::new(
+            OpKind::RmsNorm,
+            format!("{name}.gamma"),
+            SaveRole::Parameter,
+            gamma,
+        );
         let saved_x = SavedTensor::save(x, x_site.clone());
         let saved_g = SavedTensor::save(gamma, g_site.clone());
         let r: Box<dyn BackwardRecipe> = Box::new(RmsNormBackward {

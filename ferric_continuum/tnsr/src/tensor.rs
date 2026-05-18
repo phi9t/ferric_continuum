@@ -239,7 +239,7 @@ pub fn tensor_value_stats(v: &TensorValue) -> TensorStats {
 fn xorshift_normal(n: usize) -> Vec<f32> {
     use std::cell::Cell;
     thread_local! {
-        static RNG: Cell<u64> = Cell::new(0x_dead_beef_cafe_1234);
+        static RNG: Cell<u64> = const { Cell::new(0x_dead_beef_cafe_1234) };
     }
 
     fn next(rng: &Cell<u64>) -> u64 {
