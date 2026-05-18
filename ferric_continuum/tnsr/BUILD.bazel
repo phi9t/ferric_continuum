@@ -2,7 +2,7 @@ load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_doc", "rust_library", "r
 
 # Core tensor/autograd/checkpointing library (CPU-only, f32, no external deps)
 rust_library(
-    name = "tinytensor",
+    name = "tnsr",
     srcs = [
         "src/lib.rs",
         "src/autograd.rs",
@@ -21,31 +21,31 @@ rust_library(
         "src/ops/loss.rs",
         "src/ops/norm.rs",
     ],
-    crate_name = "tinytensor",
+    crate_name = "tnsr",
     edition = "2021",
     visibility = ["//visibility:public"],
 )
 
 # End-to-end demo: no-checkpoint / whole-block / selective, emits /tmp/block.dot
 rust_binary(
-    name = "tinytensor_demo",
+    name = "tnsr_demo",
     srcs = ["src/main.rs"],
-    crate_name = "tinytensor_demo",
+    crate_name = "tnsr_demo",
     edition = "2021",
-    deps = [":tinytensor"],
+    deps = [":tnsr"],
 )
 
 # Integration tests: gradient checks, checkpoint correctness, shape panics
 rust_test(
-    name = "tinytensor_tests",
+    name = "tnsr_tests",
     srcs = ["tests/autograd_test.rs"],
     crate_name = "autograd_test",
     edition = "2021",
-    deps = [":tinytensor"],
+    deps = [":tnsr"],
 )
 
 # API documentation
 rust_doc(
-    name = "tinytensor_doc",
-    crate = ":tinytensor",
+    name = "tnsr_doc",
+    crate = ":tnsr",
 )

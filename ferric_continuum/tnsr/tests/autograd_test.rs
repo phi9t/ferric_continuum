@@ -1,4 +1,4 @@
-use tinytensor::{
+use tnsr::{
     autograd::Engine,
     checkpoint::{checkpoint, TransformerSelectivePolicy, WholeBlockCheckpoint},
     ops::{activations, attention, basic, embedding, linear, loss, norm},
@@ -458,7 +458,7 @@ fn test_selective_checkpoint_saves_less_than_no_checkpoint() {
 
 #[test]
 fn test_no_grad_mode() {
-    use tinytensor::grad_mode::{is_enabled, NoGradGuard};
+    use tnsr::grad_mode::{is_enabled, NoGradGuard};
 
     assert!(is_enabled());
     {
