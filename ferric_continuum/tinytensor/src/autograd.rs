@@ -1,17 +1,11 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::{Rc, Weak};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::debug::DebugRecorder;
 use crate::saved::SavedTensor;
 use crate::tensor::{Shape, Tensor, TensorId, TensorInner, TensorValue};
 
-static OP_CALL_ID_COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-pub fn fresh_op_call_id() -> OpCallId {
-    OpCallId(OP_CALL_ID_COUNTER.fetch_add(1, Ordering::Relaxed))
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OpKind {

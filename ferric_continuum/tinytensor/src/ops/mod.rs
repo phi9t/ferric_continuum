@@ -15,7 +15,7 @@ use crate::tensor::{Tensor, TensorValue};
 
 static OP_CALL_ID_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
-pub fn fresh_op_call_id() -> crate::autograd::OpCallId {
+pub(crate) fn fresh_op_call_id() -> crate::autograd::OpCallId {
     crate::autograd::OpCallId(OP_CALL_ID_COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
