@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use tinytensor::{
+use tnsr::{
     autograd::Engine,
     checkpoint::{checkpoint, TransformerSelectivePolicy, WholeBlockCheckpoint},
     ops::basic,
@@ -9,7 +9,7 @@ use tinytensor::{
 };
 
 fn main() {
-    println!("=== tinytensor: transformer autograd + checkpointing demo ===\n");
+    println!("=== tnsr: transformer autograd + checkpointing demo ===\n");
 
     let cfg = TransformerConfig::tiny_4_7_29();
     let block = Rc::new(TransformerBlock::new(cfg));
