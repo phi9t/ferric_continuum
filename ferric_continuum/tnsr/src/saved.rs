@@ -72,7 +72,11 @@ impl SavedTensor {
                 debug.record_saved_unpack_materialized(site);
                 value.clone()
             }
-            SavedTensor::Borrowed { tensor, version, site } => {
+            SavedTensor::Borrowed {
+                tensor,
+                version,
+                site,
+            } => {
                 debug.record_saved_unpack_borrowed(site);
                 let upgraded = tensor
                     .upgrade()

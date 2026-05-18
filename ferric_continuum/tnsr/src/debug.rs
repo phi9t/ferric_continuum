@@ -17,12 +17,26 @@ pub struct OpCallRecord {
 
 #[derive(Clone, Debug)]
 pub enum SaveEvent {
-    Materialized { site: SaveSite },
-    Borrowed { site: SaveSite },
-    Recomputable { site: SaveSite, checkpoint_id: usize, ordinal: usize },
-    UnpackedMaterialized { site: SaveSite },
-    UnpackedBorrowed { site: SaveSite },
-    UnpackedRecomputed { site: SaveSite },
+    Materialized {
+        site: SaveSite,
+    },
+    Borrowed {
+        site: SaveSite,
+    },
+    Recomputable {
+        site: SaveSite,
+        checkpoint_id: usize,
+        ordinal: usize,
+    },
+    UnpackedMaterialized {
+        site: SaveSite,
+    },
+    UnpackedBorrowed {
+        site: SaveSite,
+    },
+    UnpackedRecomputed {
+        site: SaveSite,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -35,13 +49,23 @@ pub enum CheckpointEvent {
 
 #[derive(Clone, Debug)]
 pub enum BackwardEvent {
-    ApplyOp { id: OpCallId, name: String, kind: OpKind },
+    ApplyOp {
+        id: OpCallId,
+        name: String,
+        kind: OpKind,
+    },
 }
 
 #[derive(Clone, Debug)]
 pub enum GradEvent {
-    Accumulate { tensor_id: TensorId, shape: Shape, bytes: usize },
-    LeafWrite { tensor_id: TensorId },
+    Accumulate {
+        tensor_id: TensorId,
+        shape: Shape,
+        bytes: usize,
+    },
+    LeafWrite {
+        tensor_id: TensorId,
+    },
 }
 
 #[derive(Default)]
@@ -56,6 +80,12 @@ struct DebugStore {
 #[derive(Clone)]
 pub struct DebugRecorder {
     inner: Rc<RefCell<DebugStore>>,
+}
+
+impl Default for DebugRecorder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DebugRecorder {
@@ -78,84 +108,127 @@ impl DebugRecorder {
     }
 
     pub fn record_save_materialized(&self, site: &SaveSite) {
-        self.inner.borrow_mut().save_events.push(SaveEvent::Materialized { site: site.clone() });
+        self.inner
+            .borrow_mut()
+            .save_events
+            .push(SaveEvent::Materialized { site: site.clone() });
     }
 
     pub fn record_save_borrowed(&self, site: &SaveSite) {
-        self.inner.borrow_mut().save_events.push(SaveEvent::Borrowed { site: site.clone() });
+        self.inner
+            .borrow_mut()
+            .save_events
+            .push(SaveEvent::Borrowed { site: site.clone() });
     }
 
     pub fn record_save_recomputable(&self, site: &SaveSite, checkpoint_id: usize, ordinal: usize) {
-        self.inner.borrow_mut().save_events.push(SaveEvent::Recomputable {
-            site: site.clone(),
-            checkpoint_id,
-            ordinal,
-        });
+        self.inner
+            .borrow_mut()
+            .save_events
+            .push(SaveEvent::Recomputable {
+                site: site.clone(),
+                checkpoint_id,
+                ordinal,
+            });
     }
 
     pub fn record_saved_unpack_materialized(&self, site: &SaveSite) {
-        self.inner.borrow_mut().save_events.push(SaveEvent::UnpackedMaterialized { site: site.clone() });
+        self.inner
+            .borrow_mut()
+            .save_events
+            .push(SaveEvent::UnpackedMaterialized { site: site.clone() });
     }
 
     pub fn record_saved_unpack_borrowed(&self, site: &SaveSite) {
-        self.inner.borrow_mut().save_events.push(SaveEvent::UnpackedBorrowed { site: site.clone() });
+        self.inner
+            .borrow_mut()
+            .save_events
+            .push(SaveEvent::UnpackedBorrowed { site: site.clone() });
     }
 
     pub fn record_saved_unpack_recompute(&self, site: &SaveSite) {
-        self.inner.borrow_mut().save_events.push(SaveEvent::UnpackedRecomputed { site: site.clone() });
+        self.inner
+            .borrow_mut()
+            .save_events
+            .push(SaveEvent::UnpackedRecomputed { site: site.clone() });
     }
 
     pub fn record_checkpoint_enter(&self, id: usize, name: &str) {
-        self.inner.borrow_mut().checkpoint_events.push(CheckpointEvent::Enter {
-            id,
-            name: name.to_string(),
-        });
+        self.inner
+            .borrow_mut()
+            .checkpoint_events
+            .push(CheckpointEvent::Enter {
+                id,
+                name: name.to_string(),
+            });
     }
 
     pub fn record_checkpoint_exit(&self, id: usize) {
-        self.inner.borrow_mut().checkpoint_events.push(CheckpointEvent::Exit { id });
+        self.inner
+            .borrow_mut()
+            .checkpoint_events
+            .push(CheckpointEvent::Exit { id });
     }
 
     pub fn record_recompute_start(&self, id: usize, name: &str) {
-        self.inner.borrow_mut().checkpoint_events.push(CheckpointEvent::RecomputeStart {
-            id,
-            name: name.to_string(),
-        });
+        self.inner
+            .borrow_mut()
+            .checkpoint_events
+            .push(CheckpointEvent::RecomputeStart {
+                id,
+                name: name.to_string(),
+            });
     }
 
     pub fn record_recompute_end(&self, id: usize, saved_count: usize) {
-        self.inner.borrow_mut().checkpoint_events.push(CheckpointEvent::RecomputeEnd {
-            id,
-            saved_count,
-        });
+        self.inner
+            .borrow_mut()
+            .checkpoint_events
+            .push(CheckpointEvent::RecomputeEnd { id, saved_count });
     }
 
     pub fn record_backward_call(&self, call: &OpCallRef) {
-        self.inner.borrow_mut().backward_events.push(BackwardEvent::ApplyOp {
-            id: call.id,
-            name: call.name.clone(),
-            kind: call.kind,
-        });
+        self.inner
+            .borrow_mut()
+            .backward_events
+            .push(BackwardEvent::ApplyOp {
+                id: call.id,
+                name: call.name.clone(),
+                kind: call.kind,
+            });
     }
 
     pub fn record_grad_accum(&self, target: &GradTarget, _grad: &TensorValue) {
-        self.inner.borrow_mut().grad_events.push(GradEvent::Accumulate {
-            tensor_id: target.id,
-            shape: target.shape.clone(),
-            bytes: target.shape.bytes_f32(),
-        });
-        if target.leaf.is_some() {
-            self.inner.borrow_mut().grad_events.push(GradEvent::LeafWrite {
+        self.inner
+            .borrow_mut()
+            .grad_events
+            .push(GradEvent::Accumulate {
                 tensor_id: target.id,
+                shape: target.shape.clone(),
+                bytes: target.shape.bytes_f32(),
             });
+        if target.leaf.is_some() {
+            self.inner
+                .borrow_mut()
+                .grad_events
+                .push(GradEvent::LeafWrite {
+                    tensor_id: target.id,
+                });
         }
     }
 
     pub fn print_op_table(&self, op_calls: &[OpCallRef]) {
-        println!("{:<4} {:<18} {:<20} {:<16} {}", "#", "kind", "name", "output shape", "saved bytes");
+        println!(
+            "{:<4} {:<18} {:<20} {:<16} saved bytes",
+            "#", "kind", "name", "output shape"
+        );
         println!("{}", "-".repeat(72));
         for (i, call) in op_calls.iter().enumerate() {
-            let out_shape = call.output_shapes.first().map(|s| s.to_string()).unwrap_or_default();
+            let out_shape = call
+                .output_shapes
+                .first()
+                .map(|s| s.to_string())
+                .unwrap_or_default();
             let saved_bytes: usize = call.debug_saved.iter().map(|s| s.bytes).sum();
             println!(
                 "{:<4} {:<18} {:<20} {:<16} {}",
@@ -171,21 +244,48 @@ impl DebugRecorder {
     pub fn print_saved_tensor_table(&self) {
         let store = self.inner.borrow();
         println!("\nSaved tensor events:");
-        println!("{:<8} {:<28} {:<14} {:<8} {}", "ordinal", "site", "shape", "bytes", "kind");
+        println!(
+            "{:<8} {:<28} {:<14} {:<8} kind",
+            "ordinal", "site", "shape", "bytes"
+        );
         println!("{}", "-".repeat(72));
         let mut ordinal = 0usize;
         for ev in &store.save_events {
             match ev {
                 SaveEvent::Materialized { site } => {
-                    println!("{:<8} {:<28} {:<14} {:<8} materialized", ordinal, site.name, site.shape.to_string(), site.bytes);
+                    println!(
+                        "{:<8} {:<28} {:<14} {:<8} materialized",
+                        ordinal,
+                        site.name,
+                        site.shape.to_string(),
+                        site.bytes
+                    );
                     ordinal += 1;
                 }
                 SaveEvent::Borrowed { site } => {
-                    println!("{:<8} {:<28} {:<14} {:<8} borrowed(param)", ordinal, site.name, site.shape.to_string(), site.bytes);
+                    println!(
+                        "{:<8} {:<28} {:<14} {:<8} borrowed(param)",
+                        ordinal,
+                        site.name,
+                        site.shape.to_string(),
+                        site.bytes
+                    );
                     ordinal += 1;
                 }
-                SaveEvent::Recomputable { site, checkpoint_id, ordinal: ord } => {
-                    println!("{:<8} {:<28} {:<14} {:<8} recompute(chk={},ord={})", ord, site.name, site.shape.to_string(), 0, checkpoint_id, ord);
+                SaveEvent::Recomputable {
+                    site,
+                    checkpoint_id,
+                    ordinal: ord,
+                } => {
+                    println!(
+                        "{:<8} {:<28} {:<14} {:<8} recompute(chk={},ord={})",
+                        ord,
+                        site.name,
+                        site.shape.to_string(),
+                        0,
+                        checkpoint_id,
+                        ord
+                    );
                 }
                 _ => {}
             }
@@ -197,10 +297,16 @@ impl DebugRecorder {
         println!("\nCheckpoint events:");
         for ev in &store.checkpoint_events {
             match ev {
-                CheckpointEvent::Enter { id, name } => println!("  [enter] chk={} name={}", id, name),
+                CheckpointEvent::Enter { id, name } => {
+                    println!("  [enter] chk={} name={}", id, name)
+                }
                 CheckpointEvent::Exit { id } => println!("  [exit]  chk={}", id),
-                CheckpointEvent::RecomputeStart { id, name } => println!("  [recompute-start] chk={} name={}", id, name),
-                CheckpointEvent::RecomputeEnd { id, saved_count } => println!("  [recompute-end]   chk={} saved_count={}", id, saved_count),
+                CheckpointEvent::RecomputeStart { id, name } => {
+                    println!("  [recompute-start] chk={} name={}", id, name)
+                }
+                CheckpointEvent::RecomputeEnd { id, saved_count } => {
+                    println!("  [recompute-end]   chk={} saved_count={}", id, saved_count)
+                }
             }
         }
     }
@@ -234,7 +340,7 @@ impl DebugRecorder {
 }
 
 thread_local! {
-    static GLOBAL_RECORDER: RefCell<Option<DebugRecorder>> = RefCell::new(None);
+    static GLOBAL_RECORDER: RefCell<Option<DebugRecorder>> = const { RefCell::new(None) };
 }
 
 pub fn set_global_recorder(r: DebugRecorder) {
@@ -266,9 +372,5 @@ pub fn record_op_call_global_checkpoint_exit(id: usize) {
 }
 
 pub fn get_global_recorder() -> DebugRecorder {
-    GLOBAL_RECORDER.with(|g| {
-        g.borrow()
-            .clone()
-            .unwrap_or_else(DebugRecorder::new)
-    })
+    GLOBAL_RECORDER.with(|g| g.borrow().clone().unwrap_or_else(DebugRecorder::new))
 }

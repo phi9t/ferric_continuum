@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use tnsr::{
     autograd::Engine,
     checkpoint::{checkpoint, TransformerSelectivePolicy, WholeBlockCheckpoint},
@@ -5,7 +6,6 @@ use tnsr::{
     tensor::{Shape, Tensor, TensorValue},
     transformer::{TransformerBlock, TransformerConfig},
 };
-use std::rc::Rc;
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -58,7 +58,11 @@ where
             assert!(
                 approx_eq(fd, an, tol),
                 "grad_check input[{}][{}]: fd={:.6} analytic={:.6} diff={:.6}",
-                idx, i, fd, an, (fd - an).abs()
+                idx,
+                i,
+                fd,
+                an,
+                (fd - an).abs()
             );
         }
     }
@@ -191,7 +195,10 @@ fn test_layer_norm_backward() {
     let beta = Tensor::from_value(TensorValue::zeros(Shape(vec![8])), true);
     grad_check(
         |inputs| {
-            basic::sum(&norm::layer_norm(&inputs[0], &inputs[1], &inputs[2], "ln"), "loss")
+            basic::sum(
+                &norm::layer_norm(&inputs[0], &inputs[1], &inputs[2], "ln"),
+                "loss",
+            )
         },
         &[x, gamma, beta],
         1e-4,
@@ -205,9 +212,7 @@ fn test_rms_norm_backward() {
     let x = Tensor::randn(&[2, 3]).requires_grad();
     let gamma = Tensor::from_value(TensorValue::from_vec(Shape(vec![3]), vec![1.0; 3]), true);
     grad_check(
-        |inputs| {
-            basic::sum(&norm::rms_norm(&inputs[0], &inputs[1], "rn"), "loss")
-        },
+        |inputs| basic::sum(&norm::rms_norm(&inputs[0], &inputs[1], "rn"), "loss"),
         &[x, gamma],
         1e-3,
         5e-3,
@@ -243,7 +248,10 @@ fn test_attention_scores_backward() {
     let k = Tensor::randn(&[2, 3, 4]).requires_grad();
     grad_check(
         |inputs| {
-            basic::sum(&attention::attention_scores(&inputs[0], &inputs[1], 0.5, "attn"), "loss")
+            basic::sum(
+                &attention::attention_scores(&inputs[0], &inputs[1], 0.5, "attn"),
+                "loss",
+            )
         },
         &[q, k],
         1e-4,
@@ -257,7 +265,10 @@ fn test_attention_mix_backward() {
     let v = Tensor::randn(&[2, 3, 4]).requires_grad();
     grad_check(
         |inputs| {
-            basic::sum(&attention::attention_mix(&inputs[0], &inputs[1], "mix"), "loss")
+            basic::sum(
+                &attention::attention_mix(&inputs[0], &inputs[1], "mix"),
+                "loss",
+            )
         },
         &[p, v],
         1e-4,
@@ -353,9 +364,12 @@ fn test_whole_block_checkpoint_gradient_equivalence() {
     // Whole-block checkpoint forward + backward
     let block2_rc = block2.clone();
     let mut eng2 = Engine::new();
-    let y2 = checkpoint("blk", Rc::new(WholeBlockCheckpoint), &[x2.clone()], move |xs| {
-        block2_rc.forward(&xs[0])
-    });
+    let y2 = checkpoint(
+        "blk",
+        Rc::new(WholeBlockCheckpoint),
+        std::slice::from_ref(&x2),
+        move |xs| block2_rc.forward(&xs[0]),
+    );
     let loss2 = basic::sum(&y2, "loss");
     eng2.backward(&loss2);
 
@@ -366,7 +380,8 @@ fn test_whole_block_checkpoint_gradient_equivalence() {
         assert!(
             approx_eq(*a, *b, 1e-4),
             "checkpoint grad mismatch: {:.6} vs {:.6}",
-            a, b
+            a,
+            b
         );
     }
 }
@@ -377,10 +392,15 @@ fn test_whole_block_checkpoint_no_nan() {
     let block = Rc::new(TransformerBlock::new(cfg));
     let mut engine = Engine::new();
     let x = Tensor::randn(&[4, 7, 29]).requires_grad();
-    let y = checkpoint("blk", Rc::new(WholeBlockCheckpoint), &[x.clone()], {
-        let block = block.clone();
-        move |xs| block.forward(&xs[0])
-    });
+    let y = checkpoint(
+        "blk",
+        Rc::new(WholeBlockCheckpoint),
+        std::slice::from_ref(&x),
+        {
+            let block = block.clone();
+            move |xs| block.forward(&xs[0])
+        },
+    );
     let loss = basic::sum(&y, "loss");
     engine.backward(&loss);
     assert_finite(&x, "x.grad (whole-block checkpoint)");
@@ -413,7 +433,7 @@ fn test_selective_checkpoint_gradient_equivalence() {
     });
     let block2_rc = block2.clone();
     let mut eng2 = Engine::new();
-    let y2 = checkpoint("blk_sel", policy, &[x2.clone()], move |xs| {
+    let y2 = checkpoint("blk_sel", policy, std::slice::from_ref(&x2), move |xs| {
         block2_rc.forward(&xs[0])
     });
     eng2.backward(&basic::sum(&y2, "loss"));
@@ -424,7 +444,8 @@ fn test_selective_checkpoint_gradient_equivalence() {
         assert!(
             approx_eq(*a, *b, 1e-4),
             "selective checkpoint grad mismatch: {:.6} vs {:.6}",
-            a, b
+            a,
+            b
         );
     }
 }
@@ -445,7 +466,7 @@ fn test_selective_checkpoint_saves_less_than_no_checkpoint() {
     let mut engine = Engine::new();
     let x = Tensor::randn(&[4, 7, 29]).requires_grad();
     let block_rc = block.clone();
-    let y = checkpoint("blk_sel", policy, &[x.clone()], move |xs| {
+    let y = checkpoint("blk_sel", policy, std::slice::from_ref(&x), move |xs| {
         block_rc.forward(&xs[0])
     });
     engine.backward(&basic::sum(&y, "loss"));

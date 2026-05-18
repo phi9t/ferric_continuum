@@ -51,22 +51,17 @@ impl TransformerBlock {
         };
 
         let ones = |n: usize| -> Tensor {
-            let t = Tensor::from_value(
-                crate::tensor::TensorValue::from_vec(
-                    crate::tensor::Shape(vec![n]),
-                    vec![1.0; n],
-                ),
+            Tensor::from_value(
+                crate::tensor::TensorValue::from_vec(crate::tensor::Shape(vec![n]), vec![1.0; n]),
                 true,
-            );
-            t
+            )
         };
 
         let zeros = |n: usize| -> Tensor {
-            let t = Tensor::from_value(
+            Tensor::from_value(
                 crate::tensor::TensorValue::zeros(crate::tensor::Shape(vec![n])),
                 true,
-            );
-            t
+            )
         };
 
         Self {
@@ -86,10 +81,16 @@ impl TransformerBlock {
 
     pub fn parameters(&self) -> Vec<&Tensor> {
         vec![
-            &self.wq, &self.wk, &self.wv, &self.wo,
-            &self.w1, &self.w2,
-            &self.ln1_gamma, &self.ln1_beta,
-            &self.ln2_gamma, &self.ln2_beta,
+            &self.wq,
+            &self.wk,
+            &self.wv,
+            &self.wo,
+            &self.w1,
+            &self.w2,
+            &self.ln1_gamma,
+            &self.ln1_beta,
+            &self.ln2_gamma,
+            &self.ln2_beta,
         ]
     }
 
