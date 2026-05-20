@@ -1,3 +1,14 @@
+//! Dense matrix multiplication with autograd.
+//!
+//! Book reference: Ch.4 "Matrix Multiplication FLOPs",
+//! <https://jax-ml.github.io/scaling-book/transformers/>
+//!
+//! For Y = X·W where X is (M×K) and W is (K×N):
+//!   fwd:   2·M·K·N  FLOPs
+//!   ∂L/∂X = (∂L/∂Y)·Wᵀ  →  2·M·K·N  FLOPs  (`raw_linear_dx`)
+//!   ∂L/∂W = Xᵀ·(∂L/∂Y)  →  2·M·K·N  FLOPs  (`raw_linear_dw`)
+//! Total training cost: 3× fwd per parameter update pass.
+
 use crate::autograd::{BackwardCtx, BackwardRecipe, GradEdge, GradTarget, OpKind};
 use crate::saved::{SaveRole, SaveSite, SavedTensor};
 use crate::tensor::{Shape, Tensor, TensorValue};

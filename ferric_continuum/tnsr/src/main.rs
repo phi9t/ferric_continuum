@@ -4,6 +4,7 @@ use tnsr::{
     autograd::Engine,
     checkpoint::{checkpoint, TransformerSelectivePolicy, WholeBlockCheckpoint},
     ops::basic,
+    scaling::report::{format_report, scale_report},
     tensor::Tensor,
     transformer::{TransformerBlock, TransformerConfig},
 };
@@ -126,5 +127,18 @@ fn main() {
         engine.backward(&loss);
         engine.write_dot("/tmp/block.dot");
         info!("Written /tmp/block.dot");
+    }
+
+    // -----------------------------------------------------------------------
+    // 5. Scaling report
+    // -----------------------------------------------------------------------
+    info!("[5] Scaling report");
+    {
+        let cfg5 = TransformerConfig::tiny_4_7_29();
+        let report = scale_report(&cfg5);
+        let table = format_report(&report);
+        for line in table.lines() {
+            info!("{}", line);
+        }
     }
 }

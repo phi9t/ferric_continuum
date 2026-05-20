@@ -1,3 +1,20 @@
+//! Attention scores, softmax, mix, and causal mask.
+//!
+//! Book reference: Ch.4 "Attention FLOPs",
+//! <https://jax-ml.github.io/scaling-book/transformers/>
+//!
+//! Using tnsr notation (N=1 head, H=D, so shapes are `[B,T,D]`):
+//!   attn_scores: Q·Kᵀ  →  2·B·T²·D  FLOPs  (`attention_scores`)
+//!   attn_mix:    P·V   →  2·B·T²·D  FLOPs  (`attention_mix`)
+//! Combined attention cost: 4·B·T²·D fwd, 8·B·T²·D bwd.
+//!
+//! **Causal mask note:** tnsr materializes the full `[B,T,T]` tensor and
+//! overwrites the upper triangle — O(B·T²) writes, no FMA arithmetic.
+//! A fused kernel could skip the upper triangle, but tnsr pays the full cost.
+//!
+//! In the book's multi-head notation: replace D with N·H and the formulas
+//! become 2·B·T²·N·H.  In tnsr, N=1 and H=D, so N·H = D.
+
 use crate::autograd::{BackwardCtx, BackwardRecipe, GradEdge, GradTarget, OpKind};
 use crate::saved::{SaveRole, SaveSite, SavedTensor};
 use crate::tensor::{Shape, Tensor, TensorValue};
@@ -398,7 +415,7 @@ pub fn causal_mask(scores: &Tensor, name: &str) -> Tensor {
         };
 
     crate::ops::finish_op(
-        OpKind::AttentionScores,
+        OpKind::CausalMask,
         name,
         &[scores],
         out_value,

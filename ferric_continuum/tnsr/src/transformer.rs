@@ -1,3 +1,23 @@
+//! Full transformer block: pre-norm attention + 2-matrix GELU MLP.
+//!
+//! Book reference: Ch.4 "Transformer Accounting",
+//! <https://jax-ml.github.io/scaling-book/transformers/>
+//!
+//! **Parameter counts** (one block, d_model=D, d_ff=F):
+//! `params = 4·D² (QKVO) + 2·D·F (MLP w1+w2) + 4·D (LayerNorm γ,β ×2)`
+//!
+//! **Training FLOPs** approximation (book's 6·N·T rule, linear layers only):
+//! `≈ 6 × (4·D² + 2·D·F) × B·T`
+//!
+//! **Divergence from book reference model:** the book uses a gated 3-matrix
+//! FFN (SwiGLU/SiLU) giving `3·D·F` params and `18·B·T·D·F` FLOPs, with
+//! attention dominating when `T > 8D`.  This block uses the classic 2-matrix
+//! GELU FFN (`2·D·F`, `12·B·T·D·F`); attention dominates when `T > 6D`.
+//! The gated variant (`ops/activations.rs::swiglu`) is available but not wired
+//! into `TransformerBlock`.
+//!
+//! Use `crate::scaling::report::scale_report` for exact computed numbers.
+
 use crate::ops::{activations, attention, basic, linear, norm};
 use crate::tensor::Tensor;
 

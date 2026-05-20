@@ -1,3 +1,20 @@
+//! Gradient checkpointing / rematerialization.
+//!
+//! Book reference: Ch.4 "Miscellaneous Math" + Ch.5 "Parallelize a Transformer",
+//! <https://jax-ml.github.io/scaling-book/transformers/>
+//!
+//! `checkpoint()` is the Rust analog of `jax.remat` / `jax.checkpoint`.
+//! Two policies are provided:
+//!
+//! - **`WholeBlockCheckpoint`** — saves only the boundary input (block input x),
+//!   recomputes all activations during backward.  Matches the book's "Block
+//!   Remat" strategy: ~8·N FLOPs/token vs 6·N without remat.
+//!
+//! - **`TransformerSelectivePolicy`** — saves softmax output (if small) and
+//!   attention intermediates (Q, K); recomputes GELU and LayerNorm.  Inspired
+//!   by the book's "Big Matmuls Only" strategy but saves inputs rather than
+//!   outputs, so it is an analog, not an exact match.
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;

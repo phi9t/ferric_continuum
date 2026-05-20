@@ -1,3 +1,15 @@
+//! Softmax cross-entropy loss (unembedding direction).
+//!
+//! Book reference: Ch.4 "Embedding and Unembedding",
+//! <https://jax-ml.github.io/scaling-book/transformers/>
+//!
+//! `cross_entropy(logits [B,T,V], targets [B·T]) → scalar`
+//!
+//! The logit computation `hidden [B,T,D] @ W_out [D,V] → logits [B,T,V]` is
+//! the "unembedding" matmul; its FLOPs are 2·B·T·D·V fwd and 4·B·T·D·V bwd.
+//! This function receives already-computed logits and applies fused
+//! softmax + cross-entropy, costing O(B·T·V) arithmetic ops.
+
 use crate::autograd::{BackwardCtx, BackwardRecipe, GradEdge, GradTarget, OpKind};
 use crate::tensor::{Shape, Tensor, TensorValue};
 

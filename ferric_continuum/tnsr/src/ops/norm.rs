@@ -1,3 +1,12 @@
+//! LayerNorm and RMSNorm with autograd.
+//!
+//! Book reference: Ch.4 "LayerNorm",
+//! <https://jax-ml.github.io/scaling-book/transformers/>
+//!
+//! LayerNorm parameters: γ (gamma) + β (beta) of shape `[D]` each → 2·D params
+//! per norm layer.  Two norm layers per block → 4·D total norm params.
+//! FLOPs: O(B·T·D) forward and backward — negligible vs. matmuls for large D.
+
 use crate::autograd::{BackwardCtx, BackwardRecipe, GradEdge, GradTarget, OpKind};
 use crate::saved::{SaveRole, SaveSite, SavedTensor};
 use crate::tensor::{Shape, Tensor, TensorValue};

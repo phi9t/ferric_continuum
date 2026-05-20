@@ -20,6 +20,13 @@ rust_library(
         "src/ops/linear.rs",
         "src/ops/loss.rs",
         "src/ops/norm.rs",
+        "src/scaling/mod.rs",
+        "src/scaling/model_stats.rs",
+        "src/scaling/op_cost.rs",
+        "src/scaling/report.rs",
+        "src/scaling/roofline.rs",
+        "src/scaling/sharding.rs",
+        "src/scaling/inference.rs",
     ],
     crate_name = "tnsr",
     edition = "2021",
@@ -44,6 +51,15 @@ rust_test(
     name = "tnsr_tests",
     srcs = ["tests/autograd_test.rs"],
     crate_name = "autograd_test",
+    edition = "2021",
+    deps = [":tnsr"],
+)
+
+# Golden-value tests for the scaling / FLOPs accounting module
+rust_test(
+    name = "scaling_tests",
+    srcs = ["tests/scaling_test.rs"],
+    crate_name = "scaling_test",
     edition = "2021",
     deps = [":tnsr"],
 )

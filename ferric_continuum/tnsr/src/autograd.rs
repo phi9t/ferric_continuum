@@ -1,3 +1,14 @@
+//! Autograd engine: DAG construction and reverse-mode backward pass.
+//!
+//! Book reference: Ch.4 "Backward Pass FLOPs",
+//! <https://jax-ml.github.io/scaling-book/transformers/>
+//!
+//! Each forward op registers an `OpCall` with a `BackwardRecipe`.  `Engine`
+//! collects the DAG via DFS topo-sort, then walks it in reverse to accumulate
+//! gradients.  The backward pass costs ≈ 2× the forward pass for matmuls
+//! (computing both ∂L/∂X and ∂L/∂W each cost one matmul), so total training
+//! FLOPs ≈ 3× forward, giving the book's `6·N·T` rule (2 fwd + 4 bwd).
+
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::{Rc, Weak};
@@ -6,6 +17,12 @@ use crate::debug::DebugRecorder;
 use crate::saved::SavedTensor;
 use crate::tensor::{Shape, Tensor, TensorId, TensorInner, TensorValue};
 
+/// Discriminant for every differentiable operation in the graph.
+/// Used by `DebugRecorder`, `SaveSite`, and `ScaleReport` for FLOPs accounting.
+/// See `src/scaling/op_cost.rs` for per-kind FLOPs formulas.
+///
+/// Book reference: Ch.4 "All the Transformer Math You Need to Know",
+/// https://jax-ml.github.io/scaling-book/transformers/
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OpKind {
     Add,
@@ -20,6 +37,7 @@ pub enum OpKind {
     Silu,
     SwiGlu,
     AttentionScores,
+    CausalMask,
     Softmax,
     AttentionMix,
     Dropout,
