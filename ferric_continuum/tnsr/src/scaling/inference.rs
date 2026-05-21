@@ -20,13 +20,7 @@
 /// * `t` — maximum sequence length (context window)
 /// * `d` — model hidden dimension (d_model)
 /// * `elem_bytes` — bytes per element (4 for f32, 2 for bf16/f16)
-pub fn kv_cache_bytes(
-    num_layers: usize,
-    b: usize,
-    t: usize,
-    d: usize,
-    elem_bytes: usize,
-) -> u64 {
+pub fn kv_cache_bytes(num_layers: usize, b: usize, t: usize, d: usize, elem_bytes: usize) -> u64 {
     2u64 * elem_bytes as u64 * num_layers as u64 * b as u64 * t as u64 * d as u64
 }
 

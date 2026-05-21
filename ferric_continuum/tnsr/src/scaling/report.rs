@@ -88,11 +88,7 @@ pub fn format_report(r: &ScaleReport) -> String {
     out.push('\n');
     out.push_str(&format!(
         "{:<14} {:>12} {:>12} {:>12} {:>12}\n",
-        "TOTAL",
-        r.total_fwd_flops,
-        r.total_bwd_flops,
-        r.total_act_bytes,
-        r.total_param_bytes
+        "TOTAL", r.total_fwd_flops, r.total_bwd_flops, r.total_act_bytes, r.total_param_bytes
     ));
     out.push_str(&format!(
         "Train FLOPs:     {:>12}  (fwd + bwd)\n",
