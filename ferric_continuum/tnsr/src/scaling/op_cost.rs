@@ -45,10 +45,9 @@ pub fn all_op_costs(cfg: &TransformerConfig) -> Vec<OpCost> {
     let t = cfg.seq as u64;
     let d = cfg.d_model as u64;
     let f = cfg.d_ff as u64;
-    let f32_bytes = 4u64;
 
     // helpers
-    let act = |shape: u64| shape * f32_bytes;
+    let act = |shape: u64| shape * super::F32_BYTES;
     let lin = |rows: u64, cols: u64| -> (u64, u64) {
         let fwd = 2 * b * t * rows * cols;
         (fwd, 2 * fwd)
@@ -61,37 +60,23 @@ pub fn all_op_costs(cfg: &TransformerConfig) -> Vec<OpCost> {
         name: "ln1",
         fwd_flops: 8 * b * t * d,
         bwd_flops: 10 * b * t * d,
-        param_bytes: 2 * d * f32_bytes,
+        param_bytes: 2 * d * super::F32_BYTES,
         act_bytes: act(b * t * d),
     });
 
-    // Q projection [B,T,D] @ [D,D] → [B,T,D]
-    let (fwd, bwd) = lin(d, d);
-    ops.push(OpCost {
-        name: "q_proj",
-        fwd_flops: fwd,
-        bwd_flops: bwd,
-        param_bytes: d * d * f32_bytes,
-        act_bytes: act(b * t * d),
-    });
-
-    // K projection
-    ops.push(OpCost {
-        name: "k_proj",
-        fwd_flops: fwd,
-        bwd_flops: bwd,
-        param_bytes: d * d * f32_bytes,
-        act_bytes: act(b * t * d),
-    });
-
-    // V projection
-    ops.push(OpCost {
-        name: "v_proj",
-        fwd_flops: fwd,
-        bwd_flops: bwd,
-        param_bytes: d * d * f32_bytes,
-        act_bytes: act(b * t * d),
-    });
+    // Q/K/V projections [B,T,D] @ [D,D] → [B,T,D] — identical FLOPs and bytes
+    let (qkv_fwd, qkv_bwd) = lin(d, d);
+    let qkv_param = d * d * super::F32_BYTES;
+    let qkv_act = act(b * t * d);
+    for name in ["q_proj", "k_proj", "v_proj"] {
+        ops.push(OpCost {
+            name,
+            fwd_flops: qkv_fwd,
+            bwd_flops: qkv_bwd,
+            param_bytes: qkv_param,
+            act_bytes: qkv_act,
+        });
+    }
 
     // Attention scores: Q[B,T,D] · Kᵀ[B,D,T] → scores[B,T,T]
     // 2·B·T²·D fwd (each of B batches: (T×D)·(D×T) = 2·T²·D)
@@ -131,13 +116,13 @@ pub fn all_op_costs(cfg: &TransformerConfig) -> Vec<OpCost> {
         act_bytes: act(b * t * d),
     });
 
-    // O projection [B,T,D] @ [D,D] → [B,T,D]
+    // O projection [B,T,D] @ [D,D] → [B,T,D] — same cost as each of Q/K/V
     ops.push(OpCost {
         name: "o_proj",
-        fwd_flops: fwd,
-        bwd_flops: bwd,
-        param_bytes: d * d * f32_bytes,
-        act_bytes: act(b * t * d),
+        fwd_flops: qkv_fwd,
+        bwd_flops: qkv_bwd,
+        param_bytes: qkv_param,
+        act_bytes: qkv_act,
     });
 
     // Residual add 1: O(B·T·D), no grad accumulation cost
@@ -154,7 +139,7 @@ pub fn all_op_costs(cfg: &TransformerConfig) -> Vec<OpCost> {
         name: "ln2",
         fwd_flops: 8 * b * t * d,
         bwd_flops: 10 * b * t * d,
-        param_bytes: 2 * d * f32_bytes,
+        param_bytes: 2 * d * super::F32_BYTES,
         act_bytes: act(b * t * d),
     });
 
@@ -164,7 +149,7 @@ pub fn all_op_costs(cfg: &TransformerConfig) -> Vec<OpCost> {
         name: "mlp_up",
         fwd_flops: mlp_up_fwd,
         bwd_flops: mlp_up_bwd,
-        param_bytes: d * f * f32_bytes,
+        param_bytes: d * f * super::F32_BYTES,
         act_bytes: act(b * t * f),
     });
 
@@ -183,7 +168,7 @@ pub fn all_op_costs(cfg: &TransformerConfig) -> Vec<OpCost> {
         name: "mlp_down",
         fwd_flops: mlp_dn_fwd,
         bwd_flops: mlp_dn_bwd,
-        param_bytes: f * d * f32_bytes,
+        param_bytes: f * d * super::F32_BYTES,
         act_bytes: act(b * t * d),
     });
 

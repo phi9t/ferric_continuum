@@ -28,6 +28,9 @@
 //! println!("{}", format_report(&r));
 //! ```
 
+/// Bytes per f32 element — used throughout the scaling module for byte estimates.
+pub(super) const F32_BYTES: u64 = 4;
+
 pub mod inference;
 pub mod model_stats;
 pub mod op_cost;

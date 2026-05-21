@@ -28,10 +28,15 @@ pub struct ScaleReport {
 pub fn scale_report(cfg: &TransformerConfig) -> ScaleReport {
     let stats = model_stats(cfg);
     let op_costs = all_op_costs(cfg);
-    let total_fwd_flops = op_costs.iter().map(|c| c.fwd_flops).sum();
-    let total_bwd_flops = op_costs.iter().map(|c| c.bwd_flops).sum();
-    let total_act_bytes = op_costs.iter().map(|c| c.act_bytes).sum();
-    let total_param_bytes = op_costs.iter().map(|c| c.param_bytes).sum();
+    let (total_fwd_flops, total_bwd_flops, total_act_bytes, total_param_bytes) =
+        op_costs.iter().fold((0u64, 0u64, 0u64, 0u64), |acc, c| {
+            (
+                acc.0 + c.fwd_flops,
+                acc.1 + c.bwd_flops,
+                acc.2 + c.act_bytes,
+                acc.3 + c.param_bytes,
+            )
+        });
     ScaleReport {
         stats,
         op_costs,
@@ -69,7 +74,7 @@ pub fn format_report(r: &ScaleReport) -> String {
         "{:<14} {:>12} {:>12} {:>12} {:>12}\n",
         "op", "fwd_flops", "bwd_flops", "act_bytes", "param_bytes"
     ));
-    out.push_str(&"-".repeat(68));
+    out.push_str(&"-".repeat(66));
     out.push('\n');
 
     for c in &r.op_costs {
@@ -79,7 +84,7 @@ pub fn format_report(r: &ScaleReport) -> String {
         ));
     }
 
-    out.push_str(&"-".repeat(68));
+    out.push_str(&"-".repeat(66));
     out.push('\n');
     out.push_str(&format!(
         "{:<14} {:>12} {:>12} {:>12} {:>12}\n",

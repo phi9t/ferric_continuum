@@ -1,8 +1,9 @@
+use tnsr::scaling::inference::{kv_cache_bytes, peak_activation_bytes};
 use tnsr::scaling::model_stats::model_stats;
-use tnsr::scaling::op_cost::{dense_matmul_fwd_flops, total_fwd_flops};
+use tnsr::scaling::op_cost::{dense_matmul_fwd_flops, total_fwd_flops, total_train_flops};
+use tnsr::scaling::report::scale_report;
 use tnsr::scaling::roofline::{a100_bf16, roofline, Bottleneck};
 use tnsr::scaling::sharding::{shard_matmul, ShardingCase};
-use tnsr::scaling::inference::kv_cache_bytes;
 use tnsr::transformer::TransformerConfig;
 
 fn tiny() -> TransformerConfig {
@@ -132,11 +133,33 @@ fn test_shard_matmul_rowwise_no_allreduce() {
 }
 
 // ---------------------------------------------------------------------------
-// KV cache
+// KV cache and inference
 // ---------------------------------------------------------------------------
 
 #[test]
 fn test_kv_cache_bytes_f32() {
     // 2 * 4 bytes * 1 layer * B=1 * T=8 * D=16 = 1024
     assert_eq!(kv_cache_bytes(1, 1, 8, 16, 4), 1024);
+}
+
+#[test]
+fn test_peak_activation_bytes() {
+    // 1 layer, B=4, T=7, D=29, F=116, f32 (4 bytes)
+    // attn = 2*B*T*D = 2*4*7*29 = 1624 elements
+    // mlp  = 2*B*T*F = 2*4*7*116 = 6496 elements
+    // total = (1624 + 6496) * 4 bytes * 1 layer = 32480
+    assert_eq!(peak_activation_bytes(1, 4, 7, 29, 116, 4), 32_480);
+}
+
+// ---------------------------------------------------------------------------
+// total_train_flops consistency
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_total_train_flops_matches_report() {
+    // total_train_flops must equal report.total_fwd + report.total_bwd
+    let cfg = tiny();
+    let train = total_train_flops(&cfg);
+    let r = scale_report(&cfg);
+    assert_eq!(train, r.total_fwd_flops + r.total_bwd_flops);
 }

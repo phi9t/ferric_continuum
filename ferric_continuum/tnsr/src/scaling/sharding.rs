@@ -60,7 +60,7 @@ pub fn shard_matmul(
     case: ShardingCase,
 ) -> ShardingCost {
     let d = num_devices as u64;
-    let f32_bytes = 4u64;
+    let f32_bytes = super::F32_BYTES;
     let full_fwd: u64 = 2 * m as u64 * k as u64 * n as u64;
 
     let (local_fwd_flops, allreduce_bytes) = match case {
