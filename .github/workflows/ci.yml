@@ -31,11 +31,13 @@ jobs:
           libstdc++-12-dev \
           libncurses6 \
           libtinfo6
-        # libtinfo5 was dropped in Ubuntu 24.04; symlink libtinfo.so.6 → libtinfo.so.5
-        # so pre-built LLVM binaries that depend on the old soname continue to work.
-        sudo ln -sf /usr/lib/x86_64-linux-gnu/libtinfo.so.6 \
-                    /usr/lib/x86_64-linux-gnu/libtinfo.so.5
-        sudo ldconfig
+        # libtinfo5 was dropped in Ubuntu 24.04; create a .so.5 compat symlink so
+        # pre-built LLVM toolchain binaries that reference the old soname still work.
+        TINFO6=$(ldconfig -p | awk '/\blibtinfo\.so\.6\b/{print $NF; exit}')
+        if [ -n "$TINFO6" ]; then
+          sudo ln -sf "$TINFO6" /usr/lib/x86_64-linux-gnu/libtinfo.so.5
+          sudo ldconfig
+        fi
 
     - name: Setup Bazel
       uses: bazel-contrib/setup-bazel@0.8.1
@@ -132,11 +134,13 @@ jobs:
           libstdc++-12-dev \
           libncurses6 \
           libtinfo6
-        # libtinfo5 was dropped in Ubuntu 24.04; symlink libtinfo.so.6 → libtinfo.so.5
-        # so pre-built LLVM binaries that depend on the old soname continue to work.
-        sudo ln -sf /usr/lib/x86_64-linux-gnu/libtinfo.so.6 \
-                    /usr/lib/x86_64-linux-gnu/libtinfo.so.5
-        sudo ldconfig
+        # libtinfo5 was dropped in Ubuntu 24.04; create a .so.5 compat symlink so
+        # pre-built LLVM toolchain binaries that reference the old soname still work.
+        TINFO6=$(ldconfig -p | awk '/\blibtinfo\.so\.6\b/{print $NF; exit}')
+        if [ -n "$TINFO6" ]; then
+          sudo ln -sf "$TINFO6" /usr/lib/x86_64-linux-gnu/libtinfo.so.5
+          sudo ldconfig
+        fi
 
     - name: Setup Bazel
       uses: bazel-contrib/setup-bazel@0.8.1
