@@ -185,7 +185,7 @@ pub fn silu(x: &Tensor, name: &str) -> Tensor {
 fn raw_swiglu_forward(x: &TensorValue) -> TensorValue {
     let shape = &x.shape.0;
     assert!(
-        (*shape.last().unwrap()).is_multiple_of(2),
+        (*shape.last().unwrap()) % 2 == 0,
         "swiglu: last dim must be even"
     );
     let d = shape.last().unwrap() / 2;
