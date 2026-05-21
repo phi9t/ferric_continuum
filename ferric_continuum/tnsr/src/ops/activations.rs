@@ -1,3 +1,17 @@
+//! Activation functions: GELU, SiLU, SwiGLU.
+//!
+//! Book reference: Ch.4 "MLP FLOPs",
+//! <https://jax-ml.github.io/scaling-book/transformers/>
+//!
+//! **`TransformerBlock` uses `gelu`** — the classic 2-matrix GELU MLP
+//! (`w1→gelu→w2`).  GELU's FLOP cost is O(B·T·F) via the erf approximation,
+//! negligible compared to the surrounding matmuls for large F.
+//!
+//! **`swiglu`** implements the gated 3-matrix variant the book uses as its
+//! reference FFN: `gate = silu(x[..,:F]) * x[...,F:]`, with input shape
+//! `[..., 2F]` and output `[..., F]`.  It is NOT wired into `TransformerBlock`
+//! but is available for custom blocks using the gated architecture.
+
 use crate::autograd::{BackwardCtx, BackwardRecipe, GradEdge, GradTarget, OpKind};
 use crate::saved::{SaveRole, SaveSite, SavedTensor};
 use crate::tensor::{Tensor, TensorValue};
@@ -171,7 +185,7 @@ pub fn silu(x: &Tensor, name: &str) -> Tensor {
 fn raw_swiglu_forward(x: &TensorValue) -> TensorValue {
     let shape = &x.shape.0;
     assert!(
-        (*shape.last().unwrap()).is_multiple_of(2),
+        (*shape.last().unwrap()) % 2 == 0,
         "swiglu: last dim must be even"
     );
     let d = shape.last().unwrap() / 2;

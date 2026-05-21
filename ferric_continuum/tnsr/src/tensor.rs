@@ -1,3 +1,13 @@
+//! Tensor data structures and storage.
+//!
+//! Book reference: Ch.4 — activations have shape `[B,T,D]` (batch × seq × d_model),
+//! weight matrices have shape `[D_in, D_out]`.
+//! <https://jax-ml.github.io/scaling-book/transformers/>
+//!
+//! `Tensor` is an `Rc<RefCell<TensorInner>>` — single-threaded, interior-mutable.
+//! `TensorValue` stores f32 data behind an `Rc<Vec<f32>>` for cheap shallow clones.
+//! `Shape` is a newtype over `Vec<usize>` with `numel()` and `bytes_f32()` helpers.
+
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};

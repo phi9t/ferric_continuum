@@ -1,3 +1,17 @@
+//! Saved-tensor storage: materialized copy, borrowed weak-ref, or deferred recompute.
+//!
+//! Book reference: Ch.4/5 rematerialization memory trade-offs,
+//! <https://jax-ml.github.io/scaling-book/training/>
+//!
+//! `SavedTensor` has three variants:
+//! - `Materialized` — full f32 copy kept in memory (default for activations).
+//! - `Borrowed` — weak reference to a still-live parameter tensor (no copy).
+//! - `Recompute` — only a `RecomputeHandle` is stored; the value is recomputed
+//!   on demand by replaying the checkpoint's forward function.
+//!
+//! The choice between variants is made by the active `CheckpointPolicy`
+//! (`checkpoint.rs`) at save time, implementing the book's remat strategies.
+
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 

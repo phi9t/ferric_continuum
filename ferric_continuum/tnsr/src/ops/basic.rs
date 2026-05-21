@@ -1,3 +1,12 @@
+//! Elementwise operations: add, mul, scale, sum.
+//!
+//! Book reference: Ch.4 residual connections — negligible FLOPs,
+//! <https://jax-ml.github.io/scaling-book/transformers/>
+//!
+//! `add` implements residual connections (`x + sublayer(x)`): O(B·T·D).
+//! `scale` and `sum` are used for attention scaling and loss reduction.
+//! All ops are O(numel) — dominated by memory bandwidth, not arithmetic.
+
 use crate::autograd::{BackwardCtx, BackwardRecipe, GradEdge, GradTarget, OpKind};
 use crate::saved::SavedTensor;
 use crate::tensor::{Tensor, TensorValue};

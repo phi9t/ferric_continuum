@@ -1,3 +1,19 @@
+//! Embedding lookup: token IDs → dense vectors.
+//!
+//! Book reference: Ch.4 "Embedding and Unembedding",
+//! <https://jax-ml.github.io/scaling-book/transformers/>
+//!
+//! **This is a lookup, NOT a matrix multiplication.**
+//! `embedding(ids, weight)`: ids `[B,T]` (usize) + weight `[V,D]` → out `[B,T,D]`
+//! by row-gathering — O(B·T·D) memory reads, zero multiply-accumulate FLOPs.
+//!
+//! The book's `6·B·T·D·V` dense-matmul formula applies to the **unembedding**
+//! direction (projecting hidden states to logits), implemented in
+//! `ops/loss.rs::cross_entropy`.  The forward embedding lookup has no
+//! equivalent matmul cost.
+//!
+//! Backward: scatter-add into `dweight[V,D]` — O(B·T·D) scalar adds.
+
 use crate::autograd::{BackwardCtx, BackwardRecipe, GradEdge, GradTarget, OpKind};
 use crate::tensor::{Shape, Tensor, TensorValue};
 

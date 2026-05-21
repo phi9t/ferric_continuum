@@ -1,11 +1,10 @@
-#include <Eigen/Dense>
+#include "pybind11/numpy.h"
+#include "pybind11/pybind11.h"
 
+#include <Eigen/Dense>
 #include <cmath>
 #include <cstddef>
 #include <string>
-
-#include "pybind11/numpy.h"
-#include "pybind11/pybind11.h"
 
 namespace {
 
@@ -44,18 +43,15 @@ void EnsureArrayCompat(const py::array& array, const std::string& name) {
   }
 }
 
-void EnsureSameShape(const py::buffer_info& lhs,
-                     const py::buffer_info& rhs,
-                     const std::string& lhs_name,
-                     const std::string& rhs_name) {
+void EnsureSameShape(const py::buffer_info& lhs, const py::buffer_info& rhs,
+                     const std::string& lhs_name, const std::string& rhs_name) {
   if (lhs.ndim != rhs.ndim) {
     throw py::value_error(lhs_name + " and " + rhs_name +
                           " must have the same number of dimensions");
   }
   for (ssize_t dim = 0; dim < lhs.ndim; ++dim) {
     if (lhs.shape[dim] != rhs.shape[dim]) {
-      throw py::value_error(lhs_name + " and " + rhs_name +
-                            " must have identical shapes");
+      throw py::value_error(lhs_name + " and " + rhs_name + " must have identical shapes");
     }
   }
 }
@@ -66,11 +62,8 @@ void EnsureTwoDim(const py::buffer_info& info, const std::string& name) {
   }
 }
 
-Eigen::MatrixXd OrthogonalizeNewtonSchulz(const Eigen::MatrixXd& update,
-                                          int ns_steps,
-                                          double coeff_a,
-                                          double coeff_b,
-                                          double coeff_c) {
+Eigen::MatrixXd OrthogonalizeNewtonSchulz(const Eigen::MatrixXd& update, int ns_steps,
+                                          double coeff_a, double coeff_b, double coeff_c) {
   Eigen::MatrixXd x = update;
   const double frob_norm = x.norm();
   if (frob_norm > 0.0) {
@@ -85,17 +78,10 @@ Eigen::MatrixXd OrthogonalizeNewtonSchulz(const Eigen::MatrixXd& update,
   return x;
 }
 
-py::array_t<double> MuonUpdate(py::array_t<double> params,
-                               py::array_t<double> grads,
-                               py::array_t<double> momentum,
-                               double learning_rate,
-                               double beta,
-                               bool nesterov,
-                               int ns_steps,
-                               double ns_coeff_a,
-                               double ns_coeff_b,
-                               double ns_coeff_c,
-                               double weight_decay) {
+py::array_t<double> MuonUpdate(py::array_t<double> params, py::array_t<double> grads,
+                               py::array_t<double> momentum, double learning_rate, double beta,
+                               bool nesterov, int ns_steps, double ns_coeff_a, double ns_coeff_b,
+                               double ns_coeff_c, double weight_decay) {
   EnsureArrayCompat(params, "params");
   EnsureArrayCompat(grads, "grads");
   EnsureArrayCompat(momentum, "momentum");
@@ -122,8 +108,7 @@ py::array_t<double> MuonUpdate(py::array_t<double> params,
   auto* grads_ptr = static_cast<double*>(grads_info.ptr);
   auto* momentum_ptr = static_cast<double*>(momentum_info.ptr);
 
-  using MatrixRM = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic,
-                                 Eigen::RowMajor>;
+  using MatrixRM = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
   const auto rows = static_cast<Eigen::Index>(params_info.shape[0]);
   const auto cols = static_cast<Eigen::Index>(params_info.shape[1]);
   Eigen::Map<MatrixRM> params_map(params_ptr, rows, cols);
@@ -133,15 +118,12 @@ py::array_t<double> MuonUpdate(py::array_t<double> params,
   const double one_minus_beta = 1.0 - beta;
   momentum_map = beta * momentum_map + one_minus_beta * grads_map;
   Eigen::MatrixXd update =
-      nesterov ? (beta * momentum_map + one_minus_beta * grads_map)
-               : momentum_map;
+      nesterov ? (beta * momentum_map + one_minus_beta * grads_map) : momentum_map;
 
   const Eigen::MatrixXd ortho_update =
-      OrthogonalizeNewtonSchulz(update, ns_steps, ns_coeff_a, ns_coeff_b,
-                                ns_coeff_c);
+      OrthogonalizeNewtonSchulz(update, ns_steps, ns_coeff_a, ns_coeff_b, ns_coeff_c);
 
-  params_map -=
-      learning_rate * (ortho_update + weight_decay * params_map);
+  params_map -= learning_rate * (ortho_update + weight_decay * params_map);
 
   return params;
 }
@@ -150,12 +132,9 @@ py::array_t<double> MuonUpdate(py::array_t<double> params,
 
 PYBIND11_MODULE(_muon_cc, m) {
   m.doc() = "Muon optimizer (momentum + Newton-Schulz orthogonalization).";
-  m.def("muon_update", &MuonUpdate, py::arg("params"), py::arg("grads"),
-        py::arg("momentum"), py::arg("learning_rate"),
-        py::arg("beta") = 0.9, py::arg("nesterov") = true,
-        py::arg("ns_steps") = 5, py::arg("ns_coeff_a") = 3.4445,
-        py::arg("ns_coeff_b") = -4.775, py::arg("ns_coeff_c") = 2.0315,
-        py::arg("weight_decay") = 0.0,
+  m.def("muon_update", &MuonUpdate, py::arg("params"), py::arg("grads"), py::arg("momentum"),
+        py::arg("learning_rate"), py::arg("beta") = 0.9, py::arg("nesterov") = true,
+        py::arg("ns_steps") = 5, py::arg("ns_coeff_a") = 3.4445, py::arg("ns_coeff_b") = -4.775,
+        py::arg("ns_coeff_c") = 2.0315, py::arg("weight_decay") = 0.0,
         "Applies an in-place Muon update to 2D parameters.");
 }
-

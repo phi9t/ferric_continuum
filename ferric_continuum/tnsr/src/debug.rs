@@ -1,3 +1,17 @@
+//! Debug recorder: op table, saved-tensor table, DOT graph.
+//!
+//! Book reference: Ch.9 "Profile TPU Code" (conceptual analog),
+//! <https://jax-ml.github.io/scaling-book/profiling/>
+//!
+//! `DebugRecorder` intercepts every op call, save event, and grad accumulation
+//! during a forward+backward pass and renders three reports:
+//! - `print_op_table` — ordered list of ops with input/output shapes
+//! - `print_saved_tensor_table` — bytes saved per tensor (materialized / borrowed / recompute)
+//! - `write_dot` — Graphviz DOT graph of the op DAG
+//!
+//! These serve the same purpose as a TPU profiler at a conceptual level, though
+//! tnsr is CPU-only and produces no timing or hardware-counter data.
+
 use std::cell::RefCell;
 use std::rc::Rc;
 

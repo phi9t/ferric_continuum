@@ -31,10 +31,13 @@ jobs:
           libstdc++-12-dev \
           libncurses6 \
           libtinfo6
-        # Install libtinfo5 compatibility library for LLVM toolchain
-        wget http://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
-        sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb
-        rm libtinfo5_6.3-2ubuntu0.1_amd64.deb
+        # libtinfo5 was dropped in Ubuntu 24.04; create a .so.5 compat symlink so
+        # pre-built LLVM toolchain binaries that reference the old soname still work.
+        TINFO6=$(ldconfig -p | awk '/\blibtinfo\.so\.6\b/{print $NF; exit}')
+        if [ -n "$TINFO6" ]; then
+          sudo ln -sf "$TINFO6" /usr/lib/x86_64-linux-gnu/libtinfo.so.5
+          sudo ldconfig
+        fi
 
     - name: Setup Bazel
       uses: bazel-contrib/setup-bazel@0.8.1
@@ -131,10 +134,13 @@ jobs:
           libstdc++-12-dev \
           libncurses6 \
           libtinfo6
-        # Install libtinfo5 compatibility library for LLVM toolchain
-        wget http://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
-        sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb
-        rm libtinfo5_6.3-2ubuntu0.1_amd64.deb
+        # libtinfo5 was dropped in Ubuntu 24.04; create a .so.5 compat symlink so
+        # pre-built LLVM toolchain binaries that reference the old soname still work.
+        TINFO6=$(ldconfig -p | awk '/\blibtinfo\.so\.6\b/{print $NF; exit}')
+        if [ -n "$TINFO6" ]; then
+          sudo ln -sf "$TINFO6" /usr/lib/x86_64-linux-gnu/libtinfo.so.5
+          sudo ldconfig
+        fi
 
     - name: Setup Bazel
       uses: bazel-contrib/setup-bazel@0.8.1
