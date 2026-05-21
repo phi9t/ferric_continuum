@@ -31,10 +31,11 @@ jobs:
           libstdc++-12-dev \
           libncurses6 \
           libtinfo6
-        # Install libtinfo5 compatibility library for LLVM toolchain
-        wget http://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
-        sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb
-        rm libtinfo5_6.3-2ubuntu0.1_amd64.deb
+        # libtinfo5 was dropped in Ubuntu 24.04; symlink libtinfo.so.6 → libtinfo.so.5
+        # so pre-built LLVM binaries that depend on the old soname continue to work.
+        sudo ln -sf /usr/lib/x86_64-linux-gnu/libtinfo.so.6 \
+                    /usr/lib/x86_64-linux-gnu/libtinfo.so.5
+        sudo ldconfig
 
     - name: Setup Bazel
       uses: bazel-contrib/setup-bazel@0.8.1
@@ -131,10 +132,11 @@ jobs:
           libstdc++-12-dev \
           libncurses6 \
           libtinfo6
-        # Install libtinfo5 compatibility library for LLVM toolchain
-        wget http://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb
-        sudo dpkg -i libtinfo5_6.3-2ubuntu0.1_amd64.deb
-        rm libtinfo5_6.3-2ubuntu0.1_amd64.deb
+        # libtinfo5 was dropped in Ubuntu 24.04; symlink libtinfo.so.6 → libtinfo.so.5
+        # so pre-built LLVM binaries that depend on the old soname continue to work.
+        sudo ln -sf /usr/lib/x86_64-linux-gnu/libtinfo.so.6 \
+                    /usr/lib/x86_64-linux-gnu/libtinfo.so.5
+        sudo ldconfig
 
     - name: Setup Bazel
       uses: bazel-contrib/setup-bazel@0.8.1
