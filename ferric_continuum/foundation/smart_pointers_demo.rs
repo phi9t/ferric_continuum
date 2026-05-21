@@ -1,6 +1,4 @@
-use smart_pointers::{
-    count_nodes, create_list, share_resource, Counter, FileGuard, Resource,
-};
+use smart_pointers::{count_nodes, create_list, share_resource, Counter, FileGuard, Resource};
 use std::rc::Rc;
 use tracing::{info, Level};
 use tracing_subscriber;
