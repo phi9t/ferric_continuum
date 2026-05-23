@@ -463,6 +463,37 @@ fn test_validate_rejects_bad_configs() {
     }
     .validate(&cfg, PL)
     .is_err());
+    // dp does not evenly divide the model-parallel param count (mp=12544, dp=3)
+    assert!(ParallelConfig { dp: 3, ..base_pc() }
+        .validate(&cfg, PL)
+        .is_err());
     // a valid config passes
     assert!(base_pc().validate(&cfg, PL).is_ok());
+}
+
+#[test]
+fn test_validate_rejects_dff_not_divisible_by_tp() {
+    // d_model divisible by tp but d_ff is not -> the MLP-sharding division
+    // would truncate, so validate must reject.
+    let cfg = TransformerConfig {
+        batch: 8,
+        seq: 8,
+        d_model: 8,
+        d_ff: 20, // 20 % 8 != 0
+        n_heads: 1,
+    };
+    let pc = ParallelConfig { tp: 8, ..base_pc() }; // 8 % 8 == 0 (d_model ok)
+    assert!(pc.validate(&cfg, PL).is_err());
+}
+
+#[test]
+fn test_zero_sharding_never_floors_to_zero() {
+    // A previously-accepted oversized dp would floor param/grad/optimizer
+    // bytes to 0 under ZeRO-3.  validate must now reject it.
+    let pc = ParallelConfig {
+        dp: 5000,
+        zero: ZeroStage::Full,
+        ..base_pc()
+    };
+    assert!(pc.validate(&par_cfg(), 1).is_err());
 }

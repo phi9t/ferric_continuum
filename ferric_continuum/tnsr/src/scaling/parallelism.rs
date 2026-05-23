@@ -23,6 +23,11 @@
 //! - MoE routing is assumed balanced (no capacity-factor / drop modeling).
 //! - Per-device FLOPs are the **max-stage** estimate (the slowest pipeline
 //!   stage bottlenecks throughput), using `S = ceil(num_layers / pp)` layers.
+//! - Sharding degrees must evenly divide what they shard (`tp | d_model`,
+//!   `tp | d_ff`, `cp | seq`, `ep | num_experts`, `dp | model-parallel param
+//!   count`); `validate` rejects configs that would otherwise truncate or
+//!   floor a reported figure to zero.  MoE per-token routing is the one
+//!   exception — it is assumed balanced and may round.
 //!
 //! # Notation
 //! `B`=local step batch, `T`=seq, `D`=d_model, `F`=d_ff, `L`=num_layers,
@@ -128,6 +133,27 @@ impl ParallelConfig {
         self.dp * self.tp * self.pp * self.cp * self.ep
     }
 
+    /// Model-parallel parameter count held on one device (one pipeline stage,
+    /// sharded by `tp` and — for MoE — by `ep`), before any ZeRO/dp sharding.
+    ///
+    /// Shared by [`Self::validate`] and [`parallel_cost`] so the divisibility
+    /// guard and the reported memory can never diverge.  Assumes `tp`/`ep`
+    /// already divide their dimensions (enforced by `validate`).
+    fn model_parallel_params(&self, cfg: &TransformerConfig, num_layers: usize) -> u128 {
+        let d = cfg.d_model as u128;
+        let f = cfg.d_ff as u128;
+        let tp = self.tp as u128;
+        let s = num_layers.div_ceil(self.pp) as u128;
+        let p_attn = 4 * d * d;
+        let p_mlp = 2 * d * f;
+        let p_norm = 4 * d;
+        let mlp_local = match self.moe {
+            Some(m) => (m.num_experts / self.ep) as u128 * p_mlp / tp,
+            None => p_mlp / tp,
+        };
+        s * (p_attn / tp + mlp_local + p_norm)
+    }
+
     /// Validate the configuration against a model.  Returns `Err` with a
     /// human-readable message for any inconsistency.
     pub fn validate(&self, cfg: &TransformerConfig, num_layers: usize) -> Result<(), String> {
@@ -166,6 +192,12 @@ impl ParallelConfig {
                 cfg.d_model, self.tp
             ));
         }
+        if cfg.d_ff % self.tp != 0 {
+            return Err(format!(
+                "d_ff ({}) must be divisible by tp ({})",
+                cfg.d_ff, self.tp
+            ));
+        }
         if cfg.seq % self.cp != 0 {
             return Err(format!(
                 "seq ({}) must be divisible by cp ({})",
@@ -191,6 +223,19 @@ impl ParallelConfig {
                         m.top_k, m.num_experts
                     ));
                 }
+            }
+        }
+        // ZeRO sharding and the dp gradient all-reduce divide the model-parallel
+        // parameter count by `dp`; require an even split so reported bytes are
+        // exact and never floor to zero for an oversized `dp`.
+        if self.dp > 1 {
+            let mp = self.model_parallel_params(cfg, num_layers);
+            if mp % self.dp as u128 != 0 {
+                return Err(format!(
+                    "model-parallel param count ({mp}) must be divisible by dp ({}) \
+                     for exact ZeRO / all-reduce sharding",
+                    self.dp
+                ));
             }
         }
         Ok(())
@@ -290,19 +335,14 @@ pub fn parallel_cost(
 
     let p_attn = 4 * d * d;
     let p_mlp = 2 * d * f;
-    let p_norm = 4 * d;
 
-    let (top_k, experts_per_rank) = match pc.moe {
-        Some(moe) => (moe.top_k as u128, (moe.num_experts / pc.ep) as u128),
-        None => (1, 1),
+    let top_k = match pc.moe {
+        Some(moe) => moe.top_k as u128,
+        None => 1,
     };
 
     // ---- parameters (model-parallel local count) ----
-    let mlp_params_local = match pc.moe {
-        Some(_) => experts_per_rank * p_mlp / tp,
-        None => p_mlp / tp,
-    };
-    let mp_params = s * (p_attn / tp + mlp_params_local + p_norm);
+    let mp_params = pc.model_parallel_params(cfg, num_layers);
 
     let param_shard = if pc.zero.shards_parameters() {
         pc.dp as u128
