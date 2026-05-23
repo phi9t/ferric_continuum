@@ -16,6 +16,7 @@
 //! | `roofline` | Ch.1 Roofline Analysis | compute-vs-memory bottleneck |
 //! | `sharding` | Ch.3 Sharded Matrices | 4 sharding cases (symbolic) |
 //! | `inference` | Ch.7 Inference | KV cache + peak activation bytes |
+//! | `parallelism` | Ultra-Scale Playbook | 5D (dp/tp/pp/cp/ep) per-device mem/FLOPs/comm + pipeline bubble |
 //!
 //! # Quick start
 //!
@@ -34,6 +35,7 @@ pub(super) const F32_BYTES: u64 = 4;
 pub mod inference;
 pub mod model_stats;
 pub mod op_cost;
+pub mod parallelism;
 pub mod report;
 pub mod roofline;
 pub mod sharding;

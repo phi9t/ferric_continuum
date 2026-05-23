@@ -40,7 +40,7 @@ In all tnsr formulas below, N = 1 and H = D, so "N·H" collapses to "D".
 | 2  | How to Think About TPUs (`tpus`) | — (CPU-only, single-threaded) | Absent |
 | 3  | Sharded Matrices (`sharding`) | `src/scaling/sharding.rs` — 4 sharding cases as local algebra | Executable-estimable |
 | 4  | All the Transformer Math (`transformers`) | `src/transformer.rs`, all of `src/ops/`, `src/autograd.rs`, `src/scaling/` | **Implemented** |
-| 5  | Parallelize a Transformer for Training (`training`) | remat → `src/checkpoint.rs`; DP/FSDP/TP/PP — absent | Partial |
+| 5  | Parallelize a Transformer for Training (`training`) | remat → `src/checkpoint.rs`; DP/ZeRO/TP/PP/CP/EP cost model → `src/scaling/parallelism.rs` (symbolic) | Executable-estimable |
 | 6  | Training LLaMA 3 on TPUs (`applied-training`) | generic block only; no LLaMA-specific heads or TPU specifics | Absent |
 | 7  | Transformer Inference (`inference`) | attention math is shared; no KV cache; `src/scaling/inference.rs` — KV bytes estimate | Conceptual |
 | 8  | Serving LLaMA 3 (`applied-inference`) | — | Absent |
@@ -183,7 +183,7 @@ See the corresponding book chapters for the full treatment.
 
 | Topic | Book chapter | Why absent from tnsr |
 |-------|-------------|----------------------|
-| Tensor / pipeline / FSDP parallelism | Ch.5 | Requires multi-device communication primitives |
+| Real multi-device execution (collectives, placement, scheduling, overlap) | Ch.5 | tnsr is CPU-only/single-threaded; only the *symbolic* cost model exists (`src/scaling/parallelism.rs`) |
 | Roofline hardware measurements | Ch.1 | tnsr provides symbolic estimates only |
 | TPU / GPU programming model | Ch.2, 12 | Hardware-specific |
 | LLaMA-3 specifics (GQA, RoPE, etc.) | Ch.6, 8 | Only a generic single-head block is implemented |
@@ -214,5 +214,51 @@ println!("{}", format_report(&scale_report(&cfg)));
 | `roofline` | Compute-vs-memory bottleneck for given FLOPs + bytes + `HardwareSpec` |
 | `sharding` | 4 sharding cases as local algebra: per-device FLOPs + all-reduce bytes |
 | `inference` | KV cache bytes; peak activation memory estimate |
+| `parallelism` | 5D parallelism (dp/tp/pp/cp/ep) per-device memory, FLOPs, comm volume, pipeline bubble |
 
 Golden values for `tiny_4_7_29` are verified in `tests/scaling_test.rs`.
+
+---
+
+## Ultra-Scale Playbook Deep-Dive: 5D Parallelism (`src/scaling/parallelism.rs`)
+
+Reference: HuggingFace/nanotron "The Ultra-Scale Playbook"
+(<https://huggingface.co/spaces/nanotron/ultrascale-playbook>). tnsr is
+CPU-only and single-threaded, so `parallelism.rs` is a **local algebra**:
+no collectives run — it computes per-device memory, per-device FLOPs, the
+communication *volume* a real cluster would move, and the pipeline bubble.
+
+### The five axes
+
+| Axis | Splits | tnsr effect |
+|------|--------|-------------|
+| `dp` data | the batch (replicas) | grad all-reduce; ZeRO/FSDP shards optimizer/grad/param state by `dp` |
+| `tp` tensor | hidden dim within a layer | params/FLOPs ÷ `tp`; 2 all-reduces/layer |
+| `pp` pipeline | the layer dim (`S = ⌈L/pp⌉`) | params/FLOPs ÷ `pp`; point-to-point boundary comm; bubble `(pp-1)/m` |
+| `cp` context | the sequence dim | activations/FLOPs ÷ `cp`; ring all-gather of K,V |
+| `ep` expert | MoE experts | each rank holds `experts/ep`; dispatch+combine all-to-all |
+
+### ZeRO / FSDP memory staging
+
+| Stage | optimizer | gradients | parameters |
+|-------|-----------|-----------|------------|
+| 0 (`None`) | replicated | replicated | replicated |
+| 1 (`OptimizerState`) | ÷ `dp` | replicated | replicated |
+| 2 (`OptimizerGradients`) | ÷ `dp` | ÷ `dp` | replicated |
+| 3 (`Full` / FSDP) | ÷ `dp` | ÷ `dp` | ÷ `dp` |
+
+### Pipeline bubble
+
+`bubble_over_ideal = (pp-1)/m`, `pipeline_efficiency = m/(m+pp-1)`. AFAB and
+1F1B share the **same bubble**; 1F1B is a *memory* win — it bounds in-flight
+activations to `min(pp, m)` microbatches vs AFAB's `m`.
+
+### Golden numbers (`tests/scaling_test.rs`, D=16 F=64 B=8 T=8 L=4)
+
+`P_attn=1024, P_mlp=2048, P_norm=64, P_block=3136`. With `dp=2`:
+- ZeRO-0: param=grad=50176 B, optimizer=100352 B.
+- ZeRO-1: optimizer drops to 50176 B (params/grads unchanged).
+- ZeRO-3 (`dp=4`): param=grad=12544 B, optimizer=25088 B.
+
+These (and exact comm volumes, e.g. `dp` grad all-reduce = 50176 B) are
+verified as golden values.

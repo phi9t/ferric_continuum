@@ -141,4 +141,66 @@ fn main() {
             info!("{}", line);
         }
     }
+
+    // -----------------------------------------------------------------------
+    // 6. 5D parallelism cost model (Ultra-Scale Playbook)
+    // -----------------------------------------------------------------------
+    info!("[6] 5D parallelism cost model");
+    {
+        use tnsr::scaling::parallelism::{
+            format_parallel_cost, parallel_cost, MoeConfig, ParallelConfig, PipelineSchedule,
+            ZeroStage,
+        };
+
+        // A demo config whose dims divide the parallelism degrees below.
+        let cfg6 = TransformerConfig {
+            batch: 8,
+            seq: 8,
+            d_model: 32,
+            d_ff: 128,
+            n_heads: 1,
+        };
+        let num_layers = 8;
+
+        let configs = [
+            // Plain data parallelism across 8 replicas.
+            ParallelConfig::data_parallel(8),
+            // 3D: dp2 × tp2 × pp2 with ZeRO-3/FSDP and 1F1B scheduling.
+            ParallelConfig {
+                dp: 2,
+                tp: 2,
+                pp: 2,
+                cp: 1,
+                ep: 1,
+                zero: ZeroStage::Full,
+                num_microbatches: 4,
+                schedule: PipelineSchedule::OneF1B,
+                optimizer_bytes_per_param: 8,
+                moe: None,
+            },
+            // MoE with expert parallelism: 4 experts split over ep=2.
+            ParallelConfig {
+                dp: 1,
+                tp: 1,
+                pp: 1,
+                cp: 1,
+                ep: 2,
+                zero: ZeroStage::None,
+                num_microbatches: 1,
+                schedule: PipelineSchedule::Afab,
+                optimizer_bytes_per_param: 8,
+                moe: Some(MoeConfig {
+                    num_experts: 4,
+                    top_k: 1,
+                }),
+            },
+        ];
+
+        for pc in configs {
+            let cost = parallel_cost(&cfg6, num_layers, &pc);
+            for line in format_parallel_cost(&cfg6, num_layers, &pc, &cost).lines() {
+                info!("{}", line);
+            }
+        }
+    }
 }

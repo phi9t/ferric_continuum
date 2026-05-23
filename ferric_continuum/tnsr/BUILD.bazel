@@ -27,6 +27,7 @@ rust_library(
         "src/scaling/roofline.rs",
         "src/scaling/sharding.rs",
         "src/scaling/inference.rs",
+        "src/scaling/parallelism.rs",
     ],
     crate_name = "tnsr",
     edition = "2021",
