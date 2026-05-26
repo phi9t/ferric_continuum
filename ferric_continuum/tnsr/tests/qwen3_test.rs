@@ -162,7 +162,12 @@ fn gqa_grad_check_all_inputs() {
     let k = Tensor::randn(&[1, 3, 1, 4]).requires_grad();
     let v = Tensor::randn(&[1, 3, 1, 4]).requires_grad();
     grad_check(
-        |inp| basic::sum(&gqa::gqa_attention(&inp[0], &inp[1], &inp[2], "gqa"), "loss"),
+        |inp| {
+            basic::sum(
+                &gqa::gqa_attention(&inp[0], &inp[1], &inp[2], "gqa"),
+                "loss",
+            )
+        },
         &[q, k, v],
         1e-3,
         3e-3,

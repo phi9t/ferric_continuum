@@ -100,10 +100,7 @@ impl Qwen3Config {
 }
 
 fn ones(n: usize) -> Tensor {
-    Tensor::from_value(
-        TensorValue::from_vec(Shape(vec![n]), vec![1.0; n]),
-        true,
-    )
+    Tensor::from_value(TensorValue::from_vec(Shape(vec![n]), vec![1.0; n]), true)
 }
 
 fn param(rows: usize, cols: usize, scale: f32) -> Tensor {
@@ -273,7 +270,11 @@ impl Qwen3Block {
         let x = basic::add(x, &a, "attn_residual");
 
         // Pre-norm SwiGLU MLP.
-        let h = norm::rms_norm(&x, &self.post_attention_layernorm, "post_attention_layernorm");
+        let h = norm::rms_norm(
+            &x,
+            &self.post_attention_layernorm,
+            "post_attention_layernorm",
+        );
         let m = self.mlp.forward(&h);
         basic::add(&x, &m, "mlp_residual")
     }

@@ -124,10 +124,7 @@ fn raw_gqa_forward(
         }
     }
 
-    (
-        TensorValue::from_vec(Shape(vec![b, t, hq, dh]), out),
-        p_all,
-    )
+    (TensorValue::from_vec(Shape(vec![b, t, hq, dh]), out), p_all)
 }
 
 fn raw_gqa_backward(
@@ -222,8 +219,7 @@ struct GqaBackward {
 impl BackwardRecipe for GqaBackward {
     fn backward(&self, grad_outputs: &[TensorValue], _ctx: &mut BackwardCtx) -> Vec<GradEdge> {
         let dout = &grad_outputs[0];
-        let (dq, dk, dv) =
-            raw_gqa_backward(dout, &self.q, &self.k, &self.v, &self.p_all, self.sh);
+        let (dq, dk, dv) = raw_gqa_backward(dout, &self.q, &self.k, &self.v, &self.p_all, self.sh);
         vec![
             GradEdge {
                 target: self.q_target.clone(),
