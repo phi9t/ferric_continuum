@@ -2,9 +2,12 @@ pub mod activations;
 pub mod attention;
 pub mod basic;
 pub mod embedding;
+pub mod gqa;
 pub mod linear;
 pub mod loss;
 pub mod norm;
+pub mod rope;
+pub mod shape;
 
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};

@@ -42,6 +42,9 @@ pub enum OpKind {
     AttentionMix,
     Dropout,
     CrossEntropy,
+    Reshape,
+    Rope,
+    GqaAttention,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

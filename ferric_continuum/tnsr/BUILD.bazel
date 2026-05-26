@@ -12,14 +12,18 @@ rust_library(
         "src/saved.rs",
         "src/tensor.rs",
         "src/transformer.rs",
+        "src/qwen3.rs",
         "src/ops/mod.rs",
         "src/ops/activations.rs",
         "src/ops/attention.rs",
         "src/ops/basic.rs",
         "src/ops/embedding.rs",
+        "src/ops/gqa.rs",
         "src/ops/linear.rs",
         "src/ops/loss.rs",
         "src/ops/norm.rs",
+        "src/ops/rope.rs",
+        "src/ops/shape.rs",
         "src/scaling/mod.rs",
         "src/scaling/model_stats.rs",
         "src/scaling/op_cost.rs",
@@ -60,6 +64,15 @@ rust_test(
     name = "scaling_tests",
     srcs = ["tests/scaling_test.rs"],
     crate_name = "scaling_test",
+    edition = "2021",
+    deps = [":tnsr"],
+)
+
+# Qwen3 architecture: grad checks for reshape/rope/gqa + block smoke tests
+rust_test(
+    name = "qwen3_tests",
+    srcs = ["tests/qwen3_test.rs"],
+    crate_name = "qwen3_test",
     edition = "2021",
     deps = [":tnsr"],
 )
