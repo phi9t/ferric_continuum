@@ -18,6 +18,7 @@ pub mod checkpoint;
 pub mod debug;
 pub mod grad_mode;
 pub mod ops;
+pub mod qwen3;
 pub mod saved;
 pub mod scaling;
 pub mod tensor;
