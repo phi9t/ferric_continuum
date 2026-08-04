@@ -17,6 +17,7 @@ In that spirit, this codebase blends C++, Rust, and Python so tensor work can fl
 - **Collocated C++ and Rust examples** in `ferric_continuum/hello` and `ferric_continuum/foundation`.
 - **Foundation modules** covering value semantics, move semantics, parameter passing, smart pointers/RAII, and constructor rules.
 - **Muon optimizer prototype** in `ferric_continuum/optimizers/muon` using a C++ backend exposed to Python via pybind11.
+- **CUDA example** in `ferric_continuum/cuda` (opt-in SAXPY kernel via `rules_cuda`).
 - **Bazel-first workflows** for builds, tests, and demos.
 
 ---
@@ -70,6 +71,22 @@ bazel run //ferric_continuum/optimizers/muon:muon_demo
 bazel test //ferric_continuum/optimizers/muon:muon_py_test
 ```
 
+### CUDA (opt-in, GPU)
+
+CUDA is disabled by default so CPU-only builds and CI stay hermetic. Enable it
+with `--config=cuda` on a machine with a CUDA toolkit:
+
+```bash
+# Build the SAXPY kernel (no GPU needed to compile).
+bazel build --config=cuda //ferric_continuum/cuda:saxpy
+
+# Run the test (requires a GPU).
+bazel test --config=cuda //ferric_continuum/cuda:saxpy_test
+```
+
+See `ferric_continuum/cuda/README.md` for architecture selection and compiler
+options.
+
 ---
 
 ## Repository Layout
@@ -78,6 +95,7 @@ bazel test //ferric_continuum/optimizers/muon:muon_py_test
 ferric_continuum/
 ├── hello/                 # C++/Rust hello world example
 ├── foundation/            # Core C++/Rust concepts with demos and tests
+├── cuda/                  # Opt-in CUDA example (SAXPY via rules_cuda)
 └── optimizers/muon/        # Muon optimizer (pybind11 + numpy)
 ```
 

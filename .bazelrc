@@ -13,9 +13,16 @@ build --enable_platform_specific_config
 # Use a static value for PATH and LD_LIBRARY_PATH
 build --incompatible_strict_action_env
 
+# Do not leak the host environment into actions; keep builds hermetic.
+build --experimental_reuse_sandbox_directories
+build --sandbox_default_allow_network=false
+
 # Output details
 build --verbose_failures
 build --show_timestamps
+
+# Surface the reason a target failed to build without re-running.
+build --announce_rc
 
 # Performance optimizations
 build --jobs=auto
@@ -34,6 +41,22 @@ build --copt=-Wall
 build --copt=-Wextra
 build --host_copt=-Wall
 build --host_copt=-Wextra
+
+# Security hardening (applied to optimized/CI builds where NDEBUG-style codegen
+# is expected). These make miscompiles and memory bugs fail loudly and shrink
+# the exploitable surface of release artifacts.
+build:hardened --copt=-fstack-protector-strong
+build:hardened --copt=-fstack-clash-protection
+build:hardened --copt=-U_FORTIFY_SOURCE
+build:hardened --copt=-D_FORTIFY_SOURCE=2
+build:hardened --copt=-fPIE
+build:hardened --copt=-Wformat
+build:hardened --copt=-Wformat-security
+build:hardened --copt=-Werror=format-security
+build:hardened --linkopt=-pie
+build:hardened --linkopt=-Wl,-z,relro
+build:hardened --linkopt=-Wl,-z,now
+build:hardened --linkopt=-Wl,-z,noexecstack
 
 # Color diagnostics
 build --copt=-fdiagnostics-color=always
@@ -69,6 +92,17 @@ build:tsan --copt=-O1
 build:tsan --copt=-g
 build:tsan --copt=-fno-omit-frame-pointer
 build:tsan --linkopt=-fsanitize=thread
+
+# Undefined behavior sanitizer
+build:ubsan --strip=never
+build:ubsan --copt=-fsanitize=undefined
+build:ubsan --copt=-fno-sanitize-recover=all
+build:ubsan --copt=-DUNDEFINED_BEHAVIOR_SANITIZER
+build:ubsan --copt=-O1
+build:ubsan --copt=-g
+build:ubsan --copt=-fno-omit-frame-pointer
+build:ubsan --linkopt=-fsanitize=undefined
+build:ubsan --test_env=UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
 
 ###############################################################################
 # Rust Configuration
@@ -106,6 +140,11 @@ build:rustfmt --output_groups=+rustfmt_checks
 build:ci --copt=-Werror
 build:ci --host_copt=-Werror
 build:ci --compilation_mode=opt
+build:ci --config=hardened
+# Report every failure in a CI run rather than stopping at the first.
+build:ci --keep_going
+# Fail the build if any sanitizer reports leak at exit in CI.
+test:ci --test_env=ASAN_OPTIONS=detect_leaks=1:halt_on_error=1
 
 ###############################################################################
 # Python Configuration
@@ -113,6 +152,34 @@ build:ci --compilation_mode=opt
 
 # Use Python 3.12 by default
 build --@rules_python//python/config_settings:python_version=3.12
+
+###############################################################################
+# CUDA Configuration
+###############################################################################
+
+# Convenient flag aliases for rules_cuda knobs.
+build --flag_alias=cuda_archs=@rules_cuda//cuda:archs
+build --flag_alias=cuda_compiler=@rules_cuda//cuda:compiler
+build --flag_alias=cuda_enable=@rules_cuda//cuda:enable
+
+# CUDA is OFF by default so CPU-only builds and CI stay hermetic and require no
+# toolkit. This also disables the auto-detected CUDA toolchains, preventing
+# accidental use of a host toolkit.
+build --@rules_cuda//cuda:enable=False
+
+# Opt in with `--config=cuda`. Override the target arch list on the command
+# line, e.g. `--config=cuda --cuda_archs=compute_80:compute_80,sm_80`.
+build:cuda --@rules_cuda//cuda:enable=True
+# Default to nvcc; switch to clang with `--cuda_compiler=clang`.
+build:cuda --@rules_cuda//cuda:compiler=nvcc
+# Reasonable multi-arch default covering Volta..Hopper plus PTX for forward
+# compatibility. Trim this for faster builds targeting a single GPU.
+build:cuda --@rules_cuda//cuda:archs=compute_70:compute_70,sm_70;compute_80:compute_80,sm_80;compute_86:sm_86;compute_90:compute_90,sm_90
+
+# nvcc uses PIDs for temp-file names; under the Linux sandbox those collide at
+# high parallelism ("No such file or directory" from cc1plus). A hermetic /tmp
+# per sandbox avoids it (default on Bazel 7+, set explicitly for safety).
+build:cuda --incompatible_sandbox_hermetic_tmp
 
 ###############################################################################
 # Testing Configuration

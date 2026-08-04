@@ -57,6 +57,10 @@ jobs:
     - name: Build all targets
       run: bazel build //...
 
+    - name: Build C++ targets with hardening (Linux)
+      if: runner.os == 'Linux'
+      run: bazel build --config=hardened //ferric_continuum/hello/... //ferric_continuum/foundation/...
+
     - name: Run all tests
       run: bazel test //... --test_output=errors
 

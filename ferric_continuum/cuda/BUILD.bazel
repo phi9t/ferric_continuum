@@ -1,0 +1,35 @@
+# CUDA example: SAXPY kernel exercising the rules_cuda toolchain.
+#
+# CUDA is disabled by default (see `--@rules_cuda//cuda:enable=False` in
+# .bazelrc), so these targets are tagged `manual` to keep them out of the
+# `//...` wildcard used by CPU-only CI. Build/run them explicitly with the
+# `cuda` config on a machine with a CUDA toolkit installed:
+#
+#     bazel build --config=cuda //ferric_continuum/cuda:saxpy
+#     bazel test  --config=cuda //ferric_continuum/cuda:saxpy_test   # needs a GPU
+#
+# `requires-gpu` marks the test as needing GPU hardware at runtime.
+
+load("@rules_cuda//cuda:defs.bzl", "cuda_library", "cuda_test")
+
+package(default_visibility = ["//visibility:public"])
+
+cuda_library(
+    name = "saxpy",
+    srcs = ["saxpy.cu"],
+    hdrs = ["saxpy.hh"],
+    tags = ["manual"],
+)
+
+cuda_test(
+    name = "saxpy_test",
+    srcs = ["saxpy_test.cu"],
+    tags = [
+        "manual",
+        "requires-gpu",
+    ],
+    deps = [
+        ":saxpy",
+        "@googletest//:gtest_main",
+    ],
+)

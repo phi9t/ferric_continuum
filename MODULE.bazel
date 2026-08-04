@@ -40,6 +40,10 @@ bazel_dep(name = "abseil-cpp", version = "20240722.0")
 # Hermetic C++ toolchain (optional, for reproducible builds)
 bazel_dep(name = "toolchains_llvm", version = "1.2.0")
 
+# CUDA support (opt-in via --config=cuda). rules_cuda provides cuda_library,
+# cuda_binary, and cuda_test rules plus hermetic and local toolchain detection.
+bazel_dep(name = "rules_cuda", version = "0.3.0")
+
 ###############################################################################
 # Rust Configuration
 ###############################################################################
@@ -140,4 +144,34 @@ llvm.toolchain(
 use_repo(llvm, "llvm_toolchain")
 
 register_toolchains("@llvm_toolchain//:all")
+
+###############################################################################
+# CUDA Toolchain Configuration (opt-in)
+###############################################################################
+#
+# CUDA is disabled by default (see `@rules_cuda//cuda:enable` in .bazelrc) so
+# that CPU-only builds and CI stay hermetic and do not require an installed
+# toolkit. Enable it with `--config=cuda`.
+#
+# Default: detect a locally-installed CUDA toolkit. Point at a specific install
+# by exporting CUDA_PATH, or by setting `toolkit_path` below.
+#
+# For fully hermetic, downloaded toolkits instead, replace the `cuda.toolkit`
+# call below with one or more `cuda.redist_json` entries, e.g.:
+#
+#     cuda.redist_json(
+#         name = "cuda_12_6_0",
+#         version = "12.6.0",
+#         platforms = ["linux-x86_64", "linux-sbsa"],
+#     )
+#     cuda.toolkit(name = "cuda")
+#
+# and select the version at build time with `--@rules_cuda//cuda:version=...`.
+cuda = use_extension("@rules_cuda//cuda:extensions.bzl", "toolchain")
+cuda.toolkit(
+    name = "cuda",
+    # Empty string => auto-detect from CUDA_PATH / /usr/local/cuda.
+    toolkit_path = "",
+)
+use_repo(cuda, "cuda")
 
