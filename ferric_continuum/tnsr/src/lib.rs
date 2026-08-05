@@ -11,7 +11,10 @@
 //!
 //! The `scaling` module makes those formulas executable: it computes parameter
 //! counts, FLOPs, activation bytes, roofline estimates, and sharding costs
-//! directly from a `TransformerConfig`.
+//! directly from a `TransformerConfig`.  Its `scaling::distributed` sub-module
+//! extends this to the multi-device mechanisms PyTorch uses — DDP, FSDP/ZeRO,
+//! tensor and pipeline parallelism — as symbolic cost estimates plus runnable
+//! single-process simulations over `Vec<f32>`.
 
 pub mod autograd;
 pub mod checkpoint;

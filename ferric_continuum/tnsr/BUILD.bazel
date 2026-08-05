@@ -35,6 +35,14 @@ _TNSR_SRCS = [
     "src/scaling/roofline.rs",
     "src/scaling/sharding.rs",
     "src/scaling/inference.rs",
+    "src/scaling/distributed/mod.rs",
+    "src/scaling/distributed/collectives.rs",
+    "src/scaling/distributed/mesh.rs",
+    "src/scaling/distributed/data_parallel.rs",
+    "src/scaling/distributed/fsdp.rs",
+    "src/scaling/distributed/tensor_parallel.rs",
+    "src/scaling/distributed/pipeline.rs",
+    "src/scaling/distributed/report.rs",
 ]
 
 # Core tensor/autograd/checkpointing library (f32). Default CPU build needs no
@@ -87,6 +95,15 @@ rust_test(
     name = "scaling_tests",
     srcs = ["tests/scaling_test.rs"],
     crate_name = "scaling_test",
+    edition = "2021",
+    deps = [":tnsr"],
+)
+
+# Golden values + invariants for the distributed-training estimates and sims
+rust_test(
+    name = "distributed_tests",
+    srcs = ["tests/distributed_test.rs"],
+    crate_name = "distributed_test",
     edition = "2021",
     deps = [":tnsr"],
 )

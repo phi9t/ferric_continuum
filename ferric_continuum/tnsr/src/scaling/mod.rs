@@ -16,6 +16,7 @@
 //! | `roofline` | Ch.1 Roofline Analysis | compute-vs-memory bottleneck |
 //! | `sharding` | Ch.3 Sharded Matrices | 4 sharding cases (symbolic) |
 //! | `inference` | Ch.7 Inference | KV cache + peak activation bytes |
+//! | `distributed` | Ch.5 Parallelize Training | DDP/FSDP/TP/PP estimates + sims |
 //!
 //! # Quick start
 //!
@@ -37,3 +38,5 @@ pub mod op_cost;
 pub mod report;
 pub mod roofline;
 pub mod sharding;
+
+pub mod distributed;

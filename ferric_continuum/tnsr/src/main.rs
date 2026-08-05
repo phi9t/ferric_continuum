@@ -4,7 +4,13 @@ use tnsr::{
     autograd::Engine,
     checkpoint::{checkpoint, TransformerSelectivePolicy, WholeBlockCheckpoint},
     ops::basic,
+    scaling::distributed::{
+        fsdp::ZeroStage,
+        mesh::DeviceMesh,
+        report::{distributed_report, format_distributed_report},
+    },
     scaling::report::{format_report, scale_report},
+    scaling::roofline::a100_bf16,
     tensor::Tensor,
     transformer::{TransformerBlock, TransformerConfig},
 };
@@ -137,6 +143,23 @@ fn main() {
         let cfg5 = TransformerConfig::tiny_4_7_29();
         let report = scale_report(&cfg5);
         let table = format_report(&report);
+        for line in table.lines() {
+            info!("{}", line);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 6. Distributed parallelism report
+    // 2×2 mesh: 2-way data parallel × 2-way tensor parallel, ZeRO-3 (FSDP),
+    // scored against an A100 BF16 roofline. Symbolic estimate only — no devices.
+    // -----------------------------------------------------------------------
+    info!("[6] Distributed parallelism report");
+    {
+        let cfg6 = TransformerConfig::tiny_4_7_29();
+        let mesh = DeviceMesh::new_2d(2, "dp", 2, "tp");
+        let num_layers = 4;
+        let report = distributed_report(&cfg6, num_layers, &mesh, ZeroStage::Stage3, &a100_bf16());
+        let table = format_distributed_report(&report);
         for line in table.lines() {
             info!("{}", line);
         }

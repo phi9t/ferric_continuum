@@ -40,7 +40,7 @@ In all tnsr formulas below, N = 1 and H = D, so "N·H" collapses to "D".
 | 2  | How to Think About TPUs (`tpus`) | — (CPU-only, single-threaded) | Absent |
 | 3  | Sharded Matrices (`sharding`) | `src/scaling/sharding.rs` — 4 sharding cases as local algebra | Executable-estimable |
 | 4  | All the Transformer Math (`transformers`) | `src/transformer.rs`, all of `src/ops/`, `src/autograd.rs`, `src/scaling/` | **Implemented** |
-| 5  | Parallelize a Transformer for Training (`training`) | remat → `src/checkpoint.rs`; DP/FSDP/TP/PP — absent | Partial |
+| 5  | Parallelize a Transformer for Training (`training`) | remat → `src/checkpoint.rs`; DP/FSDP/TP/PP → `src/scaling/distributed/` (executable estimates + single-process sims) | Executable-estimable |
 | 6  | Training LLaMA 3 on TPUs (`applied-training`) | generic block only; no LLaMA-specific heads or TPU specifics | Absent |
 | 7  | Transformer Inference (`inference`) | attention math is shared; no KV cache; `src/scaling/inference.rs` — KV bytes estimate | Conceptual |
 | 8  | Serving LLaMA 3 (`applied-inference`) | — | Absent |
@@ -176,6 +176,99 @@ making the memory savings from remat directly observable.
 
 ---
 
+## Chapter 5 Deep-Dive: Parallelism
+
+`tnsr` is CPU-only and single-threaded, so it teaches distributed training the
+only faithful way one process can: **executable symbolic cost estimates** (the
+`scaling/` pattern) **plus runnable single-process simulations over `Vec<f32>`**
+that make each mechanism provably correct. No real devices, threads, or network
+— the simulation loops over `D` logical shards in one process. All of this lives
+in `src/scaling/distributed/`.
+
+### Collectives (ring model) → `distributed::collectives`
+
+For `D` devices and a `bytes`-sized logical vector, per-device volume is:
+
+```text
+all-gather / reduce-scatter / broadcast :  (D−1)/D · bytes
+all-reduce  = reduce-scatter + all-gather:  2·(D−1)/D · bytes
+```
+
+| Function | What it does |
+|----------|--------------|
+| `collective_cost(c, D, bytes)` | ring-model bytes per device for a `Collective` |
+| `sim_all_reduce_sum` | naive: sum then broadcast the total to all devices |
+| `sim_ring_all_reduce_sum` | reduce-scatter ∘ all-gather; bit-exact match to naive |
+| `sim_all_gather` | concatenate shards to all devices |
+| `sim_reduce_scatter_sum` | sum then scatter one equal slice per device |
+| `sim_broadcast` | copy one device's buffer to all |
+
+`all-to-all` is deferred (needs a cross-shard permutation beyond single-matmul
+scope). PyTorch counterpart: `torch.distributed.{all_reduce,all_gather,reduce_scatter,broadcast}`.
+
+### Device mesh → `distributed::mesh`
+
+`DeviceMesh { shape, axis_names }` (row-major ranks) mirrors
+`torch.distributed.device_mesh.DeviceMesh`: `new_1d`, `new_2d`,
+`total_devices`, `axis_size(name)`, `coords(rank)`.
+
+### Data parallel (DDP) → `distributed::data_parallel`
+
+Every device holds a full replica; only the gradient all-reduce scales with
+`dp`, and **per-device memory is independent of `dp`** (the DDP invariant).
+
+```text
+grad_allreduce_bytes/device = 2·(dp−1)/dp · grad_bytes
+```
+
+PyTorch counterpart: `torch.nn.parallel.DistributedDataParallel`.
+
+### FSDP / ZeRO → `distributed::fsdp`
+
+`ZeroStage {Stage1, Stage2, Stage3}`; **Stage3 == FSDP**. Each stage shards
+strictly more of the per-device memory, so `Stage1 ≥ Stage2 ≥ Stage3`:
+
+| Stage | Optimizer state | Gradients | Parameters |
+|-------|-----------------|-----------|------------|
+| 1     | `1/D`           | full      | full       |
+| 2     | `1/D`           | `1/D`     | full       |
+| 3     | `1/D`           | `1/D`     | `1/D`      |
+
+Stage 2/3 reduce-scatter gradients; Stage 3 also all-gathers parameters — extra
+comm vs DDP. PyTorch counterpart: `torch.distributed.fsdp.FullyShardedDataParallel`.
+
+### Tensor parallel (Megatron) → `distributed::tensor_parallel`
+
+Column-parallel matmul (`WColwise`, no all-reduce) feeding a row-parallel one
+(`InnerReduction`, one all-reduce), delegating to `sharding::shard_matmul`.
+`sim_column_then_row(...)` runs the full `Z = (X·W1)·W2` MLP across `tp` shards —
+column-sharding the hidden dim of `W1`, row-sharding `W2`, then all-reducing the
+per-device partials — and proves the result equals the unsharded computation.
+PyTorch counterpart: `torch.distributed.tensor.parallel`
+(`ColwiseParallel`/`RowwiseParallel`).
+
+### Pipeline parallel → `distributed::pipeline`
+
+GPipe bubble fraction and per-boundary activation handoff:
+
+```text
+bubble_fraction = (P − 1) / (M + P − 1)
+```
+
+for `P` stages and `M` microbatches; the bubble shrinks as `M` grows. PyTorch
+counterpart: `torch.distributed.pipelining`.
+
+### Aggregate report → `distributed::report`
+
+`distributed_report(cfg, num_layers, &mesh, fsdp_stage, &hw)` reads the mesh's
+`"dp"`/`"tp"` axes, sums per-device collective bytes across DDP + FSDP-extra +
+TP, and reuses `roofline` to flag comm-vs-compute bound.
+`format_distributed_report(...)` renders an ASCII table like `report::format_report`.
+
+Golden values and invariants are verified in `tests/distributed_test.rs`.
+
+---
+
 ## What tnsr Does NOT Cover
 
 These topics are out of scope for a CPU-only, single-threaded, f32 library.
@@ -183,7 +276,7 @@ See the corresponding book chapters for the full treatment.
 
 | Topic | Book chapter | Why absent from tnsr |
 |-------|-------------|----------------------|
-| Tensor / pipeline / FSDP parallelism | Ch.5 | Requires multi-device communication primitives |
+| Tensor / pipeline / FSDP parallelism | Ch.5 | Modelled in `src/scaling/distributed/` as executable estimates + single-process simulations over `Vec<f32>` — no real devices, threads, or network |
 | Roofline hardware measurements | Ch.1 | tnsr provides symbolic estimates only |
 | TPU / GPU programming model | Ch.2, 12 | Hardware-specific |
 | LLaMA-3 specifics (GQA, RoPE, etc.) | Ch.6, 8 | Only a generic single-head block is implemented |
@@ -214,5 +307,12 @@ println!("{}", format_report(&scale_report(&cfg)));
 | `roofline` | Compute-vs-memory bottleneck for given FLOPs + bytes + `HardwareSpec` |
 | `sharding` | 4 sharding cases as local algebra: per-device FLOPs + all-reduce bytes |
 | `inference` | KV cache bytes; peak activation memory estimate |
+| `distributed::collectives` | ring-model collective cost + `Vec<f32>` sims (all-reduce, all-gather, reduce-scatter, broadcast) |
+| `distributed::mesh` | named multi-axis `DeviceMesh` (dp/tp axes, ranks → coords) |
+| `distributed::data_parallel` | DDP grad all-reduce bytes; per-device memory invariant |
+| `distributed::fsdp` | ZeRO 1/2/3 (Stage3 == FSDP) sharded memory + extra comm |
+| `distributed::tensor_parallel` | Megatron column-then-row cost + matmul-equivalence sim |
+| `distributed::pipeline` | GPipe bubble fraction + activation-handoff bytes |
+| `distributed::report` | aggregate 2-D-mesh report + ASCII table + roofline verdict |
 
 Golden values for `tiny_4_7_29` are verified in `tests/scaling_test.rs`.
