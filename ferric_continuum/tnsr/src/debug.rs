@@ -109,6 +109,26 @@ impl DebugRecorder {
         }
     }
 
+    /// Clone out every forward op call recorded so far. Read-only accessor for
+    /// analysis tools (e.g. the Qwen3 op-closure tracer) that want to inspect
+    /// what the forward pass dispatched without touching the private store.
+    pub fn op_call_records(&self) -> Vec<OpCallRecord> {
+        self.inner.borrow().op_calls.clone()
+    }
+
+    /// Clone out the `OpKind` of every op applied during the backward pass, in
+    /// application order. The Rust analog of counting ATen backward ops.
+    pub fn backward_apply_kinds(&self) -> Vec<OpKind> {
+        self.inner
+            .borrow()
+            .backward_events
+            .iter()
+            .map(|ev| match ev {
+                BackwardEvent::ApplyOp { kind, .. } => *kind,
+            })
+            .collect()
+    }
+
     pub fn record_op_call(&self, call: &OpCallRef) {
         let mut s = self.inner.borrow_mut();
         s.op_calls.push(OpCallRecord {

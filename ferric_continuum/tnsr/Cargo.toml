@@ -7,6 +7,18 @@ edition = "2021"
 name = "tnsr_demo"
 path = "src/main.rs"
 
+[[bin]]
+name = "qwen3_op_trace"
+path = "src/bin/qwen3_op_trace.rs"
+
+[[bin]]
+name = "qwen3_demo"
+path = "src/bin/qwen3_demo.rs"
+
+[[bin]]
+name = "qwen3_generate"
+path = "src/bin/qwen3_generate.rs"
+
 [lib]
 name = "tnsr"
 path = "src/lib.rs"

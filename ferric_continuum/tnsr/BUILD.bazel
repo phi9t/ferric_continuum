@@ -81,6 +81,46 @@ rust_binary(
     ],
 )
 
+# Qwen3 op-closure tracer: Rust analog of docs/trace_qwen3.py — forward and
+# forward+backward OpKind closures with per-component attribution.
+rust_binary(
+    name = "qwen3_op_trace",
+    srcs = ["src/bin/qwen3_op_trace.rs"],
+    crate_name = "qwen3_op_trace",
+    edition = "2021",
+    deps = [
+        ":tnsr",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
+    ],
+)
+
+# Qwen3 forward + loss + backward demo: op table + grad stats + logits shape.
+rust_binary(
+    name = "qwen3_demo",
+    srcs = ["src/bin/qwen3_demo.rs"],
+    crate_name = "qwen3_demo",
+    edition = "2021",
+    deps = [
+        ":tnsr",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
+    ],
+)
+
+# Qwen3 greedy autoregressive generation demo (untrained weights).
+rust_binary(
+    name = "qwen3_generate",
+    srcs = ["src/bin/qwen3_generate.rs"],
+    crate_name = "qwen3_generate",
+    edition = "2021",
+    deps = [
+        ":tnsr",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
+    ],
+)
+
 # Integration tests: gradient checks, checkpoint correctness, shape panics
 rust_test(
     name = "tnsr_tests",
