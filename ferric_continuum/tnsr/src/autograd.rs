@@ -192,6 +192,8 @@ impl Default for Engine {
 }
 
 impl Engine {
+    /// Create an engine and install its recorder as the process-global one, so
+    /// ops built afterwards register their `OpCall`s and saved tensors into it.
     pub fn new() -> Self {
         let debug = DebugRecorder::new();
         crate::debug::set_global_recorder(debug.clone());
@@ -331,18 +333,27 @@ impl Engine {
         out.push(call.clone());
     }
 
+    // ── Reporting helpers ──────────────────────────────────────────────────
+    // These read nothing from the gradient math; they render the retained
+    // `topo` and the recorder's data for teaching/analysis. Call them after
+    // `backward` has populated `self.topo`.
+
+    /// Print one row per op: kind, name, shapes, and FLOPs.
     pub fn print_op_table(&self) {
         self.debug.print_op_table(&self.topo);
     }
 
+    /// Print the activations saved for backward and their memory cost.
     pub fn print_saved_tensor_table(&self) {
         self.debug.print_saved_tensor_table();
     }
 
+    /// Print the gradient-checkpointing summary (saved vs. recomputed).
     pub fn print_checkpoint_report(&self) {
         self.debug.print_checkpoint_report();
     }
 
+    /// Emit the DAG as Graphviz DOT for visualizing the computation graph.
     pub fn write_dot(&self, path: &str) {
         self.debug.write_dot(&self.topo, path);
     }
