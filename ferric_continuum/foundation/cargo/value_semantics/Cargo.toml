@@ -1,0 +1,16 @@
+[package]
+name = "ferric-value-semantics"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "value_semantics"
+path = "../../value_semantics.rs"
+
+[[bin]]
+name = "value_semantics_demo_rs"
+path = "../../value_semantics_demo.rs"
+
+[dependencies]
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

@@ -1,0 +1,16 @@
+[package]
+name = "ferric-parameter-passing"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "parameter_passing"
+path = "../../parameter_passing.rs"
+
+[[bin]]
+name = "parameter_passing_demo_rs"
+path = "../../parameter_passing_demo.rs"
+
+[dependencies]
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

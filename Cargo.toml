@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "ferric_continuum/hello",
+    "ferric_continuum/foundation/cargo/value_semantics",
+    "ferric_continuum/foundation/cargo/move_semantics",
+    "ferric_continuum/foundation/cargo/parameter_passing",
+    "ferric_continuum/foundation/cargo/smart_pointers",
+    "ferric_continuum/tnsr",
+]
+resolver = "2"
