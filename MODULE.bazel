@@ -10,35 +10,35 @@ module(
 )
 
 # Core Bazel rules and tools
-bazel_dep(name = "rules_cc", version = "0.1.1")
-bazel_dep(name = "platforms", version = "0.0.11")
-bazel_dep(name = "bazel_skylib", version = "1.7.1")
+bazel_dep(name = "rules_cc", version = "0.2.17")
+bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "bazel_skylib", version = "1.9.0")
 
 # Rust support
-bazel_dep(name = "rules_rust", version = "0.52.2")
+bazel_dep(name = "rules_rust", version = "0.69.0")
 
 # Python support
-bazel_dep(name = "rules_python", version = "0.40.0")
+bazel_dep(name = "rules_python", version = "1.9.0")
 
 # Pybind11 for Python/C++ extensions
-bazel_dep(name = "pybind11_bazel", version = "2.13.6")
+bazel_dep(name = "pybind11_bazel", version = "3.0.1")
 
 # Eigen for linear algebra (header-only)
-bazel_dep(name = "eigen", version = "3.4.0")
+bazel_dep(name = "eigen", version = "3.4.1.bcr.1")
 
 # Protocol Buffers and gRPC (for distributed systems)
-bazel_dep(name = "protobuf", version = "29.0")
+bazel_dep(name = "protobuf", version = "33.4")
 # gRPC will be added later when needed for distributed systems
 # bazel_dep(name = "grpc", version = "1.65.5")
 
 # Testing frameworks
-bazel_dep(name = "googletest", version = "1.15.2")
+bazel_dep(name = "googletest", version = "1.17.0.bcr.2")
 
 # Abseil - Google's C++ library with useful utilities
-bazel_dep(name = "abseil-cpp", version = "20240722.0")
+bazel_dep(name = "abseil-cpp", version = "20250814.1")
 
 # Hermetic C++ toolchain (optional, for reproducible builds)
-bazel_dep(name = "toolchains_llvm", version = "1.2.0")
+bazel_dep(name = "toolchains_llvm", version = "1.7.0")
 
 # CUDA support (opt-in via --config=cuda). rules_cuda provides cuda_library,
 # cuda_binary, and cuda_test rules plus hermetic and local toolchain detection.

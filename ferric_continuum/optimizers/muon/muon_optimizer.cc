@@ -34,7 +34,7 @@ void EnsureArrayCompat(const py::array& array, const std::string& name) {
   if (!(array.flags() & py::array::c_style)) {
     throw py::value_error(name + " must be C-contiguous");
   }
-  if (!(array.flags() & py::array::writeable)) {
+  if (!array.writeable()) {
     throw py::value_error(name + " must be writeable");
   }
   const py::buffer_info info = array.request();
@@ -118,7 +118,8 @@ py::array_t<double> MuonUpdate(py::array_t<double> params, py::array_t<double> g
   const double one_minus_beta = 1.0 - beta;
   momentum_map = beta * momentum_map + one_minus_beta * grads_map;
   Eigen::MatrixXd update =
-      nesterov ? (beta * momentum_map + one_minus_beta * grads_map) : momentum_map;
+      nesterov ? Eigen::MatrixXd(beta * momentum_map + one_minus_beta * grads_map)
+               : Eigen::MatrixXd(momentum_map);
 
   const Eigen::MatrixXd ortho_update =
       OrthogonalizeNewtonSchulz(update, ns_steps, ns_coeff_a, ns_coeff_b, ns_coeff_c);
