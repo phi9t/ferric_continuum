@@ -11,7 +11,7 @@ use crate::autograd::{BackwardCtx, BackwardRecipe, GradEdge, GradTarget, OpKind}
 use crate::saved::{SaveRole, SaveSite, SavedTensor};
 use crate::tensor::{Shape, Tensor, TensorValue};
 
-const EPS: f32 = 1e-5;
+const EPS: f32 = 1e-6;
 
 // ---------------------------------------------------------------------------
 // LayerNorm helpers

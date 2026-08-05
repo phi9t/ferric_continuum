@@ -17,6 +17,8 @@ _TNSR_SRCS = [
     "src/tensor.rs",
     "src/transformer.rs",
     "src/qwen3.rs",
+    "src/qwen3_load.rs",
+    "src/bpe.rs",
     "src/ops/mod.rs",
     "src/ops/activations.rs",
     "src/ops/attention.rs",
@@ -58,7 +60,12 @@ rust_library(
     crate_name = "tnsr",
     edition = "2021",
     visibility = ["//visibility:public"],
-    deps = select({
+    deps = [
+        "@crates//:half",
+        "@crates//:memmap2",
+        "@crates//:safetensors",
+        "@crates//:serde_json",
+    ] + select({
         ":enable_cuda": [
             "//ferric_continuum/cuda_kernels:gemm",
             "//ferric_continuum/cuda_kernels:headers",
@@ -121,6 +128,19 @@ rust_binary(
     ],
 )
 
+# Qwen3 end-to-end inference on real HF weights (model dir passed via CLI arg).
+rust_binary(
+    name = "qwen3_infer",
+    srcs = ["src/bin/qwen3_infer.rs"],
+    crate_name = "qwen3_infer",
+    edition = "2021",
+    deps = [
+        ":tnsr",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
+    ],
+)
+
 # Integration tests: gradient checks, checkpoint correctness, shape panics
 rust_test(
     name = "tnsr_tests",
@@ -155,6 +175,14 @@ rust_test(
     crate_name = "qwen3_test",
     edition = "2021",
     deps = [":tnsr"],
+)
+
+# Library unit tests (#[cfg(test)] in-crate): transpose / RoPE-interleave bridge
+# in qwen3_load and the byte-level BPE tables in bpe.
+rust_test(
+    name = "lib_tests",
+    crate = ":tnsr",
+    edition = "2021",
 )
 
 # GPU forward agreement with CPU (only meaningful under --config=cuda).

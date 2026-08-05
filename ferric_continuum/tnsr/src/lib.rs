@@ -17,12 +17,14 @@
 //! single-process simulations over `Vec<f32>`.
 
 pub mod autograd;
+pub mod bpe;
 pub mod checkpoint;
 pub mod cuda_ffi;
 pub mod debug;
 pub mod grad_mode;
 pub mod ops;
 pub mod qwen3;
+pub mod qwen3_load;
 pub mod saved;
 pub mod scaling;
 pub mod tensor;

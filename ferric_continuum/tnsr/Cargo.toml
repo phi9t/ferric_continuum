@@ -19,6 +19,10 @@ path = "src/bin/qwen3_demo.rs"
 name = "qwen3_generate"
 path = "src/bin/qwen3_generate.rs"
 
+[[bin]]
+name = "qwen3_infer"
+path = "src/bin/qwen3_infer.rs"
+
 [lib]
 name = "tnsr"
 path = "src/lib.rs"
@@ -26,6 +30,10 @@ path = "src/lib.rs"
 [dependencies]
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde_json = "1.0"
+safetensors = "0.4"
+half = "2.4"
+memmap2 = "0.9"
 
 [features]
 # Opt-in GPU forward path for matmul + softmax via the cuda_kernels C ABI.

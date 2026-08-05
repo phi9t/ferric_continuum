@@ -77,6 +77,11 @@ crate.spec(package = "prost-types", version = "0.13.3")
 crate.spec(package = "serde", features = ["derive"], version = "1.0.210")
 crate.spec(package = "serde_json", version = "1.0.128")
 
+# Checkpoint loading: safetensors parsing + bf16 conversion + mmap
+crate.spec(package = "safetensors", version = "0.4.5")
+crate.spec(package = "half", version = "2.4.1")
+crate.spec(package = "memmap2", version = "0.9.5")
+
 # Benchmarking with Criterion
 crate.spec(package = "criterion", version = "0.5.1")
 
