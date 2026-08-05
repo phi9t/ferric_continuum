@@ -1,0 +1,47 @@
+# Lesson 01 — Hello GPU: device properties + first kernel launch (SAXPY).
+#
+# CUDA is opt-in; targets are tagged `cuda` (build) / `requires-gpu` (test) so
+# they stay out of the CPU-only `//...` wildcard. Run on a CUDA machine:
+#
+#     bazel run  --config=cuda //ferric_continuum/cuda_gym/lessons/01_hello_gpu:hello_gpu_demo
+#     bazel test --config=cuda //ferric_continuum/cuda_gym/lessons/01_hello_gpu:hello_gpu_test
+
+load("@rules_cuda//cuda:defs.bzl", "cuda_binary", "cuda_library", "cuda_test")
+
+package(default_visibility = ["//visibility:public"])
+
+cuda_library(
+    name = "hello_gpu",
+    srcs = ["hello_gpu.cu"],
+    hdrs = ["hello_gpu.hh"],
+    tags = ["cuda"],
+)
+
+cuda_binary(
+    name = "hello_gpu_demo",
+    srcs = ["hello_gpu_demo.cu"],
+    tags = [
+        "cuda",
+        "requires-gpu",
+    ],
+    deps = [
+        ":hello_gpu",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:globals",
+        "@abseil-cpp//absl/log:initialize",
+        "@abseil-cpp//absl/strings",
+    ],
+)
+
+cuda_test(
+    name = "hello_gpu_test",
+    srcs = ["hello_gpu_test.cu"],
+    tags = [
+        "cuda",
+        "requires-gpu",
+    ],
+    deps = [
+        ":hello_gpu",
+        "@googletest//:gtest_main",
+    ],
+)

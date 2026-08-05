@@ -47,7 +47,7 @@ In all tnsr formulas below, N = 1 and H = D, so "N·H" collapses to "D".
 | 9  | Profile TPU Code (`profiling`) | `src/debug.rs` — op table / saved-tensor table / DOT graph | Conceptual |
 | 10 | Programming TPUs in JAX (`jax-stuff`) | `checkpoint::checkpoint()` is the manual Rust analog of `jax.remat` | Conceptual |
 | 11 | Conclusions (`conclusion`) | — | n/a |
-| 12 | How to Think About GPUs (`gpus`) | — | Absent |
+| 12 | How to Think About GPUs (`gpus`) | Optional CUDA forward for matmul + softmax via `cuda_ffi` + `//ferric_continuum/cuda_kernels` (`--config=cuda`); gym under `cuda_gym/` | Partial (fwd GPU, bwd CPU) |
 
 ---
 

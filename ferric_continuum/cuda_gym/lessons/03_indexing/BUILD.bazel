@@ -1,0 +1,44 @@
+# Lesson 03 — Indexing: 1D and 2D thread/block maps.
+#
+#     bazel run  --config=cuda //ferric_continuum/cuda_gym/lessons/03_indexing:indexing_demo
+#     bazel test --config=cuda //ferric_continuum/cuda_gym/lessons/03_indexing:indexing_test
+
+load("@rules_cuda//cuda:defs.bzl", "cuda_binary", "cuda_library", "cuda_test")
+
+package(default_visibility = ["//visibility:public"])
+
+cuda_library(
+    name = "indexing",
+    srcs = ["indexing.cu"],
+    hdrs = ["indexing.hh"],
+    tags = ["cuda"],
+)
+
+cuda_binary(
+    name = "indexing_demo",
+    srcs = ["indexing_demo.cu"],
+    tags = [
+        "cuda",
+        "requires-gpu",
+    ],
+    deps = [
+        ":indexing",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:globals",
+        "@abseil-cpp//absl/log:initialize",
+        "@abseil-cpp//absl/strings",
+    ],
+)
+
+cuda_test(
+    name = "indexing_test",
+    srcs = ["indexing_test.cu"],
+    tags = [
+        "cuda",
+        "requires-gpu",
+    ],
+    deps = [
+        ":indexing",
+        "@googletest//:gtest_main",
+    ],
+)

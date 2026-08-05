@@ -1,0 +1,10 @@
+load("//ferric_continuum/cuda_gym/challenges:defs.bzl", "cuda_challenge")
+
+package(default_visibility = ["//visibility:public"])
+
+cuda_challenge(
+    name = "reduce",
+    cases = "cases.json",
+    reference_srcs = ["reference.cu"],
+    student_srcs = ["student.cu"],
+)

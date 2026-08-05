@@ -1,0 +1,44 @@
+# Lesson 05 — Shared memory: tiled matrix-vector product.
+#
+#     bazel run  --config=cuda //ferric_continuum/cuda_gym/lessons/05_shared_memory:shared_memory_demo
+#     bazel test --config=cuda //ferric_continuum/cuda_gym/lessons/05_shared_memory:shared_memory_test
+
+load("@rules_cuda//cuda:defs.bzl", "cuda_binary", "cuda_library", "cuda_test")
+
+package(default_visibility = ["//visibility:public"])
+
+cuda_library(
+    name = "shared_memory",
+    srcs = ["shared_memory.cu"],
+    hdrs = ["shared_memory.hh"],
+    tags = ["cuda"],
+)
+
+cuda_binary(
+    name = "shared_memory_demo",
+    srcs = ["shared_memory_demo.cu"],
+    tags = [
+        "cuda",
+        "requires-gpu",
+    ],
+    deps = [
+        ":shared_memory",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:globals",
+        "@abseil-cpp//absl/log:initialize",
+        "@abseil-cpp//absl/strings",
+    ],
+)
+
+cuda_test(
+    name = "shared_memory_test",
+    srcs = ["shared_memory_test.cu"],
+    tags = [
+        "cuda",
+        "requires-gpu",
+    ],
+    deps = [
+        ":shared_memory",
+        "@googletest//:gtest_main",
+    ],
+)

@@ -160,7 +160,8 @@ pub fn attention_scores(q: &Tensor, k: &Tensor, scale: f32, name: &str) -> Tenso
 // softmax_last_dim: x [B,T,T] -> p [B,T,T]
 // ---------------------------------------------------------------------------
 
-pub fn raw_softmax(x: &TensorValue) -> TensorValue {
+/// CPU row-softmax used by the default path, CUDA fallback, and agreement tests.
+pub fn raw_softmax_cpu(x: &TensorValue) -> TensorValue {
     let xd = &x.shape.0;
     let d = *xd.last().unwrap();
     let batch: usize = xd[..xd.len() - 1].iter().product();
@@ -179,6 +180,28 @@ pub fn raw_softmax(x: &TensorValue) -> TensorValue {
     }
 
     TensorValue::from_vec(x.shape.clone(), out)
+}
+
+pub fn raw_softmax(x: &TensorValue) -> TensorValue {
+    let xd = &x.shape.0;
+    let d = *xd.last().unwrap();
+    let batch: usize = xd[..xd.len() - 1].iter().product();
+    let xr = x.data.as_ref();
+
+    // Optional GPU forward (host in / host out); backward remains CPU on host data.
+    if crate::cuda_ffi::use_cuda() {
+        match crate::cuda_ffi::softmax_f32(batch, d, xr) {
+            Some(out) => return TensorValue::from_vec(x.shape.clone(), out),
+            None => {
+                eprintln!(
+                    "tnsr: CUDA softmax failed (rows={batch}, cols={d}); \
+                     falling back to CPU"
+                );
+            }
+        }
+    }
+
+    raw_softmax_cpu(x)
 }
 
 fn raw_softmax_backward(dy: &TensorValue, p: &TensorValue) -> TensorValue {

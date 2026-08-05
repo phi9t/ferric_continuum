@@ -1,0 +1,44 @@
+# Lesson 04 — Reduction: block tree reduction + atomicAdd.
+#
+#     bazel run  --config=cuda //ferric_continuum/cuda_gym/lessons/04_reduction:reduction_demo
+#     bazel test --config=cuda //ferric_continuum/cuda_gym/lessons/04_reduction:reduction_test
+
+load("@rules_cuda//cuda:defs.bzl", "cuda_binary", "cuda_library", "cuda_test")
+
+package(default_visibility = ["//visibility:public"])
+
+cuda_library(
+    name = "reduction",
+    srcs = ["reduction.cu"],
+    hdrs = ["reduction.hh"],
+    tags = ["cuda"],
+)
+
+cuda_binary(
+    name = "reduction_demo",
+    srcs = ["reduction_demo.cu"],
+    tags = [
+        "cuda",
+        "requires-gpu",
+    ],
+    deps = [
+        ":reduction",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:globals",
+        "@abseil-cpp//absl/log:initialize",
+        "@abseil-cpp//absl/strings",
+    ],
+)
+
+cuda_test(
+    name = "reduction_test",
+    srcs = ["reduction_test.cu"],
+    tags = [
+        "cuda",
+        "requires-gpu",
+    ],
+    deps = [
+        ":reduction",
+        "@googletest//:gtest_main",
+    ],
+)

@@ -36,6 +36,14 @@ build --local_resources=cpu=HOST_CPUS*.75
 build --cxxopt=-std=c++20
 build --host_cxxopt=-std=c++20
 
+# The LLVM toolchain links libstdc++ (see `stdlib` in MODULE.bazel). libstdc++
+# does not ship the clang module map that Bazel's `layering_check` /
+# `use_module_maps` features rely on (that map assumes libc++), so disable them
+# globally. Bazel does not support C++ modules yet, so this only removes an
+# unused strictness check and avoids "module 'crosstool' ... not provided".
+build --features=-layering_check
+build --features=-module_maps
+
 # Compiler warnings
 build --copt=-Wall
 build --copt=-Wextra
@@ -167,14 +175,45 @@ build --flag_alias=cuda_enable=@rules_cuda//cuda:enable
 # accidental use of a host toolkit.
 build --@rules_cuda//cuda:enable=False
 
+# Exclude CUDA-tagged targets from default wildcards so CPU CI (`bazel build
+# //...`, `bazel test //...`) never analyzes cuda_library rules (which fail
+# when `@rules_cuda//cuda:enable=False`). Explicit labels still honor this
+# filter; use `--config=cuda` (which replaces these filters below).
+build --build_tag_filters=-cuda
+test --test_tag_filters=-cuda
+
 # Opt in with `--config=cuda`. Override the target arch list on the command
 # line, e.g. `--config=cuda --cuda_archs=compute_80:compute_80,sm_80`.
+#
+# Last --build_tag_filters / --test_tag_filters wins, so this replaces the
+# default `-cuda` exclusion and allows CUDA-tagged wildcards. Student `:grade`
+# targets keep the Bazel `manual` tag so wildcards skip them while explicit
+# labels still run (they fail until student.cu is filled).
+build:cuda --build_tag_filters=
+test:cuda --test_tag_filters=
 build:cuda --@rules_cuda//cuda:enable=True
-# Default to nvcc; switch to clang with `--cuda_compiler=clang`.
+# Default to nvcc; switch to clang with `--cuda_compiler=clang`. nvcc uses the
+# registered LLVM clang as its host compiler (`-ccbin`). The LLVM toolchain is
+# configured to link libstdc++ (see `stdlib` in MODULE.bazel), NOT libc++:
+# CUDA 13.x rejects libc++ on x86 ("libc++ is not supported on x86 system"), and
+# a single stdlib across CPU and CUDA objects avoids std::__1 vs std::__cxx11
+# ABI clashes when a cuda_test links C++ deps such as gtest.
 build:cuda --@rules_cuda//cuda:compiler=nvcc
-# Reasonable multi-arch default covering Volta..Hopper plus PTX for forward
-# compatibility. Trim this for faster builds targeting a single GPU.
-build:cuda --@rules_cuda//cuda:archs=compute_70:compute_70,sm_70;compute_80:compute_80,sm_80;compute_86:sm_86;compute_90:compute_90,sm_90
+# CUDA runtime: dynamic cudart WITHOUT cudadevrt. Our kernels do not use
+# relocatable device code (rdc), so the device runtime (`cudadevrt`, needed only
+# for JIT/device linking of rdc objects) is unnecessary. The default runtime
+# whole-archives `cudadevrt`, whose `__cudaRegisterAll` pulls in an
+# `__cudaRegisterLinkedBinary_*` symbol that only a device-link step provides —
+# fine for cuda_binary/cuda_test, but it breaks when Rust (tnsr's `cuda` feature)
+# links the kernel archives directly. `cudart_so` avoids devrt entirely and works
+# for C++ demos/tests and the Rust FFI alike.
+build:cuda --@rules_cuda//cuda:runtime=@cuda//:cudart_so
+# Multi-arch default covering Ampere..Blackwell plus PTX for forward
+# compatibility. compute_70 (Volta) is intentionally dropped: CUDA 13.x removed
+# support for it ("Unsupported gpu architecture 'compute_70'"). sm_100 targets
+# Blackwell / B200. Trim this list for faster builds targeting a single GPU,
+# e.g. `--cuda_archs=compute_100:sm_100`.
+build:cuda --@rules_cuda//cuda:archs=compute_80:compute_80,sm_80;compute_86:sm_86;compute_90:compute_90,sm_90;compute_100:compute_100,sm_100
 
 # nvcc uses PIDs for temp-file names; under the Linux sandbox those collide at
 # high parallelism ("No such file or directory" from cc1plus). A hermetic /tmp
@@ -204,13 +243,21 @@ coverage --experimental_generate_llvm_lcov
 build:macos --cxxopt=-stdlib=libc++
 build:macos --linkopt=-lc++
 
-# Linux - Use libc++ with LLVM toolchain
-build:linux --cxxopt=-stdlib=libc++
-build:linux --linkopt=-lc++
-build:linux --linkopt=-lc++abi
-build:linux --host_cxxopt=-stdlib=libc++
-build:linux --host_linkopt=-lc++
-build:linux --host_linkopt=-lc++abi
+# Linux - the registered LLVM/Clang toolchain links libstdc++ (see `stdlib` in
+# MODULE.bazel) so that CPU and CUDA objects share one C++ ABI. No libc++ flags
+# are attached to the always-on `build:linux` block: `--cxxopt`/`--linkopt` are
+# additive and cannot be removed by a later config, and rules_cuda forwards the
+# whole C++ cxxopts fragment to nvcc's host compiler, where CUDA 13.x rejects
+# `-stdlib=libc++` on x86.
+#
+# `--config=libcxx` remains available for CPU-only builds that specifically want
+# libc++, but must never be combined with `--config=cuda`.
+build:libcxx --cxxopt=-stdlib=libc++
+build:libcxx --linkopt=-lc++
+build:libcxx --linkopt=-lc++abi
+build:libcxx --host_cxxopt=-stdlib=libc++
+build:libcxx --host_linkopt=-lc++
+build:libcxx --host_linkopt=-lc++abi
 
 ###############################################################################
 # Remote Execution / Caching (disabled by default)

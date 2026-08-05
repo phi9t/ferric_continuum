@@ -17,7 +17,8 @@ use crate::tensor::{Shape, Tensor, TensorValue};
 // Raw matmul helpers: x [B,T,Din] @ w [Din,Dout] -> out [B,T,Dout]
 // ---------------------------------------------------------------------------
 
-pub fn raw_linear_forward(x: &TensorValue, w: &TensorValue) -> TensorValue {
+/// CPU matmul used by the default path, CUDA fallback, and agreement tests.
+pub fn raw_linear_forward_cpu(x: &TensorValue, w: &TensorValue) -> TensorValue {
     let xd = &x.shape.0;
     let wd = &w.shape.0;
 
@@ -38,10 +39,9 @@ pub fn raw_linear_forward(x: &TensorValue, w: &TensorValue) -> TensorValue {
     let mut out_shape = xd[..xd.len() - 1].to_vec();
     out_shape.push(dout);
 
-    let mut out_data = vec![0.0f32; batch * dout];
     let xd_ref = x.data.as_ref();
     let wd_ref = w.data.as_ref();
-
+    let mut out_data = vec![0.0f32; batch * dout];
     for b in 0..batch {
         for j in 0..dout {
             let mut acc = 0.0f32;
@@ -53,6 +53,41 @@ pub fn raw_linear_forward(x: &TensorValue, w: &TensorValue) -> TensorValue {
     }
 
     TensorValue::from_vec(Shape(out_shape), out_data)
+}
+
+pub fn raw_linear_forward(x: &TensorValue, w: &TensorValue) -> TensorValue {
+    let xd = &x.shape.0;
+    let wd = &w.shape.0;
+    assert!(xd.len() >= 2, "linear: x must be at least 2D");
+    assert_eq!(wd.len(), 2, "linear: w must be 2D [Din, Dout]");
+    let din = *xd.last().unwrap();
+    let dout = wd[1];
+    assert_eq!(
+        wd[0], din,
+        "linear: Din mismatch: x has {} but w has {}",
+        din, wd[0]
+    );
+    let batch: usize = xd[..xd.len() - 1].iter().product();
+    let mut out_shape = xd[..xd.len() - 1].to_vec();
+    out_shape.push(dout);
+
+    // Optional GPU forward via cuda_kernels (host in / host out). Backward stays CPU.
+    if crate::cuda_ffi::use_cuda() {
+        match crate::cuda_ffi::gemm_f32(batch, dout, din, x.data.as_ref(), w.data.as_ref())
+        {
+            Some(out_data) => {
+                return TensorValue::from_vec(Shape(out_shape), out_data);
+            }
+            None => {
+                eprintln!(
+                    "tnsr: CUDA gemm failed (batch={batch}, dout={dout}, din={din}); \
+                     falling back to CPU"
+                );
+            }
+        }
+    }
+
+    raw_linear_forward_cpu(x, w)
 }
 
 // dy [B,T,Dout], w [Din,Dout] -> dx [B,T,Din]

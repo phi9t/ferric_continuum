@@ -1,40 +1,63 @@
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_doc", "rust_library", "rust_test")
 
-# Core tensor/autograd/checkpointing library (CPU-only, f32, no external deps)
+# Matches `--config=cuda` / `@rules_cuda//cuda:enable=True`.
+config_setting(
+    name = "enable_cuda",
+    flag_values = {"@rules_cuda//cuda:enable": "True"},
+)
+
+_TNSR_SRCS = [
+    "src/lib.rs",
+    "src/autograd.rs",
+    "src/checkpoint.rs",
+    "src/cuda_ffi.rs",
+    "src/debug.rs",
+    "src/grad_mode.rs",
+    "src/saved.rs",
+    "src/tensor.rs",
+    "src/transformer.rs",
+    "src/qwen3.rs",
+    "src/ops/mod.rs",
+    "src/ops/activations.rs",
+    "src/ops/attention.rs",
+    "src/ops/basic.rs",
+    "src/ops/embedding.rs",
+    "src/ops/gqa.rs",
+    "src/ops/linear.rs",
+    "src/ops/loss.rs",
+    "src/ops/norm.rs",
+    "src/ops/rope.rs",
+    "src/ops/shape.rs",
+    "src/scaling/mod.rs",
+    "src/scaling/model_stats.rs",
+    "src/scaling/op_cost.rs",
+    "src/scaling/report.rs",
+    "src/scaling/roofline.rs",
+    "src/scaling/sharding.rs",
+    "src/scaling/inference.rs",
+]
+
+# Core tensor/autograd/checkpointing library (f32). Default CPU build needs no
+# CUDA. With `--config=cuda`, crate feature `cuda` links cuda_kernels and uses
+# GPU forward for matmul + softmax (host↔device convenience ABI).
 rust_library(
     name = "tnsr",
-    srcs = [
-        "src/lib.rs",
-        "src/autograd.rs",
-        "src/checkpoint.rs",
-        "src/debug.rs",
-        "src/grad_mode.rs",
-        "src/saved.rs",
-        "src/tensor.rs",
-        "src/transformer.rs",
-        "src/qwen3.rs",
-        "src/ops/mod.rs",
-        "src/ops/activations.rs",
-        "src/ops/attention.rs",
-        "src/ops/basic.rs",
-        "src/ops/embedding.rs",
-        "src/ops/gqa.rs",
-        "src/ops/linear.rs",
-        "src/ops/loss.rs",
-        "src/ops/norm.rs",
-        "src/ops/rope.rs",
-        "src/ops/shape.rs",
-        "src/scaling/mod.rs",
-        "src/scaling/model_stats.rs",
-        "src/scaling/op_cost.rs",
-        "src/scaling/report.rs",
-        "src/scaling/roofline.rs",
-        "src/scaling/sharding.rs",
-        "src/scaling/inference.rs",
-    ],
+    srcs = _TNSR_SRCS,
+    crate_features = select({
+        ":enable_cuda": ["cuda"],
+        "//conditions:default": [],
+    }),
     crate_name = "tnsr",
     edition = "2021",
     visibility = ["//visibility:public"],
+    deps = select({
+        ":enable_cuda": [
+            "//ferric_continuum/cuda_kernels:gemm",
+            "//ferric_continuum/cuda_kernels:headers",
+            "//ferric_continuum/cuda_kernels:softmax",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 # End-to-end demo: no-checkpoint / whole-block / selective, emits /tmp/block.dot
@@ -74,6 +97,19 @@ rust_test(
     srcs = ["tests/qwen3_test.rs"],
     crate_name = "qwen3_test",
     edition = "2021",
+    deps = [":tnsr"],
+)
+
+# GPU forward agreement with CPU (only meaningful under --config=cuda).
+rust_test(
+    name = "cuda_forward_tests",
+    srcs = ["tests/cuda_forward_test.rs"],
+    crate_name = "cuda_forward_test",
+    edition = "2021",
+    tags = [
+        "cuda",
+        "requires-gpu",
+    ],
     deps = [":tnsr"],
 )
 

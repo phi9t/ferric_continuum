@@ -1,0 +1,31 @@
+{
+  "cases": [
+    {
+      "name": "small_square",
+      "m": 8,
+      "n": 8,
+      "k": 8,
+      "seed": 1,
+      "rtol": 1e-4,
+      "atol": 1e-5
+    },
+    {
+      "name": "rectangular",
+      "m": 17,
+      "n": 13,
+      "k": 11,
+      "seed": 2,
+      "rtol": 1e-4,
+      "atol": 1e-4
+    },
+    {
+      "name": "medium",
+      "m": 64,
+      "n": 48,
+      "k": 32,
+      "seed": 3,
+      "rtol": 1e-3,
+      "atol": 1e-3
+    }
+  ]
+}

@@ -1,14 +1,11 @@
-// SAXPY (single-precision a*x + y) CUDA kernel and host launcher.
+// Lesson 01 — Hello GPU.
 //
-// This is a minimal, self-contained example that exercises the rules_cuda
-// toolchain wired up in MODULE.bazel / .bazelrc. Build it with:
-//
-//     bazel build --config=cuda //ferric_continuum/cuda:saxpy
-//
-// It intentionally keeps error handling explicit rather than relying on a
-// macro so the control flow stays readable.
+// The gym's entry point: query the device you are running on, then perform the
+// canonical first kernel launch (SAXPY, y = a*x + y). Concepts: device
+// properties, grid/block launch geometry, host<->device copies, and explicit
+// error checking after a launch.
 
-#include "ferric_continuum/cuda/saxpy.hh"
+#include "ferric_continuum/cuda_gym/lessons/01_hello_gpu/hello_gpu.hh"
 
 #include <cuda_runtime.h>
 
@@ -16,7 +13,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace ferric_continuum::cuda {
+namespace ferric_continuum::cuda_gym::hello_gpu {
 namespace {
 
 void ThrowOnCudaError(cudaError_t status, const char* what) {
@@ -35,6 +32,30 @@ __global__ void SaxpyKernel(std::size_t n, float a, const float* x, float* y) {
 }
 
 }  // namespace
+
+DeviceInfo QueryDevice() {
+  int device_count = 0;
+  ThrowOnCudaError(cudaGetDeviceCount(&device_count), "cudaGetDeviceCount");
+  if (device_count == 0) {
+    throw std::runtime_error("QueryDevice: no CUDA device available");
+  }
+
+  int device_id = 0;
+  ThrowOnCudaError(cudaGetDevice(&device_id), "cudaGetDevice");
+
+  cudaDeviceProp props{};
+  ThrowOnCudaError(cudaGetDeviceProperties(&props, device_id),
+                   "cudaGetDeviceProperties");
+
+  DeviceInfo info;
+  info.device_id = device_id;
+  info.name = props.name;
+  info.compute_major = props.major;
+  info.compute_minor = props.minor;
+  info.multiprocessor_count = props.multiProcessorCount;
+  info.total_global_mem_bytes = props.totalGlobalMem;
+  return info;
+}
 
 void Saxpy(float a, const std::vector<float>& x, std::vector<float>& y) {
   if (x.size() != y.size()) {
@@ -76,4 +97,4 @@ void Saxpy(float a, const std::vector<float>& x, std::vector<float>& y) {
   cudaFree(d_y);
 }
 
-}  // namespace ferric_continuum::cuda
+}  // namespace ferric_continuum::cuda_gym::hello_gpu

@@ -1,0 +1,25 @@
+{
+  "cases": [
+    {
+      "name": "tiny",
+      "n": 7,
+      "seed": 1,
+      "rtol": 1e-5,
+      "atol": 1e-6
+    },
+    {
+      "name": "power_of_two",
+      "n": 1024,
+      "seed": 2,
+      "rtol": 1e-5,
+      "atol": 1e-6
+    },
+    {
+      "name": "ragged",
+      "n": 100003,
+      "seed": 3,
+      "rtol": 1e-5,
+      "atol": 1e-6
+    }
+  ]
+}

@@ -17,7 +17,7 @@ In that spirit, this codebase blends C++, Rust, and Python so tensor work can fl
 - **Collocated C++ and Rust examples** in `ferric_continuum/hello` and `ferric_continuum/foundation`.
 - **Foundation modules** covering value semantics, move semantics, parameter passing, smart pointers/RAII, and constructor rules.
 - **Muon optimizer prototype** in `ferric_continuum/optimizers/muon` using a C++ backend exposed to Python via pybind11.
-- **CUDA example** in `ferric_continuum/cuda` (opt-in SAXPY kernel via `rules_cuda`).
+- **CUDA gym** in `ferric_continuum/cuda_gym` (lessons + challenges) and shared kernels in `ferric_continuum/cuda_kernels`, with an opt-in GPU forward path for `tnsr`.
 - **Bazel-first workflows** for builds, tests, and demos.
 
 ---
@@ -71,21 +71,34 @@ bazel run //ferric_continuum/optimizers/muon:muon_demo
 bazel test //ferric_continuum/optimizers/muon:muon_py_test
 ```
 
-### CUDA (opt-in, GPU)
+### CUDA Gym (opt-in, GPU)
 
 CUDA is disabled by default so CPU-only builds and CI stay hermetic. Enable it
-with `--config=cuda` on a machine with a CUDA toolkit:
+with `--config=cuda` on a machine with a CUDA toolkit and GPU.
+
+**Prerequisites:** a locally-installed CUDA toolkit (auto-detected via
+`CUDA_PATH` or `/usr/local/cuda`) and a CUDA-capable GPU to *run* tests/demos.
+The default arch list covers Ampere→Blackwell including **sm_100 (B200)**; note
+CUDA 13.x dropped Volta (`compute_70`). Trim to your GPU for faster builds, e.g.
+`--config=cuda --cuda_archs=compute_100:sm_100`.
 
 ```bash
-# Build the SAXPY kernel (no GPU needed to compile).
-bazel build --config=cuda //ferric_continuum/cuda:saxpy
+# Shared production kernels / lessons (wildcards work under --config=cuda)
+bazel test --config=cuda //ferric_continuum/cuda_kernels/...
+bazel test --config=cuda //ferric_continuum/cuda_gym/lessons/...
 
-# Run the test (requires a GPU).
-bazel test --config=cuda //ferric_continuum/cuda:saxpy_test
+# Lesson 01 demo
+bazel run  --config=cuda //ferric_continuum/cuda_gym/lessons/01_hello_gpu:hello_gpu_demo
+
+# Challenge self-check (green). Student :grade fails until stubs are filled.
+bazel test --config=cuda //ferric_continuum/cuda_gym/challenges/vector_add:grade_reference
+
+# tnsr GPU forward (matmul + softmax)
+bazel test --config=cuda //ferric_continuum/tnsr:cuda_forward_tests
 ```
 
-See `ferric_continuum/cuda/README.md` for architecture selection and compiler
-options.
+See `ferric_continuum/cuda_gym/README.md` for the full lesson order, challenge
+workflow, and architecture flags (`--cuda_archs=...`).
 
 ---
 
@@ -95,8 +108,10 @@ options.
 ferric_continuum/
 ├── hello/                 # C++/Rust hello world example
 ├── foundation/            # Core C++/Rust concepts with demos and tests
-├── cuda/                  # Opt-in CUDA example (SAXPY via rules_cuda)
-└── optimizers/muon/        # Muon optimizer (pybind11 + numpy)
+├── cuda_gym/              # CUDA lessons + graded challenges
+├── cuda_kernels/          # Shared production GEMM / softmax / attention kernels
+├── tnsr/                  # Transformer autograd library (optional CUDA fwd)
+└── optimizers/muon/       # Muon optimizer (pybind11 + numpy)
 ```
 
 ---

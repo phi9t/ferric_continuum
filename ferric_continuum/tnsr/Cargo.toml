@@ -14,3 +14,11 @@ path = "src/lib.rs"
 [dependencies]
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[features]
+# Opt-in GPU forward path for matmul + softmax via the cuda_kernels C ABI.
+# Under Bazel this is selected by `--config=cuda` (see BUILD.bazel); the FFI
+# symbols are provided by //ferric_continuum/cuda_kernels. Backward stays on the
+# CPU path. Not buildable with plain `cargo` (no CUDA link), so it is off by
+# default and CPU builds/tests never touch CUDA.
+cuda = []

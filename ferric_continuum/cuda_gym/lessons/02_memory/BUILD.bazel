@@ -1,0 +1,45 @@
+# Lesson 02 — Memory: cudaMalloc / H2D / D2H / cudaFree.
+#
+# Run on a CUDA machine (targets are `cuda`; test needs a GPU):
+#     bazel run  --config=cuda //ferric_continuum/cuda_gym/lessons/02_memory:memory_demo
+#     bazel test --config=cuda //ferric_continuum/cuda_gym/lessons/02_memory:memory_test
+
+load("@rules_cuda//cuda:defs.bzl", "cuda_binary", "cuda_library", "cuda_test")
+
+package(default_visibility = ["//visibility:public"])
+
+cuda_library(
+    name = "memory",
+    srcs = ["memory.cu"],
+    hdrs = ["memory.hh"],
+    tags = ["cuda"],
+)
+
+cuda_binary(
+    name = "memory_demo",
+    srcs = ["memory_demo.cu"],
+    tags = [
+        "cuda",
+        "requires-gpu",
+    ],
+    deps = [
+        ":memory",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:globals",
+        "@abseil-cpp//absl/log:initialize",
+        "@abseil-cpp//absl/strings",
+    ],
+)
+
+cuda_test(
+    name = "memory_test",
+    srcs = ["memory_test.cu"],
+    tags = [
+        "cuda",
+        "requires-gpu",
+    ],
+    deps = [
+        ":memory",
+        "@googletest//:gtest_main",
+    ],
+)

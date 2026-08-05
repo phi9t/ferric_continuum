@@ -136,9 +136,18 @@ use_repo(pip, "pip_deps")
 
 llvm = use_extension("@toolchains_llvm//toolchain/extensions:llvm.bzl", "llvm")
 
-# Configure LLVM toolchain for multiple platforms
+# Configure LLVM toolchain for multiple platforms.
+#
+# stdlib = stdc++: link the system libstdc++ rather than clang's bundled libc++.
+# This gives CPU and CUDA translation units a single C++ ABI. CUDA 13.x rejects
+# libc++ on x86 ("libc++ is not supported on x86 system") and libc++'s <cmath>
+# also clashes with CUDA's math_functions.h, so CUDA host code must use
+# libstdc++; matching CPU builds to it avoids std::__1 vs std::__cxx11 link
+# errors when a cuda_test/cuda_binary links C++ deps like gtest or Abseil.
+# Opt back into libc++ for a specific CPU build with `--config=libcxx`.
 llvm.toolchain(
     llvm_version = "18.1.8",
+    stdlib = {"": "stdc++"},
 )
 
 use_repo(llvm, "llvm_toolchain")

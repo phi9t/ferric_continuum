@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "name": "tiny",
+      "rows": 2,
+      "cols": 4,
+      "seed": 1,
+      "rtol": 1e-4,
+      "atol": 1e-5
+    },
+    {
+      "name": "wide",
+      "rows": 8,
+      "cols": 128,
+      "seed": 2,
+      "rtol": 1e-4,
+      "atol": 1e-5
+    },
+    {
+      "name": "batchish",
+      "rows": 64,
+      "cols": 64,
+      "seed": 3,
+      "rtol": 1e-4,
+      "atol": 1e-5
+    }
+  ]
+}

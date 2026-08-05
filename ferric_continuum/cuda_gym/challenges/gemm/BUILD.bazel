@@ -1,0 +1,14 @@
+load("//ferric_continuum/cuda_gym/challenges:defs.bzl", "cuda_challenge")
+
+package(default_visibility = ["//visibility:public"])
+
+cuda_challenge(
+    name = "gemm",
+    cases = "cases.json",
+    reference_deps = [
+        "//ferric_continuum/cuda_kernels:gemm",
+        "//ferric_continuum/cuda_kernels:headers",
+    ],
+    reference_srcs = ["reference.cu"],
+    student_srcs = ["student.cu"],
+)

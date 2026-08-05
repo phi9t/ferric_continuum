@@ -1,0 +1,124 @@
+# Shared production CUDA kernels with a C ABI surface.
+#
+# These kernels power the advanced gym lessons (06_gemm / 07_softmax /
+# 08_attention) and tnsr's opt-in GPU forward path. The public headers under
+# include/ferric/cuda/ are pure C so both C++ and Rust FFI can link them.
+#
+# CUDA is disabled by default (see `--@rules_cuda//cuda:enable=False` in
+# .bazelrc). Targets are tagged `cuda` (+ `requires-gpu` on tests). Default
+# `--build_tag_filters=-cuda` / `--test_tag_filters=-cuda` keep them out of CPU
+# `//...`; `--config=cuda` replaces those filters so wildcards work:
+#
+#     bazel build --config=cuda //ferric_continuum/cuda_kernels/...
+#     bazel test  --config=cuda //ferric_continuum/cuda_kernels/...   # needs a GPU
+
+load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cuda//cuda:defs.bzl", "cuda_library", "cuda_test")
+
+package(default_visibility = ["//visibility:public"])
+
+# Public C ABI headers. `includes` puts include/ on the search path so consumers
+# write `#include "ferric/cuda/gemm.h"`.
+cc_library(
+    name = "headers",
+    hdrs = glob(["include/ferric/cuda/*.h"]),
+    includes = ["include"],
+    tags = ["cuda"],
+)
+
+# Internal C++ helpers (RAII device buffer, error macro, status names). Depends
+# on the CUDA runtime headers, so it is a cuda_library.
+cuda_library(
+    name = "common",
+    hdrs = [
+        "common/cuda_check.hh",
+        "common/device_buffer.hh",
+        "common/status.hh",
+    ],
+    tags = ["cuda"],
+    deps = [":headers"],
+)
+
+cuda_library(
+    name = "gemm",
+    srcs = ["gemm/gemm.cu"],
+    tags = ["cuda"],
+    deps = [
+        ":common",
+        ":headers",
+    ],
+)
+
+cuda_library(
+    name = "softmax",
+    srcs = ["softmax/softmax.cu"],
+    tags = ["cuda"],
+    deps = [
+        ":common",
+        ":headers",
+    ],
+)
+
+cuda_library(
+    name = "attention",
+    srcs = ["attention/attention.cu"],
+    tags = ["cuda"],
+    deps = [
+        ":common",
+        ":headers",
+    ],
+)
+
+# Convenience aggregate for consumers (tnsr, gym lessons) that want every
+# kernel behind the C ABI.
+cuda_library(
+    name = "cuda_kernels",
+    tags = ["cuda"],
+    deps = [
+        ":attention",
+        ":gemm",
+        ":softmax",
+    ],
+)
+
+cuda_test(
+    name = "gemm_test",
+    srcs = ["gemm/gemm_test.cu"],
+    tags = [
+        "cuda",
+        "requires-gpu",
+    ],
+    deps = [
+        ":gemm",
+        ":headers",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cuda_test(
+    name = "softmax_test",
+    srcs = ["softmax/softmax_test.cu"],
+    tags = [
+        "cuda",
+        "requires-gpu",
+    ],
+    deps = [
+        ":headers",
+        ":softmax",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cuda_test(
+    name = "attention_test",
+    srcs = ["attention/attention_test.cu"],
+    tags = [
+        "cuda",
+        "requires-gpu",
+    ],
+    deps = [
+        ":attention",
+        ":headers",
+        "@googletest//:gtest_main",
+    ],
+)

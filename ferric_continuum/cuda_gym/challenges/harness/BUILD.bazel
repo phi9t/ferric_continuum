@@ -1,0 +1,26 @@
+# Shared harness for CUDA gym challenges.
+#
+# The grader is pure Python stdlib (no numpy/pytest) so it runs anywhere; it
+# drives two cuda_binary targets (student vs reference) over a JSON case matrix
+# and compares outputs. challenge_io.hh is the C++ side each binary uses to
+# parse a case, generate deterministic inputs, time the kernel, check CUDA
+# errors, and emit JSON.
+
+load("@rules_cuda//cuda:defs.bzl", "cuda_library")
+load("@rules_python//python:defs.bzl", "py_library")
+
+package(default_visibility = ["//visibility:public"])
+
+cuda_library(
+    name = "challenge_io",
+    hdrs = ["challenge_io.hh"],
+    tags = ["cuda"],
+)
+
+py_library(
+    name = "grader",
+    srcs = ["grader.py"],
+    imports = ["../../.."],
+)
+
+exports_files(["grader.py"])

@@ -1,0 +1,39 @@
+# Lesson 07 — Softmax: thin demo/test over the shared cuda_kernels softmax.
+#
+#     bazel run  --config=cuda //ferric_continuum/cuda_gym/lessons/07_softmax:softmax_demo
+#     bazel test --config=cuda //ferric_continuum/cuda_gym/lessons/07_softmax:softmax_test
+
+load("@rules_cuda//cuda:defs.bzl", "cuda_binary", "cuda_test")
+
+package(default_visibility = ["//visibility:public"])
+
+cuda_binary(
+    name = "softmax_demo",
+    srcs = ["softmax_demo.cu"],
+    tags = [
+        "cuda",
+        "requires-gpu",
+    ],
+    deps = [
+        "//ferric_continuum/cuda_kernels:headers",
+        "//ferric_continuum/cuda_kernels:softmax",
+        "@abseil-cpp//absl/log",
+        "@abseil-cpp//absl/log:globals",
+        "@abseil-cpp//absl/log:initialize",
+        "@abseil-cpp//absl/strings",
+    ],
+)
+
+cuda_test(
+    name = "softmax_test",
+    srcs = ["softmax_test.cu"],
+    tags = [
+        "cuda",
+        "requires-gpu",
+    ],
+    deps = [
+        "//ferric_continuum/cuda_kernels:headers",
+        "//ferric_continuum/cuda_kernels:softmax",
+        "@googletest//:gtest_main",
+    ],
+)

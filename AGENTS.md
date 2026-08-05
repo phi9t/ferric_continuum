@@ -16,6 +16,7 @@ Ferric Continuum is designed to grow into an agent-driven HPC system, but the cu
 
 - C++/Rust learning modules in `ferric_continuum/hello` and `ferric_continuum/foundation`.
 - A Muon optimizer prototype in `ferric_continuum/optimizers/muon` (pybind11 + numpy).
+- A **CUDA gym** in `ferric_continuum/cuda_gym` (8 teaching lessons + graded challenges) plus shared production kernels in `ferric_continuum/cuda_kernels`, which also back `tnsr`'s opt-in GPU forward path. All CUDA targets are opt-in via `--config=cuda` and need a GPU to run; CPU-only `bazel test //...` skips them.
 - No agent implementations are present yet (`/agents` does not exist today).
 
 ---

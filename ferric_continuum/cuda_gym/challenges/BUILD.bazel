@@ -1,0 +1,3 @@
+# Package marker so challenges/*/BUILD.bazel can load :defs.bzl.
+
+exports_files(["defs.bzl"])

@@ -33,6 +33,10 @@ bazel run //ferric_continuum/foundation:value_semantics_demo_rs
 
 # Muon optimizer demo
 bazel run //ferric_continuum/optimizers/muon:muon_demo
+
+# CUDA gym (opt-in; needs toolkit + GPU)
+bazel test --config=cuda //ferric_continuum/cuda_kernels/...
+bazel run  --config=cuda //ferric_continuum/cuda_gym/lessons/01_hello_gpu:hello_gpu_demo
 ```
 
 ### Targeted Tests
@@ -47,6 +51,10 @@ bazel test //ferric_continuum/foundation:all
 
 # Muon Python test
 bazel test //ferric_continuum/optimizers/muon:muon_py_test
+
+# CUDA (GPU-tagged; skip on CPU CI)
+bazel test --config=cuda //ferric_continuum/cuda_gym/lessons/...
+bazel test --config=cuda //ferric_continuum/tnsr:cuda_forward_tests
 ```
 
 ## Repository Layout
