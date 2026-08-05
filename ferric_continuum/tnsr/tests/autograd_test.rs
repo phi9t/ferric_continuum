@@ -2,7 +2,7 @@ use std::rc::Rc;
 use tnsr::{
     autograd::Engine,
     checkpoint::{checkpoint, TransformerSelectivePolicy, WholeBlockCheckpoint},
-    ops::{activations, attention, basic, embedding, linear, loss, norm},
+    ops::{activations, attention, basic, embedding, linear, loss, norm, shape},
     tensor::{Shape, Tensor, TensorValue},
     transformer::{TransformerBlock, TransformerConfig},
 };
@@ -520,4 +520,83 @@ fn test_attention_mix_shape_mismatch_panics() {
     let p = Tensor::randn(&[2, 3, 4]); // wrong: should be [2,3,3]
     let v = Tensor::randn(&[2, 3, 5]);
     let _ = attention::attention_mix(&p, &v, "bad_mix");
+}
+
+// ---------------------------------------------------------------------------
+// split3 — the multi-output op
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_split3_forward_is_slicing() {
+    // Concatenating q, k, v must reproduce the input exactly.
+    let x = Tensor::from_value_no_grad(TensorValue::from_vec(
+        Shape(vec![2, 6]),
+        (0..12).map(|i| i as f32).collect(),
+    ));
+    let (q, k, v) = shape::split3(&x, "qkv");
+
+    assert_eq!(q.shape().0, vec![2, 2]);
+    assert_eq!(k.shape().0, vec![2, 2]);
+    assert_eq!(v.shape().0, vec![2, 2]);
+
+    // Row 0 of x is [0,1,2,3,4,5] -> q=[0,1], k=[2,3], v=[4,5]
+    assert_eq!(q.inner.borrow().value.data.as_ref(), &vec![0.0, 1.0, 6.0, 7.0]);
+    assert_eq!(k.inner.borrow().value.data.as_ref(), &vec![2.0, 3.0, 8.0, 9.0]);
+    assert_eq!(v.inner.borrow().value.data.as_ref(), &vec![4.0, 5.0, 10.0, 11.0]);
+}
+
+#[test]
+fn test_split3_backward() {
+    // Weight q, k, v differently so a wrong concat order/placement would fail
+    // the finite-difference check: loss = sum(1*q + 2*k + 3*v).
+    let x = Tensor::randn(&[2, 3, 12]).requires_grad();
+    grad_check(
+        |inputs| {
+            let (q, k, v) = shape::split3(&inputs[0], "qkv");
+            let qk = basic::add(
+                &basic::scale(&q, 1.0, "wq"),
+                &basic::scale(&k, 2.0, "wk"),
+                "qk",
+            );
+            let qkv = basic::add(&qk, &basic::scale(&v, 3.0, "wv"), "qkv_sum");
+            basic::sum(&qkv, "loss")
+        },
+        &[x],
+        1e-3,
+        3e-3,
+    );
+}
+
+#[test]
+fn test_split3_shared_producer() {
+    // All three outputs are produced by the SAME OpCall, so the DAG node is
+    // visited once and the input gradient accumulates all three contributions.
+    let x = Tensor::randn(&[4, 9]).requires_grad();
+    let (q, k, v) = shape::split3(&x, "qkv");
+
+    let q_prod = q.inner.borrow().autograd.producer.clone();
+    let k_prod = k.inner.borrow().autograd.producer.clone();
+    let v_prod = v.inner.borrow().autograd.producer.clone();
+    assert!(q_prod.is_some());
+    assert!(Rc::ptr_eq(
+        q_prod.as_ref().unwrap(),
+        k_prod.as_ref().unwrap()
+    ));
+    assert!(Rc::ptr_eq(
+        q_prod.as_ref().unwrap(),
+        v_prod.as_ref().unwrap()
+    ));
+
+    // Only k participates in the loss: q and v get zero-gradient outputs, and
+    // the engine's zero-fallback for unused outputs must still produce a valid
+    // full-width input gradient.
+    let loss = basic::sum(&k, "loss");
+    let mut engine = Engine::new();
+    engine.backward(&loss);
+
+    let g = x.grad().expect("x should have grad");
+    assert_eq!(g.shape.0, vec![4, 9]);
+    // Middle chunk (k) is ones; q and v chunks are zero.
+    let row0 = &g.data.as_ref()[0..9];
+    assert_eq!(row0, &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0]);
 }

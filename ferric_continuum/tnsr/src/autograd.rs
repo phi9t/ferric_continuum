@@ -33,7 +33,7 @@
 //!
 //! - [`OpCall`]      — one node in the DAG (one forward op that ran).
 //! - [`GradTarget`]  — a reference to an *input* of an op: where to send its
-//!                     gradient, and how to recurse further back.
+//!   gradient, and how to recurse further back.
 //! - [`GradEdge`]    — a computed gradient paired with the target it belongs to.
 //! - [`BackwardRecipe`] — the per-op rule turning output grads into input grads.
 //! - [`Engine`]      — owns the accumulation map and drives the reverse walk.
@@ -78,6 +78,7 @@ pub enum OpKind {
     Dropout,
     CrossEntropy,
     Reshape,
+    Split,
     Rope,
     GqaAttention,
 }
