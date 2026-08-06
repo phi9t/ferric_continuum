@@ -1,0 +1,69 @@
+#+TITLE: Issue tracker: local org-mode
+
+Issues and specs for this repo live as org-mode files in `.scratch/`.
+
+This is a repo-local customization of Matt Pocock's default local markdown tracker. Markdown is the upstream default and is easier for generic tools to parse, but org-mode is the better fit for this repo's Emacs-heavy workflow: TODO states, tags, properties, folding, agenda views, refiling, and capture templates are useful when humans manage the queue locally.
+
+* Conventions
+
+- One effort per directory: `.scratch/<effort-slug>/`
+- The spec is `.scratch/<effort-slug>/spec.org`
+- Implementation issues are one file per ticket at `.scratch/<effort-slug>/issues/<NN>-<slug>.org`, numbered from `01` in dependency order
+- Never create one combined ticket file; one ticket is one file
+- Conversation history appends near the bottom under `* Comments`
+- Resolution notes append under `* Answer`
+
+* Metadata
+
+Use org keywords near the top of each file so both humans and agents can parse state without relying on heading text:
+
+#+begin_src org
+#+TITLE: Short ticket title
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 01-prerequisite-ticket, 03-context-ticket
+#+PARENT: ../spec.org
+#+end_src
+
+Valid `#+TYPE:` values for wayfinding tickets are `research`, `prototype`, `grilling`, and `task`.
+
+Valid triage `#+STATUS:` values are the tracker label strings listed in [[file:triage-labels.md][triage-labels.md]]. During wayfinding, `open`, `claimed`, and `resolved` are also valid local work states.
+
+* Ticket Template
+
+#+begin_src org
+#+TITLE: <ticket title>
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY:
+#+PARENT: ../spec.org
+
+* Context
+
+* Requirements
+
+* Out of scope
+
+* Verification
+
+* Comments
+#+end_src
+
+* When a skill says "publish to the issue tracker"
+
+Create a new org file under `.scratch/<effort-slug>/`, creating the directory if needed. Specs use `spec.org`; implementation tickets go under `issues/`.
+
+* When a skill says "fetch the relevant ticket"
+
+Read the referenced org file. The user will normally pass the path, effort slug, or ticket number directly.
+
+* Wayfinding operations
+
+Used by `/wayfinder`. The map is a file with one child file per ticket.
+
+- *Map*: `.scratch/<effort>/map.org` holds Notes, Decisions-so-far, and Fog sections.
+- *Child ticket*: `.scratch/<effort>/issues/NN-<slug>.org`, numbered from `01`, with the question in the body. `#+TYPE:` records the ticket type and `#+STATUS:` records `open`, `claimed`, or `resolved`.
+- *Blocking*: `#+BLOCKED_BY:` lists ticket numbers or slugs. A ticket is unblocked when every listed file is `resolved`.
+- *Frontier*: scan `.scratch/<effort>/issues/` for files that are open, unblocked, and unclaimed; first by number wins.
+- *Claim*: set `#+STATUS: claimed` and save before any work.
+- *Resolve*: set `#+STATUS: resolved`, append the answer under `* Answer`, then append a context pointer to the map's Decisions-so-far section in `map.org`.

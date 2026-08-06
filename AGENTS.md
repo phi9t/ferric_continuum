@@ -8,7 +8,7 @@
 
 ## Overview
 
-Ferric Continuum is designed to grow into an agent-driven HPC system, but the current repository focuses on foundational C++/Rust examples and a Python/C++ optimizer prototype. This document describes the **planned** agent architecture and how it should integrate once implemented.
+Ferric Continuum is a Bazel-built monorepo designed to grow into an agent-driven HPC system, but the current repository focuses on foundational C++/Rust examples and a Python/C++ optimizer prototype. This document describes the **planned** agent architecture and how it should integrate once implemented.
 
 ---
 
@@ -49,6 +49,22 @@ Ferric Continuum is designed to grow into an agent-driven HPC system, but the cu
 - Bazel targets should follow the pattern `//agents:<agent_name>`.
 - Agents should be hermetic and runnable in a Bazel sandbox.
 - C++ logging uses Abseil; Rust logging uses `tracing`.
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs are tracked as local org-mode files under `.scratch/`. See `docs/agents/issue-tracker.org`.
+
+### Triage labels
+
+The repo uses the default five Matt Pocock skill triage roles as file-backed status values. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Ferric Continuum is treated as a multi-context repo with a root context map and context-local docs. See `docs/agents/domain.md`.
 
 ---
 
