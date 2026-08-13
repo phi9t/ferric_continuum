@@ -1,6 +1,6 @@
 #+TITLE: Decide source of truth for overlapping Rust modules
 #+TYPE: grilling
-#+STATUS: open
+#+STATUS: resolved
 #+BLOCKED_BY: 01-define-incorporation-goal, 02-inventory-external-artifacts
 #+PARENT: ../map.org
 
@@ -30,3 +30,114 @@ The monorepo version has already accumulated Qwen3, CUDA, distributed-teaching, 
 This decision must prevent accidental regression of validated monorepo behavior.
 
 * Comments
+
+* Answer
+
+For overlapping Rust modules, `ferric_continuum/tnsr` is the source of truth. `~/workspace/tnsr` is source material for selective behavior ports, tests, and docs; it should not replace shared files wholesale.
+
+** Core runtime files
+
+Monorepo source of truth:
+
+- `autograd.rs`
+- `tensor.rs`
+- `grad_mode.rs`
+- `saved.rs`
+- `checkpoint.rs`
+- `debug.rs`
+- `transformer.rs`
+- `lib.rs`
+
+Rationale:
+
+- Monorepo `autograd.rs` has the newer `OpCallId(pub usize)`, `GradEdge`, `BackwardRecipe` trait, named ops, multi-output plumbing, and source-level teaching docs.
+- Monorepo `tensor.rs` has `TensorId` and `Shape` newtypes, `TensorStats`, xorshift initialization helpers, and APIs already used by Qwen3/CUDA/scaling code.
+- Monorepo `checkpoint.rs` and `saved.rs` use the newer `SaveRecord`, `RecomputeHandle`, `SaveSite::new`, and `DebugRecorder` integration.
+- Monorepo `debug.rs` has structured op/save/checkpoint/backward/grad event stores and accessors used by Qwen3 op-closure analysis.
+- Monorepo `transformer.rs` is already aligned to current `TransformerConfig { d_model, d_ff, n_heads }`, named ops, and scaling docs.
+- Monorepo `lib.rs` exports Qwen3, BPE, loader, and CUDA modules that do not exist externally.
+
+External concepts to port selectively:
+
+- Debug trace serialization and pretty text trace from external `debug.rs`, adapted to monorepo `DebugRecorder` event types.
+- DOT/JSON convenience APIs from external `debug.rs`, if they improve the existing `write_dot` surface.
+- Finite-difference `grad_check`, `tensor_stats`, and `assert_all_finite` helpers from external `debug.rs`, preferably as test helpers unless a production debugging API is justified.
+- Any checkpoint behavior tests that expose real monorepo gaps, adapted to current `SavedTensor`/`CheckpointPolicy` APIs.
+
+** Ops files
+
+Monorepo source of truth:
+
+- `ops/activations.rs`
+- `ops/attention.rs`
+- `ops/basic.rs`
+- `ops/embedding.rs`
+- `ops/linear.rs`
+- `ops/loss.rs`
+- `ops/mod.rs`
+- `ops/norm.rs`
+
+Rationale:
+
+- Monorepo ops use named-op APIs and `BackwardRecipe` structs.
+- Monorepo has raw CPU/CUDA-aware forward helpers in places where external ops only expose simple public wrappers.
+- Monorepo-only ops `gqa.rs`, `rope.rs`, and `shape.rs` are required by Qwen3 and must not be disrupted.
+- Monorepo `norm.rs` uses `EPS = 1e-6`, matching the validated Qwen3/HF path.
+
+External concepts to port selectively:
+
+- Simpler gradient-check test cases from external `ops_gradcheck.rs`, not the old op APIs themselves.
+- Any external panic/shape tests that cover behavior missing from monorepo tests.
+
+** Transformer block
+
+Monorepo `transformer.rs` remains source of truth.
+
+External `transformer.rs` may supply behavior-test ideas, but its API and shapes are older: `dim`/`hidden` naming, seed-driven constructor, old op signatures, and explicit reshape path differ from the monorepo. Do not port it directly.
+
+** Scaling files
+
+Monorepo source of truth for existing files:
+
+- `scaling/inference.rs`
+- `scaling/mod.rs`
+- `scaling/model_stats.rs`
+- `scaling/op_cost.rs`
+- `scaling/report.rs`
+- `scaling/roofline.rs`
+- `scaling/sharding.rs`
+
+Rationale:
+
+- Monorepo scaling files are already aligned to current `TransformerConfig` and distributed-teaching modules.
+- Monorepo owns `scaling/distributed/*`, which supersedes some external `parallelism.rs` concepts.
+
+External concepts to port selectively:
+
+- `ModelShape` as a symbolic multi-layer shape concept, if needed for memory/report formulas. Do not replace monorepo `model_stats`; extend or add a separate symbolic type.
+- `scaling/memory.rs` concepts: precision modes, ZeRO stage memory partitioning, recompute activation estimates, and text report.
+- `scaling/parallelism.rs` concepts only where they complement, not duplicate, `scaling/distributed/*`.
+- Runtime-derived scaling reports from external `ScaleReport::from_loss_and_debug`, if useful, adapted to monorepo `DebugRecorder` and existing `scale_report` API.
+
+** External-only modules**
+
+Likely import-worthy, but not "overlap" replacements:
+
+- `src/inference.rs`: generic CPU inference primitives (`RopeConfig`, `apply_rope`, `KvCache`, `DecodeRequest`, `AttentionStep`, batching model). It should land behind a deliberate API boundary and avoid conflicting with monorepo `ops/rope.rs` and Qwen3 inference.
+- `src/playground.rs` and `src/bin/tnsr-demo.rs`: useful as a Bazel-backed teaching/debug CLI, but should be adapted to current module APIs rather than copied.
+
+** Tests**
+
+External tests should be treated as behavior specifications, not direct imports. Prioritize adapting:
+
+- `inference.rs` for CPU RoPE/KV-cache/batcher behavior.
+- `cli.rs` if the playground CLI is accepted.
+- `debug_trace.rs` for structured trace expectations.
+- `scaling_reports.rs` for memory/ZeRO and parallelism report behavior.
+- selected `ops_gradcheck.rs` cases to strengthen current monorepo grad checks.
+
+Do not port tests that simply assert old API spellings.
+
+** Default rule for implementation tickets**
+
+When an implementation ticket touches an overlapping file, start from the monorepo file and port the smallest external behavior needed. If a direct replacement seems attractive, it must reopen this decision with evidence that the monorepo behavior is obsolete and that Qwen3/CUDA/distributed/Bazel validation remains intact.
