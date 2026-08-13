@@ -1,0 +1,31 @@
+#+TITLE: Incorporate external tnsr into Ferric Continuum
+#+TYPE: wayfinder:map
+#+STATUS: open
+
+* Destination
+
+Produce a decision-backed incorporation plan for bringing useful material from `~/workspace/tnsr` into this Bazel-built monorepo without regressing the existing `ferric_continuum/tnsr` module. The map is complete when the remaining work can be collapsed into a spec and implementation tickets.
+
+* Notes
+
+- Consult `/data02/home/philip.yang/workspace/ferric_continuum/docs/agents/domain.md` and `/data02/home/philip.yang/workspace/ferric_continuum/docs/agents/issue-tracker.org`.
+- Treat `ferric_continuum/tnsr` as the current Bazel-integrated target, not a blank destination.
+- Treat `~/workspace/tnsr` as a Cargo-first source repo containing overlapping Rust core files, CPU inference primitives, playground CLI, tests, docs, examples, and a Vite/Three.js trace viewer.
+- Preserve the repo's Bazel-first workflow. Cargo manifests may exist for Rust tooling, but implementation landing must keep Bazel targets coherent.
+- Decisions should prefer selective, reviewed incorporation over wholesale overwrite.
+
+* Decisions so far
+
+* Not yet specified
+
+- Exact implementation-ticket split after source-of-truth and import-boundary decisions are resolved.
+- Whether any `CONTEXT-MAP.md` or context-local `CONTEXT.md` updates should be part of the implementation phase.
+- Whether external `tnsr` docs become repo docs, source comments, examples, or archived references.
+- Whether web viewer assets need a new Bazel/npm toolchain boundary or should remain outside this incorporation.
+- Whether the standalone `~/workspace/tnsr` repo should be archived, left as-is, or kept as a prototype/source reference after incorporation.
+
+* Out of scope
+
+- Directly overwriting `ferric_continuum/tnsr` with `~/workspace/tnsr`.
+- Pushing branches or changing remotes.
+- Reworking unrelated Ferric Continuum modules outside the integration boundaries this map identifies.

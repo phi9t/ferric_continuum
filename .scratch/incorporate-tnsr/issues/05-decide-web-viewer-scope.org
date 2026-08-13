@@ -1,0 +1,27 @@
+#+TITLE: Decide web trace viewer scope
+#+TYPE: grilling
+#+STATUS: open
+#+BLOCKED_BY: 01-define-incorporation-goal, 02-inventory-external-artifacts
+#+PARENT: ../map.org
+
+* Question
+
+Should the Vite/Three.js trace viewer from `~/workspace/tnsr/web` be incorporated into Ferric Continuum now?
+
+If yes, decide:
+
+- destination path
+- build/test command surface
+- whether Bazel should wrap npm/Vite/Playwright commands
+- how sample trace JSON is produced or checked in
+- whether the viewer is a production tool, teaching artifact, or prototype reference
+
+If no, decide whether to archive it, link to it from docs, or leave it only in the external repo.
+
+* Context
+
+The external README describes the viewer as a Vite + Three.js trace viewer for structured `trace-json` exports. It includes npm tests, build, and Playwright e2e. Ferric Continuum currently has no obvious frontend build boundary.
+
+This decision is intentionally separate from Rust library incorporation because web tooling can expand the build and CI surface substantially.
+
+* Comments

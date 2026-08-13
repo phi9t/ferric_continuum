@@ -1,0 +1,24 @@
+#+TITLE: Collapse incorporation decisions into build spec
+#+TYPE: task
+#+STATUS: open
+#+BLOCKED_BY: 01-define-incorporation-goal, 02-inventory-external-artifacts, 03-decide-source-of-truth-for-overlaps, 04-decide-bazel-integration-boundary, 05-decide-web-viewer-scope, 06-decide-history-policy, 07-decide-verification-matrix
+#+PARENT: ../map.org
+
+* Question
+
+Once the preceding decisions are resolved, synthesize them into a buildable spec suitable for `/to-spec` and `/to-tickets`.
+
+The answer should identify:
+
+- implementation slices
+- dependency order
+- accepted artifacts and destination paths
+- explicit out-of-scope artifacts
+- required validation commands
+- commit/landing expectations
+
+* Context
+
+This ticket is intentionally blocked by every first-wave decision. It should not be claimed until the map has enough decisions recorded in `../map.org` that the remaining work is execution rather than wayfinding.
+
+* Comments

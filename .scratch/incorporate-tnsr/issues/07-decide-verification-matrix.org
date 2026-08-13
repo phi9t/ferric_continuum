@@ -1,0 +1,27 @@
+#+TITLE: Decide verification matrix
+#+TYPE: grilling
+#+STATUS: open
+#+BLOCKED_BY: 02-inventory-external-artifacts, 03-decide-source-of-truth-for-overlaps, 04-decide-bazel-integration-boundary, 05-decide-web-viewer-scope
+#+PARENT: ../map.org
+
+* Question
+
+What verification matrix proves the incorporation succeeded without regressing existing `ferric_continuum/tnsr` behavior?
+
+Resolve the required checks for:
+
+- Bazel build/test targets
+- Rust formatting/lints/doc checks, if still relevant through Cargo mirrors
+- imported or reconciled tests from `~/workspace/tnsr`
+- existing Qwen3 numeric compatibility tooling
+- CUDA opt-in targets, if touched
+- web viewer npm/Playwright checks, if in scope
+- docs/examples smoke tests
+
+The answer should define the minimum commands required before implementation can land.
+
+* Context
+
+Prior `ferric_continuum/tnsr` work expects real validation, not source changes alone. CPU-only checks should remain available without CUDA, while CUDA checks stay opt-in through `--config=cuda`.
+
+* Comments

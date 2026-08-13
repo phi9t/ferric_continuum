@@ -1,0 +1,30 @@
+#+TITLE: Inventory external tnsr artifacts
+#+TYPE: research
+#+STATUS: open
+#+BLOCKED_BY:
+#+PARENT: ../map.org
+
+* Question
+
+What artifacts exist in `~/workspace/tnsr`, and how do they map to current `ferric_continuum/tnsr` functionality?
+
+Produce an inventory grouped by artifact class:
+
+- Rust core modules
+- ops modules
+- inference/checkpoint/debug/playground/scaling modules
+- binaries/examples
+- tests
+- docs
+- web viewer assets
+- build/tooling metadata
+
+For each group, classify the relationship to the monorepo as one of: already present, newer in monorepo, missing from monorepo, divergent and needs reconciliation, or likely out of scope.
+
+* Context
+
+Use the external repo at `/data02/home/philip.yang/workspace/tnsr` and the current monorepo module at `/data02/home/philip.yang/workspace/ferric_continuum/ferric_continuum/tnsr`.
+
+Do not make source changes while resolving this ticket. The output is a source-grounded inventory that later decisions can cite.
+
+* Comments

@@ -1,0 +1,24 @@
+#+TITLE: Decide history preservation policy
+#+TYPE: grilling
+#+STATUS: open
+#+BLOCKED_BY: 01-define-incorporation-goal, 02-inventory-external-artifacts
+#+PARENT: ../map.org
+
+* Question
+
+Should any `~/workspace/tnsr` git history be preserved inside Ferric Continuum, or should incorporation be a normal patch series with the external repo cited as source material?
+
+Resolve whether to use:
+
+- git subtree or filter-repo import
+- squashed source import
+- selective manual port with references in commit messages/docs
+- no history import
+
+The answer should account for overlap with existing `ferric_continuum/tnsr` history and the risk of making future `git blame` less useful.
+
+* Context
+
+The external repo is on branch `focused-transformer-visualization`. The monorepo already has independent `tnsr` history, including recent Qwen3/CUDA/scaling work. A history-preserving import may be useful for attribution and archaeology, but can also complicate a selective reconciliation.
+
+* Comments

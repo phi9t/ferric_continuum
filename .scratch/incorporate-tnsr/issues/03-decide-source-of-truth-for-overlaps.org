@@ -1,0 +1,32 @@
+#+TITLE: Decide source of truth for overlapping Rust modules
+#+TYPE: grilling
+#+STATUS: open
+#+BLOCKED_BY: 01-define-incorporation-goal, 02-inventory-external-artifacts
+#+PARENT: ../map.org
+
+* Question
+
+For Rust modules that exist in both repos, which side is source of truth and how should divergences be reconciled?
+
+Resolve this at least for:
+
+- `autograd.rs`
+- `tensor.rs`
+- `checkpoint.rs`
+- `saved.rs`
+- `debug.rs`
+- `grad_mode.rs`
+- `transformer.rs`
+- `ops/*`
+- `scaling/*`
+- tests covering the same behavior
+
+The answer should identify any files where `~/workspace/tnsr` should replace, partially patch, or merely inform the monorepo version.
+
+* Context
+
+The monorepo version has already accumulated Qwen3, CUDA, distributed-teaching, and Bazel integration work. The external repo appears to preserve a cleaner Cargo-first teaching/library shape and may contain features or docs absent from the monorepo.
+
+This decision must prevent accidental regression of validated monorepo behavior.
+
+* Comments
