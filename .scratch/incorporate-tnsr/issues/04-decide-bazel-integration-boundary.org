@@ -1,6 +1,6 @@
 #+TITLE: Decide Bazel integration boundary
 #+TYPE: grilling
-#+STATUS: open
+#+STATUS: resolved
 #+BLOCKED_BY: 01-define-incorporation-goal, 02-inventory-external-artifacts, 03-decide-source-of-truth-for-overlaps
 #+PARENT: ../map.org
 
@@ -26,3 +26,91 @@ Ferric Continuum is Bazel-first. Existing Rust support includes root and per-cra
 Avoid landing a Cargo-only feature path that future agents cannot validate through Bazel.
 
 * Comments
+
+* Answer
+
+Accepted Rust artifacts from `~/workspace/tnsr` must land as first-class Bazel targets in `ferric_continuum/tnsr`. Cargo metadata may be updated as an editor/tooling mirror, but Bazel remains the build, test, and validation boundary.
+
+** Current boundary**
+
+- `ferric_continuum/tnsr/BUILD.bazel` already owns `rust_library`, `rust_binary`, `rust_test`, and `rust_doc` targets.
+- `MODULE.bazel` already uses `rules_rust` crate_universe and has direct specs for `serde`, `serde_json`, and `clap`.
+- `ferric_continuum/tnsr/Cargo.toml` is a tooling mirror for Rust analyzer/Cargo ergonomics; it is not the primary source of truth for CI.
+- CUDA remains opt-in through `--config=cuda`, with CUDA-tagged tests excluded from CPU-only wildcards.
+
+** Rust library modules**
+
+Accepted source modules should be added to `_TNSR_SRCS` and exposed through `src/lib.rs` only when they are intended as library API.
+
+Use these likely boundaries:
+
+- `src/inference.rs`: add as a normal library module if the CPU inference primitives are accepted.
+- `src/scaling/memory.rs`: add under `src/scaling/` if memory/ZeRO reports are accepted.
+- `src/scaling/parallelism.rs`: either add under `src/scaling/` or fold into `src/scaling/distributed/`; the implementation ticket should choose the smaller API surface after reconciling overlap.
+- debug trace helpers: extend existing `src/debug.rs`; do not add a parallel debug module.
+- symbolic `ModelShape`: add to an existing scaling module or a new small scaling shape module only if needed by accepted memory/report APIs.
+
+** Rust binaries and CLI**
+
+If the external `tnsr-demo` behavior is accepted, land it as a Bazel `rust_binary`, preferably with a distinct target/name that does not blur with the existing `:tnsr_demo` unless that target is intentionally replaced.
+
+Recommended options:
+
+- extend existing `:tnsr_demo` if the external subcommands become the canonical teaching/debug CLI;
+- otherwise add a new target such as `:tnsr_playground` or `:tnsr_trace_demo`.
+
+Any CLI dependency must be declared explicitly:
+
+- `@crates//:clap` can be used; it is already a direct `MODULE.bazel` crate spec.
+- `@crates//:serde` / `@crates//:serde_json` can be used for trace JSON if needed.
+- If an implementation directly uses `rand`, add `crate.spec(package = "rand", version = "...")` to `MODULE.bazel` and regenerate `MODULE.bazel.lock`; do not rely on a transitive `rand` alias.
+
+** Tests**
+
+Accepted external tests should become Bazel `rust_test` targets. Prefer several focused targets over a single large test when the feature areas are separable:
+
+- `inference_tests`
+- `debug_trace_tests`
+- `scaling_memory_tests`
+- `playground_cli_tests`
+- selected grad-check additions to the existing `tnsr_tests` target or a new focused target
+
+Tests that require CLI binaries should depend on the relevant binary only if rules_rust supports the pattern cleanly; otherwise write library-level tests and keep CLI smoke checks as explicit `bazel run` commands in the verification matrix.
+
+** Examples and generated artifacts**
+
+External examples such as `examples/tiny_block.rs` should not land as Cargo-only examples. Either:
+
+- convert them to `rust_binary` targets under `ferric_continuum/tnsr`, or
+- convert their assertions into `rust_test` targets, or
+- adapt the prose into docs if the executable artifact is not worth maintaining.
+
+Generated debug artifacts such as `.dot`, `.json`, `target/`, or example output files should not be checked in unless a later ticket explicitly chooses a small golden fixture.
+
+** Docs**
+
+Docs can land under the monorepo docs structure or `ferric_continuum/tnsr/` as markdown/source docs. They must describe Bazel commands first. Cargo commands may appear only as local tooling alternatives when they are actually supported.
+
+** Web viewer**
+
+The web trace viewer is outside this Rust/Bazel boundary decision. Ferric Continuum currently has no Node/Vite/Playwright Bazel stack. Do not introduce npm/Vite/Playwright tooling as part of Rust artifact incorporation. The separate `Decide web trace viewer scope` ticket must decide whether to:
+
+- keep it out of scope,
+- import it as non-Bazel auxiliary tooling,
+- add a Bazel-wrapped frontend toolchain,
+- or archive it as reference material.
+
+** Lockfile and dependency discipline**
+
+Implementation tickets that add direct Rust dependencies must update both:
+
+- `MODULE.bazel` crate specs and regenerated `MODULE.bazel.lock`;
+- `ferric_continuum/tnsr/Cargo.toml` only when needed for the Cargo mirror.
+
+Regenerate lockfiles with the repo's intended Bazel version, not whichever `bazel` shim happens to be first on `PATH`.
+
+** Validation boundary**
+
+Every implementation slice must have at least one Bazel build/test command. Cargo checks may supplement but cannot replace Bazel validation.
+
+CPU-only slices should pass without `--config=cuda`. CUDA checks remain explicit and opt-in.
