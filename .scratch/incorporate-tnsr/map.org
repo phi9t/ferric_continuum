@@ -16,6 +16,8 @@ Produce a decision-backed incorporation plan for bringing useful material from `
 
 * Decisions so far
 
+- [[file:issues/02-inventory-external-artifacts.org][Inventory external tnsr artifacts]] — use `~/workspace/tnsr` as selective source material: monorepo is newer for Qwen3/CUDA/distributed/Bazel paths, while external repo contributes likely import-worthy CPU inference, playground, memory/parallelism reports, docs/examples, and web viewer assets.
+
 * Not yet specified
 
 - Exact implementation-ticket split after source-of-truth and import-boundary decisions are resolved.

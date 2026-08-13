@@ -1,6 +1,6 @@
 #+TITLE: Inventory external tnsr artifacts
 #+TYPE: research
-#+STATUS: open
+#+STATUS: resolved
 #+BLOCKED_BY:
 #+PARENT: ../map.org
 
@@ -28,3 +28,70 @@ Use the external repo at `/data02/home/philip.yang/workspace/tnsr` and the curre
 Do not make source changes while resolving this ticket. The output is a source-grounded inventory that later decisions can cite.
 
 * Comments
+
+* Answer
+
+Inventory result: `~/workspace/tnsr` should be treated as a source of selective ports, not as a replacement tree. The current monorepo `ferric_continuum/tnsr` is already ahead in Qwen3, CUDA, GQA/RoPE, Bazel integration, distributed teaching modules, and HF numeric-compat tooling. The external repo has important missing artifacts around CPU inference, playground/reporting, memory/parallelism formulas, tests, examples, docs, and a web trace viewer.
+
+** Rust core modules
+
+- Already present but divergent: `autograd.rs`, `checkpoint.rs`, `debug.rs`, `grad_mode.rs`, `lib.rs`, `saved.rs`, `tensor.rs`, `transformer.rs`.
+- Classification: divergent and needs reconciliation.
+- Direction: the monorepo versions should be presumed source of truth until ticket `Decide source of truth for overlapping Rust modules` resolves otherwise. They contain newer source-level teaching docs, Qwen3-supporting shape/operator changes, changed id types, changed debug recorder interfaces, checkpointing changes, and Bazel-facing module exports.
+
+** Ops modules
+
+- Present in both: `ops/activations.rs`, `ops/attention.rs`, `ops/basic.rs`, `ops/embedding.rs`, `ops/linear.rs`, `ops/loss.rs`, `ops/mod.rs`, `ops/norm.rs`.
+- Monorepo-only: `ops/gqa.rs`, `ops/rope.rs`, `ops/shape.rs`.
+- Classification: divergent and monorepo newer for model-facing ops.
+- Direction: do not replace monorepo ops wholesale. External ops are useful as comparison/reference material for tests and simpler CPU-only behavior, but monorepo-only GQA/RoPE/shape support must be preserved.
+
+** Inference, checkpoint, debug, playground
+
+- External-only: `src/inference.rs`, `src/playground.rs`, `src/bin/tnsr-demo.rs`.
+- Monorepo-only: `src/qwen3.rs`, `src/qwen3_load.rs`, `src/bpe.rs`, `src/cuda_ffi.rs`, Qwen3 binaries, and `main.rs`.
+- Classification: missing from monorepo for generic CPU inference primitives and playground CLI; newer in monorepo for Qwen3 and CUDA paths.
+- Direction: likely import-worthy as selective ports, but the destination API should be decided explicitly. External `inference.rs` provides `RopeConfig`, `apply_rope`, `KvCache`, `DecodeRequest`, `AttentionStep`, and a deterministic CPU batching model. That may overlap conceptually with monorepo `ops/rope.rs` and Qwen3 inference, so it needs an API boundary decision before implementation.
+
+** Scaling modules
+
+- Present in both: `scaling/inference.rs`, `scaling/mod.rs`, `scaling/model_stats.rs`, `scaling/op_cost.rs`, `scaling/report.rs`, `scaling/roofline.rs`, `scaling/sharding.rs`.
+- External-only: `scaling/memory.rs`, `scaling/parallelism.rs`.
+- Monorepo-only: `scaling/distributed/*`.
+- Classification: divergent and complementary.
+- Direction: monorepo owns the newer distributed-teaching path. External `memory.rs` and `parallelism.rs` are likely import-worthy, but their types depend on external `ModelShape`, `CheckpointMode`, and report APIs that differ from the monorepo. Port as reconciled modules or fold into existing distributed/scaling modules rather than copying.
+
+** Tests
+
+- External tests: `autograd_basic.rs`, `checkpoint.rs`, `cli.rs`, `debug_trace.rs`, `inference.rs`, `ops_gradcheck.rs`, `scaling.rs`, `scaling_reports.rs`, `transformer_block.rs`.
+- Monorepo tests: `autograd_test.rs`, `cuda_forward_test.rs`, `distributed_test.rs`, `qwen3_test.rs`, `scaling_test.rs`.
+- Classification: missing or divergent test coverage.
+- Direction: import tests selectively as Bazel `rust_test` targets after source-of-truth decisions. The external `inference.rs`, `cli.rs`, `debug_trace.rs`, and scaling report tests are likely the most valuable because they cover external-only features. Existing monorepo Qwen3/CUDA/distributed tests must remain intact.
+
+** Docs and examples
+
+- External-only: `README.md` sections for playground, inference path, web trace viewer, activation checkpointing, scaling reports, verification; `docs/debugging.md`; `examples/tiny_block.rs`.
+- Monorepo currently has `ferric_continuum/tnsr/SCALING_BOOK_MAP.md` and repo-level docs, but not the same debugging/example material.
+- Classification: missing from monorepo or divergent.
+- Direction: likely import-worthy, but docs should be adapted to the Bazel-built monorepo and current Qwen3/CUDA/distributed shape. Do not copy README claims that conflict with monorepo behavior such as "CPU-only" without qualification.
+
+** Web viewer assets
+
+- External-only: `web/index.html`, `web/package.json`, `web/package-lock.json`, Vite config, Playwright config, TypeScript source under `web/src`, tests under `web/tests`, sample trace JSON, and generated `web/dist` / `web/test-results`.
+- Classification: missing from monorepo and requires a separate scope decision.
+- Direction: source and tests may be useful, but generated `dist`, `test-results`, and `node_modules` artifacts should not be imported as source. The `Decide web trace viewer scope` ticket should decide whether this becomes a Bazel-wrapped frontend tool, a non-Bazel auxiliary tool, an archived reference, or out of scope.
+
+** Build/tooling metadata
+
+- External repo is Cargo-first with Rust 2024 / rust-version 1.85 and dependencies on `clap`, `rand`, `serde`, and `serde_json`.
+- Monorepo is Bazel-first with Cargo manifests used as Rust tooling mirrors. It already has Bazel module/dependency plumbing for `tnsr` and newer safetensors/tokenizer support.
+- Classification: divergent.
+- Direction: imported Rust behavior must land through Bazel targets. Cargo metadata can inform tooling mirrors, but must not become the primary validation path.
+
+** Summary classification
+
+- Already present: core tensor/autograd/checkpoint/debug/ops/transformer/scaling basics.
+- Newer in monorepo: Qwen3, safetensors loading, BPE, CUDA forward path, GQA/RoPE/shape ops, distributed teaching modules, HF numeric compatibility tooling, Bazel integration.
+- Missing from monorepo: generic CPU inference primitives, playground CLI, memory and parallelism report modules, external docs/debugging guide, tiny block example, web trace viewer.
+- Divergent and needs reconciliation: nearly every shared Rust core/scaling file.
+- Likely out of scope unless explicitly chosen: generated web artifacts (`web/dist`, `web/test-results`) and `web/node_modules`.
