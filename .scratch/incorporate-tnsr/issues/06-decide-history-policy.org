@@ -1,6 +1,6 @@
 #+TITLE: Decide history preservation policy
 #+TYPE: grilling
-#+STATUS: open
+#+STATUS: resolved
 #+BLOCKED_BY: 01-define-incorporation-goal, 02-inventory-external-artifacts
 #+PARENT: ../map.org
 
@@ -22,3 +22,26 @@ The answer should account for overlap with existing `ferric_continuum/tnsr` hist
 The external repo is on branch `focused-transformer-visualization`. The monorepo already has independent `tnsr` history, including recent Qwen3/CUDA/scaling work. A history-preserving import may be useful for attribution and archaeology, but can also complicate a selective reconciliation.
 
 * Comments
+
+* Answer
+
+Do not use git subtree, filter-repo, or a history-preserving import for this incorporation by default.
+
+Incorporation should proceed as a normal selective patch series in Ferric Continuum, with `~/workspace/tnsr` cited as source material where it meaningfully informs a port. This fits the already-decided selective feature-port direction and avoids mixing two independent histories for overlapping files.
+
+Rationale:
+
+- `ferric_continuum/tnsr` already has substantial independent history for Qwen3, CUDA, GQA/RoPE, distributed teaching modules, Bazel integration, and HF numeric-compat verification.
+- `~/workspace/tnsr` is on branch `focused-transformer-visualization`, with recent history heavily focused on trace viewer interactions. Preserving that entire history inside Ferric Continuum would add noise for the Rust-core incorporation work.
+- The selected source-of-truth policy says overlapping Rust modules remain monorepo-owned. A subtree/filter-repo import would make future `git blame` less clear because the same conceptual files would have unrelated pre-merge histories.
+- Web viewer history may be useful for archaeology, but the web viewer scope is not decided yet. If the viewer lands, implementation commits can cite the external repo path and relevant source commits instead of importing the full repository history.
+
+Implementation guidance:
+
+- Use normal Ferric Continuum commits for implementation tickets.
+- In commit messages, mention `~/workspace/tnsr` source paths or external commit ids when porting non-trivial behavior.
+- Preserve attribution in docs or source comments only when it helps future maintenance.
+- Do not add the external repo as a git submodule.
+- Do not vendor `.git`, generated `web/dist`, `web/test-results`, or `web/node_modules`.
+
+Reopen this decision only if a later ticket decides to land the web viewer as a large standalone artifact and there is concrete evidence that preserving its original commit history is worth the added repository complexity.
