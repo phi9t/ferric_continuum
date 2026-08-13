@@ -1,6 +1,6 @@
 #+TITLE: Define what incorporation means
 #+TYPE: grilling
-#+STATUS: open
+#+STATUS: resolved
 #+BLOCKED_BY:
 #+PARENT: ../map.org
 
@@ -25,3 +25,27 @@ The answer should state the success criteria in terms future `/to-spec` and `/to
 `~/workspace/tnsr` is a separate Cargo-first repo. It overlaps core Rust source files and adds material not obviously present in the monorepo, including a playground CLI, CPU inference primitives, memory/parallelism reports, docs/debugging.md, examples, and a Vite/Three.js trace viewer.
 
 * Comments
+
+* Answer
+
+Incorporation means a selective feature port into the existing Bazel-integrated `ferric_continuum/tnsr` module.
+
+This effort should not treat `~/workspace/tnsr` as a replacement tree. The monorepo remains the destination and source of truth for current `tnsr` behavior unless a later ticket explicitly decides otherwise for a narrow artifact. Existing Qwen3, CUDA, GQA/RoPE, distributed teaching, HuggingFace numeric-compatibility, and Bazel integration work must be preserved.
+
+The default import policy is:
+
+- port useful external features and tests intentionally
+- reconcile overlapping Rust modules file by file
+- adapt imported material to the Bazel-built monorepo
+- keep Cargo manifests as tooling mirrors, not primary validation
+- avoid generated artifacts such as `web/dist`, `web/test-results`, and `web/node_modules`
+- avoid history-preserving subtree/filter-repo import unless the history-policy ticket finds a specific need
+
+Success criteria for this map:
+
+- identify exactly which `~/workspace/tnsr` artifacts should land
+- define destination paths and Bazel targets for accepted artifacts
+- record which overlapping monorepo files remain source of truth
+- decide whether the web trace viewer is in scope
+- define a verification matrix that protects existing monorepo behavior
+- collapse the decisions into a spec and implementation tickets
