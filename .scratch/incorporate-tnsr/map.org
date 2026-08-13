@@ -22,6 +22,7 @@ Produce a decision-backed incorporation plan for bringing useful material from `
 - [[file:issues/04-decide-bazel-integration-boundary.org][Decide Bazel integration boundary]] — accepted Rust artifacts must land as first-class Bazel library/binary/test/doc targets; Cargo remains a tooling mirror, and web tooling is deferred to the web-scope decision.
 - [[file:issues/05-decide-web-viewer-scope.org][Decide web trace viewer scope]] — keep the Vite/Three.js viewer out of this incorporation batch; treat `~/workspace/tnsr/web` as reference material until a separate frontend/tooling effort exists.
 - [[file:issues/06-decide-history-policy.org][Decide history preservation policy]] — do not use subtree/filter-repo/submodule import by default; port selected behavior as normal Ferric Continuum commits and cite external paths or commits when useful.
+- [[file:issues/07-decide-verification-matrix.org][Decide verification matrix]] — require Bazel build/test validation for every Rust slice, add focused tests for accepted imports, keep Cargo checks supplementary, require Qwen3/CUDA checks only when touched, and exclude web checks from this batch.
 
 * Not yet specified
 

@@ -1,6 +1,6 @@
 #+TITLE: Decide verification matrix
 #+TYPE: grilling
-#+STATUS: open
+#+STATUS: resolved
 #+BLOCKED_BY: 02-inventory-external-artifacts, 03-decide-source-of-truth-for-overlaps, 04-decide-bazel-integration-boundary, 05-decide-web-viewer-scope
 #+PARENT: ../map.org
 
@@ -25,3 +25,137 @@ The answer should define the minimum commands required before implementation can
 Prior `ferric_continuum/tnsr` work expects real validation, not source changes alone. CPU-only checks should remain available without CUDA, while CUDA checks stay opt-in through `--config=cuda`.
 
 * Comments
+
+* Answer
+
+Use a tiered verification matrix. Every implementation ticket must name the smallest required tier that proves its slice, and larger cross-cutting tickets must run the broader tiers.
+
+** Required baseline for any Rust source change
+
+Run these before landing any implementation ticket that touches `ferric_continuum/tnsr/src`, `ferric_continuum/tnsr/tests`, `ferric_continuum/tnsr/BUILD.bazel`, `MODULE.bazel`, or `MODULE.bazel.lock`:
+
+#+begin_src sh
+bazel build //ferric_continuum/tnsr:tnsr
+bazel test //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+If the change adds or modifies public docs, also run:
+
+#+begin_src sh
+bazel build //ferric_continuum/tnsr:tnsr_doc
+#+end_src
+
+** Feature-specific Bazel tests
+
+Run the target that corresponds to the feature area:
+
+#+begin_src sh
+# Autograd, ops, checkpointing, debug helpers, transformer behavior
+bazel test //ferric_continuum/tnsr:tnsr_tests
+
+# Scaling formulas, memory/parallelism reports, symbolic estimates
+bazel test //ferric_continuum/tnsr:scaling_tests
+
+# Distributed/scaling integration and collective simulations
+bazel test //ferric_continuum/tnsr:distributed_tests
+
+# Qwen3, GQA/RoPE, loader-sensitive behavior
+bazel test //ferric_continuum/tnsr:qwen3_tests
+#+end_src
+
+If an implementation adds new accepted external test coverage, add a focused Bazel `rust_test` target and include it in that ticket's verification. Likely new targets:
+
+- `//ferric_continuum/tnsr:inference_tests`
+- `//ferric_continuum/tnsr:debug_trace_tests`
+- `//ferric_continuum/tnsr:scaling_memory_tests`
+- `//ferric_continuum/tnsr:playground_cli_tests`
+
+** Whole-module CPU check**
+
+Run this for tickets that touch more than one feature area or alter common APIs used across `tnsr`:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:tnsr_tests \
+  //ferric_continuum/tnsr:scaling_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:qwen3_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+Use `bazel test //ferric_continuum/tnsr/...` if new targets make the explicit list stale and the wildcard remains CPU-only.
+
+** CLI / binary smoke checks**
+
+Run relevant `bazel run` commands for changed binaries:
+
+#+begin_src sh
+bazel run //ferric_continuum/tnsr:tnsr_demo
+bazel run //ferric_continuum/tnsr:qwen3_op_trace
+bazel run //ferric_continuum/tnsr:qwen3_demo
+bazel run //ferric_continuum/tnsr:qwen3_generate
+#+end_src
+
+For `qwen3_infer`, do not require real model weights for every implementation ticket. Require a build by default:
+
+#+begin_src sh
+bazel build -c opt //ferric_continuum/tnsr:qwen3_infer
+#+end_src
+
+Run the real-weight compatibility script only when a ticket touches Qwen3 math, loader/tokenizer code, norm/RoPE/GQA behavior, or logits output:
+
+#+begin_src sh
+MODEL_DIR=/data02/home/philip.yang/models/qwen3-0.6b \
+  ferric_continuum/tnsr/tools/verify_hf_compat.sh
+#+end_src
+
+This script depends on local model files and host Python packages, so record skipped prerequisites explicitly if unavailable.
+
+** CUDA checks**
+
+CUDA checks are opt-in and required only when a ticket touches CUDA kernels, `cuda_ffi`, CUDA build wiring, or CPU/GPU forward agreement:
+
+#+begin_src sh
+bazel test --config=cuda //ferric_continuum/tnsr:cuda_forward_tests
+#+end_src
+
+Do not require CUDA for CPU-only inference, scaling, debug, docs, or playground work.
+
+** Cargo mirror checks**
+
+Cargo checks are supplementary. Use them when a ticket updates `Cargo.toml`, Rust tooling mirrors, or code intended to keep rust-analyzer happy:
+
+#+begin_src sh
+cargo check --workspace
+#+end_src
+
+Cargo checks do not replace Bazel checks.
+
+** Formatting and linting**
+
+Prefer Bazel aspects where practical:
+
+#+begin_src sh
+bazel build --config=rustfmt //ferric_continuum/tnsr:tnsr
+bazel build --config=clippy //ferric_continuum/tnsr:tnsr
+#+end_src
+
+If those aspects are too broad or fail for unrelated generated/dependency reasons, run the narrowest available formatter/linter and record the limitation.
+
+** Web viewer**
+
+No npm, Vite, Vitest, Playwright, browser, WebGL, screenshot, or frontend build checks are required for this incorporation batch because the web viewer is out of scope.
+
+** Full safety check before collapsing to implementation tickets**
+
+Before the final `Collapse incorporation decisions into build spec` ticket is resolved, the spec should name the expected full verification command set for the accepted implementation slices. A reasonable default is:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:tnsr_tests \
+  //ferric_continuum/tnsr:scaling_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:qwen3_tests \
+  //ferric_continuum/tnsr:lib_tests
+bazel build //ferric_continuum/tnsr:tnsr_doc
+#+end_src
+
+Add new focused test targets to that list as they are introduced.
