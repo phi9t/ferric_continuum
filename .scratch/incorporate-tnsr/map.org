@@ -20,6 +20,7 @@ Produce a decision-backed incorporation plan for bringing useful material from `
 - [[file:issues/02-inventory-external-artifacts.org][Inventory external tnsr artifacts]] — use `~/workspace/tnsr` as selective source material: monorepo is newer for Qwen3/CUDA/distributed/Bazel paths, while external repo contributes likely import-worthy CPU inference, playground, memory/parallelism reports, docs/examples, and web viewer assets.
 - [[file:issues/03-decide-source-of-truth-for-overlaps.org][Decide source of truth for overlapping Rust modules]] — keep monorepo shared core/ops/transformer/scaling files as source of truth; port external behavior selectively as new/adapted APIs, tests, and docs.
 - [[file:issues/04-decide-bazel-integration-boundary.org][Decide Bazel integration boundary]] — accepted Rust artifacts must land as first-class Bazel library/binary/test/doc targets; Cargo remains a tooling mirror, and web tooling is deferred to the web-scope decision.
+- [[file:issues/05-decide-web-viewer-scope.org][Decide web trace viewer scope]] — keep the Vite/Three.js viewer out of this incorporation batch; treat `~/workspace/tnsr/web` as reference material until a separate frontend/tooling effort exists.
 - [[file:issues/06-decide-history-policy.org][Decide history preservation policy]] — do not use subtree/filter-repo/submodule import by default; port selected behavior as normal Ferric Continuum commits and cite external paths or commits when useful.
 
 * Not yet specified
@@ -27,11 +28,11 @@ Produce a decision-backed incorporation plan for bringing useful material from `
 - Exact implementation-ticket split after source-of-truth and import-boundary decisions are resolved.
 - Whether any `CONTEXT-MAP.md` or context-local `CONTEXT.md` updates should be part of the implementation phase.
 - Whether external `tnsr` docs become repo docs, source comments, examples, or archived references.
-- Whether web viewer assets need a new Bazel/npm toolchain boundary or should remain outside this incorporation.
 - Whether the standalone `~/workspace/tnsr` repo should be archived, left as-is, or kept as a prototype/source reference after incorporation.
 
 * Out of scope
 
 - Directly overwriting `ferric_continuum/tnsr` with `~/workspace/tnsr`.
+- Importing the Vite/Three.js web trace viewer, frontend toolchain, `web/dist`, `web/test-results`, or `web/node_modules` in this incorporation batch.
 - Pushing branches or changing remotes.
 - Reworking unrelated Ferric Continuum modules outside the integration boundaries this map identifies.

@@ -1,6 +1,6 @@
 #+TITLE: Decide web trace viewer scope
 #+TYPE: grilling
-#+STATUS: open
+#+STATUS: resolved
 #+BLOCKED_BY: 01-define-incorporation-goal, 02-inventory-external-artifacts
 #+PARENT: ../map.org
 
@@ -25,3 +25,31 @@ The external README describes the viewer as a Vite + Three.js trace viewer for s
 This decision is intentionally separate from Rust library incorporation because web tooling can expand the build and CI surface substantially.
 
 * Comments
+
+* Answer
+
+The Vite/Three.js web trace viewer is out of scope for this `tnsr` incorporation batch.
+
+This map should incorporate Rust-side trace/export capabilities only far enough to make a future viewer possible. The viewer itself should remain in `~/workspace/tnsr/web` as a reference/prototype unless a later, separate effort intentionally adds frontend tooling to Ferric Continuum.
+
+Rationale:
+
+- Ferric Continuum currently has no Node/Vite/Playwright package, workspace, or Bazel frontend toolchain.
+- The viewer is a real frontend app, not a static doc asset: it uses Vite, TypeScript, Three.js, Vitest, Playwright, and browser/WebGL rendering checks.
+- The viewer expects a trace export schema with event fields such as `kind`, `detail`, `op_id`, `op_kind`, `op_name`, `save_site`, and collectives. The monorepo `DebugRecorder` currently stores structured Rust event enums, not that exact exported JSON schema.
+- The Rust incorporation already has enough scope: CPU inference primitives, debug trace export, scaling memory/parallelism concepts, tests, and Bazel targets.
+- Adding frontend build/test infrastructure would expand the blast radius and should be designed deliberately as a separate monorepo frontend/tooling decision.
+
+Implementation guidance for this batch:
+
+- Do not import `web/` into Ferric Continuum.
+- Do not import `web/dist`, `web/test-results`, `web/node_modules`, screenshots, or Playwright artifacts.
+- Do not add `package.json`, Vite, Playwright, Vitest, npm, pnpm, or Bazel JS rules as part of this incorporation batch.
+- It is acceptable to cite `~/workspace/tnsr/web` in docs as a reference viewer/prototype.
+- It is acceptable to design Rust trace JSON output so it can feed the external viewer later, but the output schema should be owned by the Rust/debug API decision, not by copying the current viewer parser wholesale.
+
+Future follow-up conditions:
+
+- First, land and validate a stable Bazel-built Rust trace JSON export.
+- Then decide whether Ferric Continuum should have a frontend/tooling boundary.
+- If yes, create a separate effort for importing or rewriting the viewer with its own build, test, asset, and CI decisions.
