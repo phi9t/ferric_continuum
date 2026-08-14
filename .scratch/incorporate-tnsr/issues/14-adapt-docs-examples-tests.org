@@ -1,0 +1,46 @@
+#+TITLE: Adapt docs examples and tests
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 09-stabilize-debug-trace-json, 10-add-cpu-inference-primitives, 11-add-scaling-memory-reports, 12-reconcile-parallelism-reports, 13-add-bazel-playground-cli
+#+PARENT: ../spec.org
+
+* Context
+
+Selected external README, debugging notes, examples, and tests should become Ferric Continuum artifacts that teach and verify the current Bazel-first `tnsr` module.
+
+Docs and examples should follow the APIs that actually landed in the preceding implementation tickets.
+
+* Requirements
+
+- Adapt useful external docs into `ferric_continuum/tnsr/` for module-local material or `docs/` for broader repo-level material.
+- Convert examples worth maintaining into Bazel binaries under `ferric_continuum/tnsr/src/bin/` or behavior tests under `ferric_continuum/tnsr/tests/`.
+- Adapt external tests as behavior specs against current APIs.
+- Show Bazel commands first in docs.
+- Include Cargo commands only as supplementary tooling commands when they are supported.
+- Avoid describing `tnsr` as globally CPU-only, because the monorepo has opt-in CUDA forward support.
+
+* Out of scope
+
+- Pasting old external docs that describe stale APIs.
+- Adding web viewer docs as if the frontend landed in this batch.
+- Importing generated artifacts.
+
+* Verification
+
+#+begin_src sh
+bazel build //ferric_continuum/tnsr:tnsr
+bazel test //ferric_continuum/tnsr:lib_tests
+bazel build //ferric_continuum/tnsr:tnsr_doc
+#+end_src
+
+Run feature targets that correspond to the docs/examples changed:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:tnsr_tests \
+  //ferric_continuum/tnsr:scaling_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:qwen3_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+* Comments

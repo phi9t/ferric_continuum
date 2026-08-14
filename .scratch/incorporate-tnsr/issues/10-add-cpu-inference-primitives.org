@@ -1,0 +1,51 @@
+#+TITLE: Add generic CPU inference primitives
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 08-collapse-map-to-build-spec
+#+PARENT: ../spec.org
+
+* Context
+
+The external `/data02/home/philip.yang/workspace/tnsr/src/inference.rs` contains useful generic CPU inference concepts. The destination is the existing Bazel-integrated `ferric_continuum/tnsr` module, not a replacement tree.
+
+Existing Qwen3, loader, tokenizer, CUDA, tensor, and ops APIs remain monorepo-owned. RoPE behavior must be reconciled with `ferric_continuum/tnsr/src/ops/rope.rs`.
+
+* Requirements
+
+- Add `ferric_continuum/tnsr/src/inference.rs`.
+- Add the new source file to `_TNSR_SRCS` in `ferric_continuum/tnsr/BUILD.bazel`.
+- Expose the module from `ferric_continuum/tnsr/src/lib.rs`.
+- Port/adapt useful concepts such as `RopeConfig`, `apply_rope`, `KvCache`, `DecodeRequest`, `AttentionStep`, and small batching/decode helpers where they fit the current APIs.
+- Add `ferric_continuum/tnsr/tests/inference_test.rs` or equivalent.
+- Add a Bazel target such as `//ferric_continuum/tnsr:inference_tests`.
+- Prefer sharing existing RoPE/attention/shape code over duplicating math paths. If duplication remains, document the reason close to the code.
+
+* Out of scope
+
+- Changing Qwen3 loader/tokenizer/logits behavior unless required by shared API reconciliation.
+- Touching CUDA paths.
+- Importing old external tests without adapting them to current APIs.
+- Adding direct Rust dependencies unless they are necessary and explicitly declared in `MODULE.bazel`.
+
+* Verification
+
+#+begin_src sh
+bazel build //ferric_continuum/tnsr:tnsr
+bazel test //ferric_continuum/tnsr:lib_tests
+bazel test //ferric_continuum/tnsr:inference_tests
+#+end_src
+
+If shared RoPE, attention, shape, or Qwen3-visible behavior changes:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:qwen3_tests
+#+end_src
+
+If Qwen3 math, loader, tokenizer, RoPE/GQA behavior, or logits output changes:
+
+#+begin_src sh
+MODEL_DIR=/data02/home/philip.yang/models/qwen3-0.6b \
+  ferric_continuum/tnsr/tools/verify_hf_compat.sh
+#+end_src
+
+* Comments

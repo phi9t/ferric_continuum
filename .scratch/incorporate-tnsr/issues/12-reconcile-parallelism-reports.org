@@ -1,0 +1,43 @@
+#+TITLE: Reconcile selected parallelism reports
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 11-add-scaling-memory-reports
+#+PARENT: ../spec.org
+
+* Context
+
+Evaluate `/data02/home/philip.yang/workspace/tnsr/scaling/parallelism.rs` only for concepts not already covered by `ferric_continuum/tnsr/src/scaling/distributed/*`.
+
+The preferred destination is small additions to existing distributed scaling modules. A new `scaling/parallelism.rs` should be added only if the concept is genuinely cross-cutting and cleaner outside `distributed`.
+
+* Requirements
+
+- Inventory external parallelism report concepts against existing `scaling/distributed/*`.
+- Fold complementary formulas or summaries into the current modules where possible.
+- Add `ferric_continuum/tnsr/src/scaling/parallelism.rs` only if the implementation justifies a separate cross-cutting module.
+- Add the new source file to `_TNSR_SRCS` only if a new module is created.
+- Add or update Bazel tests in `scaling_tests`, `distributed_tests`, or a focused target.
+- Keep naming and semantics aligned with existing DDP, FSDP/ZeRO, tensor parallel, and pipeline parallel modules.
+
+* Out of scope
+
+- Introducing a second competing model of DDP, FSDP, tensor parallel, or pipeline parallel behavior.
+- Moving large existing distributed modules for cosmetic reasons.
+- Importing external scaling files wholesale.
+
+* Verification
+
+#+begin_src sh
+bazel build //ferric_continuum/tnsr:tnsr
+bazel test //ferric_continuum/tnsr:lib_tests
+bazel test //ferric_continuum/tnsr:scaling_tests
+bazel test //ferric_continuum/tnsr:distributed_tests
+#+end_src
+
+If public docs change:
+
+#+begin_src sh
+bazel build //ferric_continuum/tnsr:tnsr_doc
+#+end_src
+
+* Comments

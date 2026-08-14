@@ -1,6 +1,6 @@
 #+TITLE: Incorporate selected tnsr features
 #+TYPE: spec
-#+STATUS: ready-for-tickets
+#+STATUS: ticketed
 
 * Goal
 
@@ -247,3 +247,13 @@ Co-authored-by: TRAE CLI <noreply@bytedance.com>
 #+end_src
 
 - Mention the external source path or commit in commit bodies when behavior is materially ported from `/data02/home/philip.yang/workspace/tnsr`.
+
+* Implementation tickets
+
+- [[file:issues/09-stabilize-debug-trace-json.org][09 Stabilize debug trace JSON]]
+- [[file:issues/10-add-cpu-inference-primitives.org][10 Add generic CPU inference primitives]]
+- [[file:issues/11-add-scaling-memory-reports.org][11 Add scaling memory reports]]
+- [[file:issues/12-reconcile-parallelism-reports.org][12 Reconcile selected parallelism reports]]
+- [[file:issues/13-add-bazel-playground-cli.org][13 Add Bazel-backed playground/debug CLI]]
+- [[file:issues/14-adapt-docs-examples-tests.org][14 Adapt docs examples and tests]]
+- [[file:issues/15-run-final-incorporation-verification.org][15 Run final incorporation verification]]

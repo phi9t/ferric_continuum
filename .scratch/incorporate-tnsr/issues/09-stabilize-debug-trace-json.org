@@ -1,0 +1,47 @@
+#+TITLE: Stabilize debug trace JSON
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 08-collapse-map-to-build-spec
+#+PARENT: ../spec.org
+
+* Context
+
+`ferric_continuum/tnsr/src/debug.rs` is the monorepo-owned debug surface. The external repo's web viewer parser at `/data02/home/philip.yang/workspace/tnsr/web/src/trace.ts` is reference material only; the Rust schema should be owned by the monorepo API.
+
+This ticket should land before any future viewer work so downstream tooling can target a stable trace format.
+
+* Requirements
+
+- Extend `ferric_continuum/tnsr/src/debug.rs` so trace JSON has documented, deterministic fields for operation identity, kind/name, edges, saved tensors, and display labels where available.
+- Keep the schema compatible with current `DebugRecorder` concepts instead of copying the older viewer parser field names blindly.
+- Add or extend tests under `ferric_continuum/tnsr/tests/`.
+- Add a focused Bazel test target such as `//ferric_continuum/tnsr:debug_trace_tests` if the existing targets are not a clean fit.
+- Update `_TNSR_SRCS` or dependencies only if the implementation genuinely needs new source files or direct crates.
+
+* Out of scope
+
+- Importing `/data02/home/philip.yang/workspace/tnsr/web`.
+- Adding frontend, npm, Vite, Three.js, Playwright, browser, WebGL, or screenshot checks.
+- Replacing `debug.rs` with the external implementation.
+
+* Verification
+
+#+begin_src sh
+bazel build //ferric_continuum/tnsr:tnsr
+bazel test //ferric_continuum/tnsr:lib_tests
+bazel test //ferric_continuum/tnsr:tnsr_tests
+#+end_src
+
+If a focused target is added:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:debug_trace_tests
+#+end_src
+
+If public docs change:
+
+#+begin_src sh
+bazel build //ferric_continuum/tnsr:tnsr_doc
+#+end_src
+
+* Comments

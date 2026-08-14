@@ -1,0 +1,68 @@
+#+TITLE: Run final incorporation verification
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 09-stabilize-debug-trace-json, 10-add-cpu-inference-primitives, 11-add-scaling-memory-reports, 12-reconcile-parallelism-reports, 13-add-bazel-playground-cli, 14-adapt-docs-examples-tests
+#+PARENT: ../spec.org
+
+* Context
+
+This is the final gate after the selected `tnsr` incorporation slices land. It should prove the Bazel-built monorepo path is coherent and document any intentionally skipped optional checks with prerequisites.
+
+* Requirements
+
+- Run the full CPU Bazel matrix for `ferric_continuum/tnsr`.
+- Run every new focused test target introduced by implementation tickets.
+- Build public docs.
+- Run relevant CLI smoke checks for changed or added binaries.
+- Run Qwen3 real-weight compatibility only if any landed ticket touched Qwen3 math, loader, tokenizer, RoPE/GQA behavior, or logits output.
+- Run CUDA checks only if any landed ticket touched CUDA kernels, `cuda_ffi`, CUDA build wiring, or CPU/GPU forward agreement.
+- Record command results in this ticket under `* Answer`.
+
+* Out of scope
+
+- Frontend, npm, Vite, Three.js, Playwright, browser, WebGL, or screenshot checks.
+- Pushing branches or changing remotes.
+
+* Verification
+
+Default CPU matrix:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:tnsr_tests \
+  //ferric_continuum/tnsr:scaling_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:qwen3_tests \
+  //ferric_continuum/tnsr:lib_tests
+bazel build //ferric_continuum/tnsr:tnsr_doc
+#+end_src
+
+Focused targets, if added:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:debug_trace_tests
+bazel test //ferric_continuum/tnsr:inference_tests
+bazel test //ferric_continuum/tnsr:scaling_memory_tests
+bazel test //ferric_continuum/tnsr:playground_cli_tests
+#+end_src
+
+CLI smoke checks, if relevant:
+
+#+begin_src sh
+bazel run //ferric_continuum/tnsr:tnsr_demo
+bazel run //ferric_continuum/tnsr:tnsr_playground -- --help
+#+end_src
+
+Qwen3 real-weight check, if relevant:
+
+#+begin_src sh
+MODEL_DIR=/data02/home/philip.yang/models/qwen3-0.6b \
+  ferric_continuum/tnsr/tools/verify_hf_compat.sh
+#+end_src
+
+CUDA check, if relevant:
+
+#+begin_src sh
+bazel test --config=cuda //ferric_continuum/tnsr:cuda_forward_tests
+#+end_src
+
+* Comments

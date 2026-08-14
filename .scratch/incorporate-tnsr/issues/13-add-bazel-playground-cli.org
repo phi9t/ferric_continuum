@@ -1,0 +1,48 @@
+#+TITLE: Add Bazel-backed playground/debug CLI
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 09-stabilize-debug-trace-json, 10-add-cpu-inference-primitives, 11-add-scaling-memory-reports
+#+PARENT: ../spec.org
+
+* Context
+
+The external `src/playground.rs` and `src/bin/tnsr-demo.rs` are source material for a maintained monorepo demo/debug binary. The binary should demonstrate current Ferric Continuum APIs through Bazel.
+
+This ticket follows the APIs it demonstrates. If one of the prerequisite API slices is intentionally skipped, record that in this ticket before implementation.
+
+* Requirements
+
+- Decide whether to extend existing `//ferric_continuum/tnsr:tnsr_demo` or add a separate binary such as `//ferric_continuum/tnsr:tnsr_playground`.
+- If a separate binary is added, place source under `ferric_continuum/tnsr/src/bin/` and add a Bazel `rust_binary` target.
+- Use `@crates//:clap` only if flags/subcommands justify it. `clap` is already a direct crate spec in `MODULE.bazel`.
+- Demonstrate current monorepo APIs, not stale external APIs.
+- Write generated demo artifacts to temp/output paths.
+- Add a focused `//ferric_continuum/tnsr:playground_cli_tests` target if CLI logic is meaningful and cleanly testable; otherwise record explicit `bazel run` smoke commands.
+
+* Out of scope
+
+- Cargo-only examples.
+- Checking in generated `.dot`, `.json`, `target/`, or example output artifacts unless a later ticket explicitly chooses small golden fixtures.
+- Importing frontend viewer tooling.
+
+* Verification
+
+#+begin_src sh
+bazel build //ferric_continuum/tnsr:tnsr
+bazel test //ferric_continuum/tnsr:lib_tests
+bazel run //ferric_continuum/tnsr:tnsr_demo
+#+end_src
+
+If a new binary is added:
+
+#+begin_src sh
+bazel run //ferric_continuum/tnsr:tnsr_playground -- --help
+#+end_src
+
+If a focused test target is added:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:playground_cli_tests
+#+end_src
+
+* Comments

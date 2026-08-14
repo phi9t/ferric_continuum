@@ -1,0 +1,51 @@
+#+TITLE: Add scaling memory reports
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 08-collapse-map-to-build-spec
+#+PARENT: ../spec.org
+
+* Context
+
+The external repo's scaling memory concepts should become a Bazel-tested monorepo scaling module. Existing `ferric_continuum/tnsr/src/scaling/model_stats.rs`, `report.rs`, and `distributed/fsdp.rs` already own nearby concepts, so this ticket must reconcile overlap rather than creating a competing report stack.
+
+This ticket should land before broad parallelism report reconciliation.
+
+* Requirements
+
+- Add `ferric_continuum/tnsr/src/scaling/memory.rs`.
+- Export it from `ferric_continuum/tnsr/src/scaling/mod.rs`.
+- Add the new source file to `_TNSR_SRCS` in `ferric_continuum/tnsr/BUILD.bazel`.
+- Implement parameter, optimizer-state, gradient, activation, and KV-cache byte estimates where they fit the existing scaling model.
+- Add ZeRO/FSDP partitioning summaries only where they complement existing `scaling/distributed/*` APIs.
+- Add golden-value tests under `ferric_continuum/tnsr/tests/`.
+- Add a Bazel target such as `//ferric_continuum/tnsr:scaling_memory_tests`.
+- Document formulas close to the code.
+
+* Out of scope
+
+- Replacing existing scaling report modules wholesale.
+- Introducing a second competing model for FSDP/ZeRO semantics.
+- Changing distributed simulation behavior except where required to share a formula or type.
+
+* Verification
+
+#+begin_src sh
+bazel build //ferric_continuum/tnsr:tnsr
+bazel test //ferric_continuum/tnsr:lib_tests
+bazel test //ferric_continuum/tnsr:scaling_memory_tests
+bazel test //ferric_continuum/tnsr:scaling_tests
+#+end_src
+
+If distributed/FSDP APIs are touched:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:distributed_tests
+#+end_src
+
+If public docs change:
+
+#+begin_src sh
+bazel build //ferric_continuum/tnsr:tnsr_doc
+#+end_src
+
+* Comments
