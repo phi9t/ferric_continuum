@@ -150,6 +150,18 @@ rust_test(
     deps = [":tnsr"],
 )
 
+# Stable JSON schema tests for DebugRecorder trace exports.
+rust_test(
+    name = "debug_trace_tests",
+    srcs = ["tests/debug_trace_test.rs"],
+    crate_name = "debug_trace_test",
+    edition = "2021",
+    deps = [
+        ":tnsr",
+        "@crates//:serde_json",
+    ],
+)
+
 # Golden-value tests for the scaling / FLOPs accounting module
 rust_test(
     name = "scaling_tests",

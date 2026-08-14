@@ -1,6 +1,6 @@
 #+TITLE: Stabilize debug trace JSON
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: resolved
 #+BLOCKED_BY: 08-collapse-map-to-build-spec
 #+PARENT: ../spec.org
 
@@ -45,3 +45,21 @@ bazel build //ferric_continuum/tnsr:tnsr_doc
 #+end_src
 
 * Comments
+
+* Answer
+
+Implemented a stable Rust-owned debug trace JSON export on `DebugRecorder`.
+
+- Added `DebugRecorder::trace_json()` and `DebugRecorder::trace_json_pretty()`.
+- Extended `OpCallRecord` with input tensor ids, input grad flags, and output tensor ids so exported traces include real graph edges.
+- Exported schema metadata, replayable `events`, normalized `forward_ops`, `saved_sites`, `checkpoints`, `backward_ops`, and `grad_accumulations`.
+- Kept the schema owned by the Rust API. The external viewer parser was reference material only.
+- Added `//ferric_continuum/tnsr:debug_trace_tests` to assert stable schema fields over a multi-op forward/backward trace.
+
+Verification passed:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:debug_trace_tests
+bazel build //ferric_continuum/tnsr:tnsr
+bazel test //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:tnsr_tests //ferric_continuum/tnsr:debug_trace_tests
+#+end_src
