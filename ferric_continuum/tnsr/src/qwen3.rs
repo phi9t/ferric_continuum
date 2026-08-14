@@ -20,7 +20,10 @@
 //! Reference: HF `Qwen3Attention.forward` —
 //! <https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen3/modeling_qwen3.py>
 
-use crate::ops::{activations, basic, embedding, gqa, linear, norm, rope, shape as shape_ops};
+use crate::ops::{
+    activations, basic, context_parallel_gqa, embedding, gqa, linear, norm, rope,
+    shape as shape_ops,
+};
 use crate::tensor::{Shape, Tensor, TensorValue};
 
 /// Hyperparameters for a Qwen3 dense model.
@@ -197,6 +200,101 @@ impl Qwen3Attention {
         // 6. Flatten heads and bias-free output projection.
         let attn_flat = shape_ops::reshape(&attn, &[b, t, hq * dh], "attn_reshape");
         linear::linear(&attn_flat, &self.wo, "o_proj")
+    }
+
+    /// Logical context-parallel attention over equal contiguous token shards.
+    ///
+    /// Every non-attention operation runs independently on `[B,S,D]` for each
+    /// logical rank. Q/K RoPE uses the rank's global contiguous token offset;
+    /// context-parallel GQA then exchanges materialized K/V logically and
+    /// returns one `[B,S,Hq,Dh]` output per rank. Weights remain shared tensors,
+    /// so autograd sums their gradient contributions from every rank.
+    pub fn forward_context_parallel(&self, x_shards: &[Tensor]) -> Vec<Tensor> {
+        assert!(
+            !x_shards.is_empty(),
+            "Qwen3Attention context parallel: at least one input shard is required"
+        );
+        let expected_d = self.wq.inner.borrow().value.shape.0[0];
+        let first_shape = x_shards[0].shape().0;
+        assert_eq!(
+            first_shape.len(),
+            3,
+            "Qwen3Attention context parallel: input must be [B,S,D]"
+        );
+        let (b, local_t, d) = (first_shape[0], first_shape[1], first_shape[2]);
+        assert!(
+            local_t > 0,
+            "Qwen3Attention context parallel: local sequence length must be positive"
+        );
+        assert_eq!(
+            d, expected_d,
+            "Qwen3Attention context parallel: hidden dimension mismatch"
+        );
+        for shard in x_shards {
+            assert_eq!(
+                shard.shape().0.as_slice(),
+                [b, local_t, d],
+                "Qwen3Attention context parallel: every input shard must have the same shape"
+            );
+        }
+
+        let hq = self.n_q_heads;
+        let hk = self.n_kv_heads;
+        let dh = self.head_dim;
+        let mut q_shards = Vec::with_capacity(x_shards.len());
+        let mut k_shards = Vec::with_capacity(x_shards.len());
+        let mut v_shards = Vec::with_capacity(x_shards.len());
+
+        for (rank, x) in x_shards.iter().enumerate() {
+            let prefix = format!("cp{rank}");
+            let q_flat = linear::linear(x, &self.wq, &format!("{prefix}.q_proj"));
+            let k_flat = linear::linear(x, &self.wk, &format!("{prefix}.k_proj"));
+            let v_flat = linear::linear(x, &self.wv, &format!("{prefix}.v_proj"));
+
+            let q4 = shape_ops::reshape(
+                &q_flat,
+                &[b, local_t, hq, dh],
+                &format!("{prefix}.q_reshape"),
+            );
+            let k4 = shape_ops::reshape(
+                &k_flat,
+                &[b, local_t, hk, dh],
+                &format!("{prefix}.k_reshape"),
+            );
+            let v4 = shape_ops::reshape(
+                &v_flat,
+                &[b, local_t, hk, dh],
+                &format!("{prefix}.v_reshape"),
+            );
+            let q4n = norm::rms_norm(&q4, &self.q_norm, &format!("{prefix}.q_norm"));
+            let k4n = norm::rms_norm(&k4, &self.k_norm, &format!("{prefix}.k_norm"));
+            let rank_rope = rope::RopeConfig {
+                base: self.rope_cfg.base,
+                start_pos: self.rope_cfg.start_pos + rank * local_t,
+            };
+            q_shards.push(rope::rope(&q4n, rank_rope, &format!("{prefix}.q_rope")));
+            k_shards.push(rope::rope(&k4n, rank_rope, &format!("{prefix}.k_rope")));
+            v_shards.push(v4);
+        }
+
+        let attention_shards = context_parallel_gqa::context_parallel_gqa_attention(
+            &q_shards,
+            &k_shards,
+            &v_shards,
+            "context_parallel_gqa",
+        );
+        attention_shards
+            .iter()
+            .enumerate()
+            .map(|(rank, attention)| {
+                let flattened = shape_ops::reshape(
+                    attention,
+                    &[b, local_t, hq * dh],
+                    &format!("cp{rank}.attn_reshape"),
+                );
+                linear::linear(&flattened, &self.wo, &format!("cp{rank}.o_proj"))
+            })
+            .collect()
     }
 }
 

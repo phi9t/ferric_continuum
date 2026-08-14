@@ -81,6 +81,7 @@ pub enum OpKind {
     Split,
     Rope,
     GqaAttention,
+    ContextParallelGqaAttention,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

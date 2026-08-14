@@ -23,6 +23,7 @@ _TNSR_SRCS = [
     "src/ops/activations.rs",
     "src/ops/attention.rs",
     "src/ops/basic.rs",
+    "src/ops/context_parallel_gqa.rs",
     "src/ops/embedding.rs",
     "src/ops/gqa.rs",
     "src/ops/linear.rs",
@@ -185,6 +186,15 @@ rust_test(
     name = "qwen3_tests",
     srcs = ["tests/qwen3_test.rs"],
     crate_name = "qwen3_test",
+    edition = "2021",
+    deps = [":tnsr"],
+)
+
+# Logical context-parallel GQA: shard-wise forward/backward + Qwen3 integration.
+rust_test(
+    name = "context_parallel_gqa_tests",
+    srcs = ["tests/context_parallel_gqa_test.rs"],
+    crate_name = "context_parallel_gqa_test",
     edition = "2021",
     deps = [":tnsr"],
 )

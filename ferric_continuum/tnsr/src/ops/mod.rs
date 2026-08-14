@@ -1,6 +1,7 @@
 pub mod activations;
 pub mod attention;
 pub mod basic;
+pub mod context_parallel_gqa;
 pub mod embedding;
 pub mod gqa;
 pub mod linear;

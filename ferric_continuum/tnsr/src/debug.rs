@@ -628,6 +628,7 @@ fn op_kind_name(kind: OpKind) -> &'static str {
         OpKind::Split => "Split",
         OpKind::Rope => "Rope",
         OpKind::GqaAttention => "GqaAttention",
+        OpKind::ContextParallelGqaAttention => "ContextParallelGqaAttention",
     }
 }
 
