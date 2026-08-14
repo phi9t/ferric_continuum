@@ -1,6 +1,6 @@
 #+TITLE: Collapse incorporation decisions into build spec
 #+TYPE: task
-#+STATUS: open
+#+STATUS: resolved
 #+BLOCKED_BY: 01-define-incorporation-goal, 02-inventory-external-artifacts, 03-decide-source-of-truth-for-overlaps, 04-decide-bazel-integration-boundary, 05-decide-web-viewer-scope, 06-decide-history-policy, 07-decide-verification-matrix
 #+PARENT: ../map.org
 
@@ -22,3 +22,17 @@ The answer should identify:
 This ticket is intentionally blocked by every first-wave decision. It should not be claimed until the map has enough decisions recorded in `../map.org` that the remaining work is execution rather than wayfinding.
 
 * Comments
+
+* Answer
+
+Collapsed the resolved wayfinding decisions into [[file:../spec.org][../spec.org]].
+
+The spec defines:
+
+- selective feature-port scope into existing `ferric_continuum/tnsr`
+- implementation slices for debug trace JSON, CPU inference primitives, scaling memory reports, selected parallelism reports, Bazel-backed playground/debug CLI, and docs/examples/tests
+- dependency order across those slices
+- accepted external artifacts and destination paths
+- explicit exclusions for wholesale replacement, history import, frontend tooling, generated web artifacts, and remote changes
+- Bazel-first validation commands, with Qwen3 and CUDA checks gated on touched surfaces
+- landing expectations, including scoped commits and the required co-author trailer

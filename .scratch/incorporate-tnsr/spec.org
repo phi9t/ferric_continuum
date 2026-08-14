@@ -1,0 +1,249 @@
+#+TITLE: Incorporate selected tnsr features
+#+TYPE: spec
+#+STATUS: ready-for-tickets
+
+* Goal
+
+Incorporate useful material from `/data02/home/philip.yang/workspace/tnsr` into the existing Bazel-integrated `ferric_continuum/tnsr` module by selective feature porting.
+
+The monorepo remains the source of truth. This effort should improve `ferric_continuum/tnsr` without replacing it, importing external repository history, or introducing frontend tooling.
+
+External source snapshot used for this plan:
+
+- repo: `/data02/home/philip.yang/workspace/tnsr`
+- branch: `focused-transformer-visualization`
+- commit: `392e524a05d9f46ae921f5cd5e73ac2d963f600b`
+
+* Source-of-truth rules
+
+- Keep the current monorepo implementations as authoritative for `autograd.rs`, `tensor.rs`, `grad_mode.rs`, `saved.rs`, `checkpoint.rs`, `debug.rs`, `transformer.rs`, `lib.rs`, `ops/*`, existing `scaling/*`, Qwen3, CUDA, distributed training, Bazel, and documentation conventions.
+- Port external behavior as adapted Ferric Continuum APIs, tests, docs, or examples. Do not copy overlapping old APIs wholesale.
+- Preserve Bazel as the primary build and validation path. Cargo metadata may be updated only as an editor/tooling mirror.
+- When a direct Rust dependency is added, update `MODULE.bazel`, regenerate `MODULE.bazel.lock` intentionally, and update `ferric_continuum/tnsr/Cargo.toml` only if the Cargo mirror needs it.
+
+* Implementation slices
+
+** 1. Stabilize debug trace JSON
+
+Purpose:
+
+- Make the existing `DebugRecorder` trace output a stable Rust-owned JSON format that future tooling can consume.
+- Use `/data02/home/philip.yang/workspace/tnsr/web/src/trace.ts` only as reference for useful fields and viewer needs.
+
+Likely destinations:
+
+- Extend `ferric_continuum/tnsr/src/debug.rs`.
+- Add or extend tests under `ferric_continuum/tnsr/tests/`.
+- Add a Bazel target such as `//ferric_continuum/tnsr:debug_trace_tests`.
+
+Acceptance:
+
+- Trace records have documented, deterministic fields for operation identity, kind/name, edges, saved tensors, and display labels where available.
+- Tests assert schema shape and at least one multi-op trace.
+- The Rust schema is not constrained to the older viewer parser's exact names if better monorepo API names exist.
+
+** 2. Add generic CPU inference primitives
+
+Purpose:
+
+- Port the useful generic inference concepts from external `src/inference.rs` without disturbing Qwen3-specific inference, loader, tokenizer, CUDA, or core tensor APIs.
+
+Likely destinations:
+
+- Add `ferric_continuum/tnsr/src/inference.rs`.
+- Add the file to `_TNSR_SRCS` in `ferric_continuum/tnsr/BUILD.bazel`.
+- Expose it from `ferric_continuum/tnsr/src/lib.rs`.
+- Add a Bazel target such as `//ferric_continuum/tnsr:inference_tests`.
+
+Candidate API concepts:
+
+- `RopeConfig`
+- `apply_rope`
+- `KvCache`
+- `DecodeRequest`
+- `AttentionStep`
+- small batching/decode helpers that fit the current tensor and ops APIs
+
+Acceptance:
+
+- RoPE behavior is reconciled with existing `ops/rope.rs`; duplicate math paths must either share an implementation or have a documented reason to stay separate.
+- Tests cover cache append/read behavior, decode shape invariants, and at least one RoPE golden case.
+- Existing Qwen3 tests continue to pass.
+
+** 3. Add scaling memory reports
+
+Purpose:
+
+- Bring in the external memory and ZeRO-style reporting concepts as a Bazel-tested scaling module.
+
+Likely destinations:
+
+- Add `ferric_continuum/tnsr/src/scaling/memory.rs`.
+- Export it from `ferric_continuum/tnsr/src/scaling/mod.rs`.
+- Add the file to `_TNSR_SRCS`.
+- Add a Bazel target such as `//ferric_continuum/tnsr:scaling_memory_tests`.
+
+Candidate API concepts:
+
+- symbolic model/training shape inputs if the existing `TransformerConfig` is too concrete
+- parameter, optimizer-state, gradient, activation, and KV-cache byte estimates
+- ZeRO/FSDP partitioning summaries that complement `scaling/distributed/*`
+
+Acceptance:
+
+- Formulas are documented close to the code and tested with golden values.
+- Overlap with `scaling/model_stats.rs`, `scaling/report.rs`, and `scaling/distributed/fsdp.rs` is reconciled rather than duplicated.
+- `scaling_tests` remains valid, or its golden values are intentionally updated with a clear reason.
+
+** 4. Reconcile selected parallelism reports
+
+Purpose:
+
+- Evaluate external `scaling/parallelism.rs` only for concepts not already covered by `scaling/distributed/*`.
+
+Likely destinations:
+
+- Prefer adding small APIs to existing `ferric_continuum/tnsr/src/scaling/distributed/*` modules.
+- Add a new `ferric_continuum/tnsr/src/scaling/parallelism.rs` only if the concept is genuinely cross-cutting and cleaner outside `distributed`.
+
+Acceptance:
+
+- No second competing model of DDP, FSDP, tensor parallel, or pipeline parallel semantics is introduced.
+- New formulas or summaries have Bazel tests, either in `scaling_tests`, `distributed_tests`, or a focused target.
+
+** 5. Add a Bazel-backed playground/debug CLI
+
+Purpose:
+
+- Adapt the useful external playground/demo behavior into a maintained monorepo binary.
+
+Likely destinations:
+
+- Either extend existing `//ferric_continuum/tnsr:tnsr_demo`, or add a clearer new binary such as `//ferric_continuum/tnsr:tnsr_playground`.
+- Add new binary source under `ferric_continuum/tnsr/src/bin/` if a separate target is chosen.
+- Use `@crates//:clap` only if command selection or flags justify it; `clap` is already a direct crate spec in `MODULE.bazel`.
+
+Acceptance:
+
+- The binary runs through Bazel and demonstrates current monorepo APIs.
+- If CLI behavior has meaningful logic, add a focused test such as `//ferric_continuum/tnsr:playground_cli_tests`; otherwise record explicit `bazel run` smoke commands.
+- Generated demo artifacts are written to temp/output paths and are not checked in unless a later ticket chooses small golden fixtures.
+
+** 6. Adapt docs, examples, and tests
+
+Purpose:
+
+- Convert selected external README, debugging notes, examples, and tests into Ferric Continuum artifacts that teach the current Bazel-first module.
+
+Likely destinations:
+
+- `ferric_continuum/tnsr/` docs when the material is module-local.
+- `docs/` only for broader repo-level material.
+- `ferric_continuum/tnsr/tests/` for behavior that should be executable.
+- `ferric_continuum/tnsr/src/bin/` for examples worth maintaining as binaries.
+
+Acceptance:
+
+- Docs show Bazel commands first.
+- Cargo commands appear only as supplementary tooling commands when they are supported.
+- External tests are adapted as behavior specs against current APIs, not pasted in with stale API assumptions.
+- Documentation does not describe `tnsr` as CPU-only globally, because the monorepo has opt-in CUDA forward support.
+
+* Dependency order
+
+1. Debug trace JSON can be implemented first because it extends existing `debug.rs` and informs any later viewer work.
+2. CPU inference primitives can proceed independently, but must run Qwen3 tests if they touch shared RoPE, attention, or shape code.
+3. Scaling memory reports should land before any broad parallelism report reconciliation, so memory ownership is clear.
+4. Parallelism report reconciliation follows the memory slice and must account for existing `scaling/distributed/*`.
+5. Playground/debug CLI should follow the APIs it demonstrates.
+6. Docs/examples/tests should be updated with each slice, with a final docs pass after APIs settle.
+
+* Accepted artifacts and destinations
+
+- External `src/inference.rs` concepts become `ferric_continuum/tnsr/src/inference.rs` plus `:inference_tests`.
+- External `src/playground.rs` and `src/bin/tnsr-demo.rs` concepts become either the existing `:tnsr_demo` behavior or a new Bazel binary such as `:tnsr_playground`.
+- External `scaling/memory.rs` concepts become `ferric_continuum/tnsr/src/scaling/memory.rs` plus `:scaling_memory_tests`.
+- External `scaling/parallelism.rs` concepts are folded into existing scaling/distributed modules unless a new small module is justified.
+- External trace JSON and pretty/debug concepts extend `ferric_continuum/tnsr/src/debug.rs` plus focused tests.
+- External tests become Bazel `rust_test` targets or additions to existing tests.
+- External docs/examples become Bazel-first monorepo docs, tests, or binaries.
+
+* Out of scope
+
+- Replacing `ferric_continuum/tnsr` with `/data02/home/philip.yang/workspace/tnsr`.
+- Importing external git history through subtree, filter-repo, or submodule by default.
+- Importing `web/`, `web/dist`, `web/test-results`, `web/node_modules`, Vite, Three.js, npm, Playwright, or other frontend tooling in this batch.
+- Adding web, browser, WebGL, screenshot, or frontend build checks.
+- Changing remotes, pushing branches, or archiving the standalone external repository.
+- Reworking unrelated Ferric Continuum modules outside the accepted `tnsr` integration boundaries.
+
+* Verification
+
+Run the narrowest feature tests for each implementation ticket, and run the broader matrix before landing a cross-cutting batch.
+
+Baseline for any Rust source, test, Bazel, or dependency change:
+
+#+begin_src sh
+bazel build //ferric_continuum/tnsr:tnsr
+bazel test //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+Default whole-module CPU check:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:tnsr_tests \
+  //ferric_continuum/tnsr:scaling_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:qwen3_tests \
+  //ferric_continuum/tnsr:lib_tests
+bazel build //ferric_continuum/tnsr:tnsr_doc
+#+end_src
+
+Add new focused targets as slices introduce them:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:debug_trace_tests
+bazel test //ferric_continuum/tnsr:inference_tests
+bazel test //ferric_continuum/tnsr:scaling_memory_tests
+bazel test //ferric_continuum/tnsr:playground_cli_tests
+#+end_src
+
+CLI smoke checks when binaries change:
+
+#+begin_src sh
+bazel run //ferric_continuum/tnsr:tnsr_demo
+# or, if added:
+bazel run //ferric_continuum/tnsr:tnsr_playground -- --help
+#+end_src
+
+Qwen3 real-weight compatibility is required only when Qwen3 math, loader, tokenizer, RoPE/GQA behavior, or logits output changes:
+
+#+begin_src sh
+MODEL_DIR=/data02/home/philip.yang/models/qwen3-0.6b \
+  ferric_continuum/tnsr/tools/verify_hf_compat.sh
+#+end_src
+
+CUDA checks are required only when CUDA kernels, `cuda_ffi`, CUDA build wiring, or CPU/GPU forward agreement changes:
+
+#+begin_src sh
+bazel test --config=cuda //ferric_continuum/tnsr:cuda_forward_tests
+#+end_src
+
+Cargo checks are supplementary and do not replace Bazel validation:
+
+#+begin_src sh
+cargo check --workspace
+#+end_src
+
+* Landing expectations
+
+- Land each implementation slice as normal Ferric Continuum commits on the working branch.
+- Keep commits scoped to the slice being implemented.
+- Preserve unrelated dirty-tree changes if present.
+- Include the required commit trailer exactly once:
+
+#+begin_src text
+Co-authored-by: TRAE CLI <noreply@bytedance.com>
+#+end_src
+
+- Mention the external source path or commit in commit bodies when behavior is materially ported from `/data02/home/philip.yang/workspace/tnsr`.
