@@ -75,3 +75,12 @@ Ferric Continuum is treated as a multi-context repo with a root context map and 
 3. Explore the Muon optimizer and its Python/C++ bridge.
 
 See `README.md` for runnable commands and `ENGINEERING.md` for coding standards.
+
+<!-- ultron-agentic-workflow:start -->
+## Agentic engineering workflow
+
+**Mandatory:** Read and follow `CONSTITUTION.md` before acting. Before planning,
+building, fixing, or changing code, read and follow
+`docs/agents/agentic-engineering.md`. Direct user instructions and more specific
+repository guidance take precedence.
+<!-- ultron-agentic-workflow:end -->

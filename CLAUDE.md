@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code when working in this repository.
 
+**Instruction topology:** This repository intentionally keeps `AGENTS.md` and
+`CLAUDE.md` separate. The Ultron-managed workflow block appears in both files;
+preserve both standalone instruction surfaces.
+
 ## Project Overview
 
 Ferric Continuum is a Bazel-based, multi-language playground focused on side-by-side C++/Rust examples and a Python/C++ optimizer prototype. The agent architecture is **planned** but not yet implemented.
@@ -74,3 +78,12 @@ Follow `ENGINEERING.md` for C++ and Rust best practices, logging, and testing co
 ## Agent Architecture (Planned)
 
 The agent system is documented in `AGENTS.md`, but no `/agents` directory or agent binaries exist in this repo yet.
+
+<!-- ultron-agentic-workflow:start -->
+## Agentic engineering workflow
+
+**Mandatory:** Read and follow `CONSTITUTION.md` before acting. Before planning,
+building, fixing, or changing code, read and follow
+`docs/agents/agentic-engineering.md`. Direct user instructions and more specific
+repository guidance take precedence.
+<!-- ultron-agentic-workflow:end -->
