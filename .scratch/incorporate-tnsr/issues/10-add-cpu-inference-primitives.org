@@ -1,6 +1,6 @@
 #+TITLE: Add generic CPU inference primitives
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: resolved
 #+BLOCKED_BY: 08-collapse-map-to-build-spec
 #+PARENT: ../spec.org
 
@@ -49,3 +49,23 @@ MODEL_DIR=/data02/home/philip.yang/models/qwen3-0.6b \
 #+end_src
 
 * Comments
+
+* Answer
+
+Implemented generic CPU inference primitives as a monorepo-owned module.
+
+- Added `ferric_continuum/tnsr/src/inference.rs`.
+- Exported `tnsr::inference` from `src/lib.rs`.
+- Added the module to `_TNSR_SRCS` in `BUILD.bazel`.
+- Added `//ferric_continuum/tnsr:inference_tests`.
+- Ported/adapted `RopeConfig`, `apply_rope`, `KvCache`, `DecodeRequest`, `AttentionStep`, `BatchStats`, and `ContinuousBatcher`.
+- Kept Qwen3/CUDA paths unchanged. The new `apply_rope` is a generic non-autograd `[B,T,D]` helper; Qwen3 continues to use `ops::rope` over `[B,T,H,Dh]`.
+- Avoided new direct dependencies; external `serde::Serialize` derives were not ported because this repo did not need them for the primitive API.
+
+Verification passed:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:inference_tests
+bazel build //ferric_continuum/tnsr:tnsr
+bazel test //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:inference_tests //ferric_continuum/tnsr:qwen3_tests
+#+end_src

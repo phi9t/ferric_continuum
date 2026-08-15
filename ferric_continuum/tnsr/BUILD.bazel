@@ -13,6 +13,7 @@ _TNSR_SRCS = [
     "src/cuda_ffi.rs",
     "src/debug.rs",
     "src/grad_mode.rs",
+    "src/inference.rs",
     "src/saved.rs",
     "src/tensor.rs",
     "src/transformer.rs",
@@ -161,6 +162,15 @@ rust_test(
         ":tnsr",
         "@crates//:serde_json",
     ],
+)
+
+# Generic CPU inference primitive tests.
+rust_test(
+    name = "inference_tests",
+    srcs = ["tests/inference_test.rs"],
+    crate_name = "inference_test",
+    edition = "2021",
+    deps = [":tnsr"],
 )
 
 # Golden-value tests for the scaling / FLOPs accounting module

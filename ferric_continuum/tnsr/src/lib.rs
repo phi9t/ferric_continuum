@@ -22,6 +22,7 @@ pub mod checkpoint;
 pub mod cuda_ffi;
 pub mod debug;
 pub mod grad_mode;
+pub mod inference;
 pub mod ops;
 pub mod qwen3;
 pub mod qwen3_load;
