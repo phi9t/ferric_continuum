@@ -1,8 +1,8 @@
 use tnsr::dtensor::harness::TrainingStepScenario;
 use tnsr::dtensor::{
-    CollectiveError, CollectiveKind, CollectiveSimulator, Layout, MeshAxis, MeshError, MeshTrace,
-    MeshTraceEvent, ParallelDims5D, Placement, RankCoord5D, ShardError, ShardMap, TrainingPhase,
-    MESH_SIM_TRACE_SCHEMA,
+    CollectiveError, CollectiveKind, CollectiveSimulator, InjectionEvent, InjectionKind,
+    InjectionPlan, Layout, MeshAxis, MeshError, MeshTrace, MeshTraceEvent, ParallelDims5D,
+    Placement, RankCoord5D, ShardError, ShardMap, TrainingPhase, MESH_SIM_TRACE_SCHEMA,
 };
 use tnsr::tensor::{Shape, TensorValue};
 
@@ -238,4 +238,31 @@ fn collective_rejects_bad_rank_count_before_grouping() {
             got: 1
         }
     );
+}
+
+#[test]
+fn injection_plan_corrupts_and_reports_deterministically() {
+    let plan = InjectionPlan::new(vec![
+        InjectionEvent {
+            label: "rank0_nan".to_string(),
+            phase: TrainingPhase::Backward,
+            rank: 0,
+            axis: Some(MeshAxis::DpReplicate),
+            kind: InjectionKind::InjectNan { offset: 1 },
+        },
+        InjectionEvent {
+            label: "rank0_missing".to_string(),
+            phase: TrainingPhase::Backward,
+            rank: 0,
+            axis: Some(MeshAxis::DpReplicate),
+            kind: InjectionKind::MissingParticipant,
+        },
+    ]);
+    let mut shard = TensorValue::from_vec(Shape(vec![2]), vec![1.0, 2.0]);
+    let failures = plan.apply_to_shard(TrainingPhase::Backward, 0, &mut shard);
+
+    assert!(shard.data[1].is_nan());
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].rank, Some(0));
+    assert_eq!(failures[0].axis, Some(MeshAxis::DpReplicate));
 }

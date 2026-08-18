@@ -6,12 +6,14 @@
 
 pub mod collective;
 pub mod harness;
+pub mod injection;
 pub mod layout;
 pub mod mesh;
 pub mod shard_map;
 pub mod trace;
 
 pub use collective::{CollectiveError, CollectiveSimulator};
+pub use injection::{InjectionEvent, InjectionKind, InjectionPlan};
 pub use layout::{Layout, LayoutError, Placement, ReduceOp};
 pub use mesh::{MeshAxis, MeshError, ParallelDims5D, RankCoord5D};
 pub use shard_map::{ShardError, ShardMap};

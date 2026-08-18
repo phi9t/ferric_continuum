@@ -15,6 +15,7 @@ _TNSR_SRCS = [
     "src/dtensor/mod.rs",
     "src/dtensor/collective.rs",
     "src/dtensor/harness.rs",
+    "src/dtensor/injection.rs",
     "src/dtensor/layout.rs",
     "src/dtensor/mesh.rs",
     "src/dtensor/shard_map.rs",
