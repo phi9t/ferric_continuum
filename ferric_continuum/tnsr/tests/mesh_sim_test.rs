@@ -1,7 +1,8 @@
 use tnsr::dtensor::harness::TrainingStepScenario;
 use tnsr::dtensor::{
-    CollectiveKind, Layout, MeshAxis, MeshError, MeshTrace, MeshTraceEvent, ParallelDims5D,
-    Placement, RankCoord5D, ShardError, ShardMap, TrainingPhase, MESH_SIM_TRACE_SCHEMA,
+    CollectiveError, CollectiveKind, CollectiveSimulator, Layout, MeshAxis, MeshError, MeshTrace,
+    MeshTraceEvent, ParallelDims5D, Placement, RankCoord5D, ShardError, ShardMap, TrainingPhase,
+    MESH_SIM_TRACE_SCHEMA,
 };
 use tnsr::tensor::{Shape, TensorValue};
 
@@ -161,6 +162,80 @@ fn mesh_trace_schema_and_events_are_stable() {
             axis: MeshAxis::DpReplicate,
             bytes: 128,
             ranks: vec![0, 1]
+        }
+    );
+}
+
+#[test]
+fn collective_all_reduce_sums_axis_groups_and_records_trace() {
+    let dims = ParallelDims5D::new(1, 2, 1, 1, 2);
+    let shards = vec![
+        TensorValue::from_vec(Shape(vec![2]), vec![1.0, 2.0]),
+        TensorValue::from_vec(Shape(vec![2]), vec![10.0, 20.0]),
+        TensorValue::from_vec(Shape(vec![2]), vec![100.0, 200.0]),
+        TensorValue::from_vec(Shape(vec![2]), vec![1000.0, 2000.0]),
+    ];
+    let mut sim = CollectiveSimulator::new(dims);
+    let out = sim
+        .all_reduce_sum(MeshAxis::DpReplicate, TrainingPhase::Backward, &shards)
+        .unwrap();
+
+    assert_eq!(out.len(), 4);
+    assert_eq!(out[0].data.as_ref(), &vec![101.0, 202.0]);
+    assert_eq!(out[1].data.as_ref(), &vec![1010.0, 2020.0]);
+    assert_eq!(out[2].data.as_ref(), &vec![101.0, 202.0]);
+    assert_eq!(out[3].data.as_ref(), &vec![1010.0, 2020.0]);
+    assert_eq!(sim.trace.events.len(), 1);
+}
+
+#[test]
+fn collective_all_gather_gathers_axis_groups_and_records_trace() {
+    let dims = ParallelDims5D::new(1, 2, 1, 1, 2);
+    let shards = vec![
+        TensorValue::from_vec(Shape(vec![1]), vec![1.0]),
+        TensorValue::from_vec(Shape(vec![1]), vec![10.0]),
+        TensorValue::from_vec(Shape(vec![1]), vec![100.0]),
+        TensorValue::from_vec(Shape(vec![1]), vec![1000.0]),
+    ];
+    let mut sim = CollectiveSimulator::new(dims);
+    let out = sim
+        .all_gather(MeshAxis::DpReplicate, TrainingPhase::Forward, &shards)
+        .unwrap();
+
+    assert_eq!(out.len(), 4);
+    assert_eq!(out[0].shape, Shape(vec![2, 1]));
+    assert_eq!(out[0].data.as_ref(), &vec![1.0, 100.0]);
+    assert_eq!(out[1].data.as_ref(), &vec![10.0, 1000.0]);
+    assert_eq!(out[2].data.as_ref(), &vec![1.0, 100.0]);
+    assert_eq!(out[3].data.as_ref(), &vec![10.0, 1000.0]);
+    assert_eq!(
+        sim.trace.events[0],
+        MeshTraceEvent::Collective {
+            phase: TrainingPhase::Forward,
+            kind: CollectiveKind::AllGather,
+            axis: MeshAxis::DpReplicate,
+            bytes: 2,
+            ranks: vec![0, 2, 1, 3],
+        }
+    );
+}
+
+#[test]
+fn collective_rejects_bad_rank_count_before_grouping() {
+    let dims = ParallelDims5D::new(1, 2, 1, 1, 2);
+    let shards = vec![TensorValue::from_vec(Shape(vec![1]), vec![1.0])];
+    let mut sim = CollectiveSimulator::new(dims);
+
+    let err = match sim.all_reduce_sum(MeshAxis::DpReplicate, TrainingPhase::Backward, &shards) {
+        Ok(_) => panic!("wrong rank count unexpectedly produced collective output"),
+        Err(err) => err,
+    };
+
+    assert_eq!(
+        err,
+        CollectiveError::RankCountMismatch {
+            expected: 4,
+            got: 1
         }
     );
 }
