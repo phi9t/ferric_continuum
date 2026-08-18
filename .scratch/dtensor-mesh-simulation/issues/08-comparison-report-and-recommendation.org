@@ -9,6 +9,15 @@
 The DTensor mesh simulation effort should conclude with evidence, not a
 preselected architecture.
 
+Planning inputs:
+
+- [[file:../reports/04-common-substrate-reflection.org][Common substrate reflection]]
+- [[file:../plans/2026-08-18-remaining-architecture-options-plan.org][Remaining architecture options implementation plan]]
+
+The comparison should explicitly use the lessons from the common substrate:
+shape semantics, axis-local group reuse, trace/failure context, wrapper
+low-risk control value, tensor-native blast radius, and plan-first observability.
+
 * Requirements
 
 - Compare all three tracer bullets against the same rubric:
@@ -44,6 +53,12 @@ preselected architecture.
   - recommendation
 - Update ~../spec.org~ with a short pointer to the selected durable direction
   only after the evidence report is complete.
+- Separate the final recommendation into:
+  - architecture to graduate
+  - common substrate pieces to keep regardless of winner
+  - test/observability infrastructure to keep even if not user-facing
+  - deferred risks that block claims of full TorchTitan parity
+- Do not select an architecture before reading the three option-local reports.
 
 * Out of scope
 

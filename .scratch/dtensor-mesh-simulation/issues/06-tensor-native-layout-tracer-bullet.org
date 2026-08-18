@@ -10,6 +10,15 @@ Option B tests native layout metadata in or next to the core ~Tensor~ type.
 The goal is to measure ergonomics and blast radius, not to make every existing
 operation distributed-aware in one step.
 
+Planning inputs:
+
+- [[file:../reports/04-common-substrate-reflection.org][Common substrate reflection]]
+- [[file:../plans/2026-08-18-remaining-architecture-options-plan.org][Remaining architecture options implementation plan]]
+
+This option is primarily a blast-radius and ergonomics experiment. The result
+is useful only if it proves both what gets easier and what existing local tensor
+surface had to change.
+
 * Requirements
 
 - Add optional distribution metadata to ~TensorInner~ or a closely adjacent
@@ -41,6 +50,10 @@ impl Tensor {
   normal local tensor code.
 - Prove that existing local tensor behavior is unchanged when no layout metadata
   is attached.
+- Keep metadata attachment explicit and avoid silent propagation through
+  arbitrary existing ops.
+- Include at least one unsupported-propagation test that returns a typed error.
+- Record exact core tensor/autograd/op seams touched in the option-local report.
 - Write a short option-local report under
   ~.scratch/dtensor-mesh-simulation/reports/06-tensor-native-layout.org~.
 

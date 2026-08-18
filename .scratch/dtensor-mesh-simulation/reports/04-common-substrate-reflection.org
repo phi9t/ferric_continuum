@@ -1,0 +1,138 @@
+#+TITLE: Common substrate reflection
+#+TYPE: report
+#+STATUS: ready-for-agent
+#+PARENT: ../spec.org
+
+* Purpose
+
+Reflect on tickets 01-04 before starting the architecture tracer bullets. The
+common substrate work is not just scaffolding; it teaches which semantics must
+be shared by all three options so the final comparison is fair.
+
+* What exists now
+
+- ~tnsr::dtensor::mesh~ models dense TorchTitan-style axes as
+  ~pp x dp_replicate x dp_shard x cp x tp~ with row-major rank coordinates and
+  ~tp~ as the fastest-moving axis.
+- ~tnsr::dtensor::layout~ models ~Replicate~, ~Shard(dim)~, ~Partial(sum)~,
+  and ~Local~, and rejects duplicate axes, duplicate shard dimensions, and
+  mixed local/distributed layouts.
+- ~tnsr::dtensor::shard_map~ provides single-axis shape, slicing, and
+  reconstruction semantics with typed validation for rank count, shape
+  mismatch, out-of-range shard dimensions, and uneven shards.
+- ~tnsr::dtensor::collective~ provides an axis-local single-process simulator
+  for all-reduce, all-gather, reduce-scatter, broadcast, and local-slice
+  operations. Ticket 04 remains responsible for fixing reduce-scatter so it
+  preserves tensor rank and slices the requested tensor dimension.
+- ~tnsr::dtensor::trace~ provides the stable
+  ~tnsr.mesh_sim_trace.v0~ event surface for collectives, layout transitions,
+  injections, and failures.
+- ~tnsr::dtensor::injection~ provides deterministic failure injection events
+  with optional axis and collective context.
+- ~tnsr::dtensor::harness~ provides an unsharded transformer-block training
+  reference and a smoke path that connects mesh, sharding, collectives,
+  injection, and trace.
+
+* Lessons
+
+** Shape semantics are the main correctness risk
+
+The first implementation of ~reduce_scatter_sum~ was axis-local but flattened
+the tensor and scattered flat chunks. That was enough for simple vectors but
+wrong for ~Partial(sum) -> Shard(dim)~ on multidimensional activations,
+gradients, or parameters. Every remaining tracer bullet must treat tensor rank,
+global shape, local shape, and shard dimension as first-class evidence.
+
+Implication for tickets 05-07:
+
+- Include at least one rank-preserving multidimensional redistribution check.
+- Assert both local shape and local data contents.
+- Reject unsupported shape transitions with typed errors instead of falling
+  back to flat buffers.
+
+** Axis-local groups are the useful abstraction boundary
+
+The collective simulator's rank groups give the right unit of reasoning:
+all-reduce on ~dp_replicate~, reduce-scatter on ~dp_shard~, local slicing on
+~tp~ or ~cp~, and derived views such as ~loss = dp_replicate * dp_shard * cp~.
+The architecture tracks should not each rediscover rank grouping.
+
+Implication for tickets 05-07:
+
+- Reuse ~CollectiveSimulator~ for collectives rather than duplicating grouping
+  logic.
+- When a derived mesh view is not expressible yet, record the limitation in the
+  option-local report rather than inventing a private interpretation.
+
+** Trace and failure context need to be part of the semantics
+
+The final-review fix added injection and failure events to the mesh trace. That
+made observability a behavioral contract, not a side log. The architecture
+comparison should therefore judge options by how naturally they attach rank,
+axis, tensor/layout, phase, and collective context to failures.
+
+Implication for tickets 05-07:
+
+- Every option-local test should assert at least one trace event, not only a
+  numerical result.
+- Every option-local report should describe failure localization quality using
+  the same terms: phase, rank, axis, tensor/layout, collective, and message.
+
+** The wrapper option is the lowest-risk control
+
+Option A can probably reuse the common substrate with the smallest blast
+radius. It should serve as the control implementation for comparing the more
+intrusive Tensor-native option and the more abstract plan-first option.
+
+Implication for rollout order:
+
+- Clear ticket 04 first.
+- Run ticket 05 before tickets 06 and 07 unless there is a strong reason to
+  parallelize.
+- Use the wrapper report as the baseline evidence format for the other option
+  reports.
+
+** Tensor-native layout is mostly a blast-radius experiment
+
+The existing ~Tensor~ and autograd code are intentionally local. Adding optional
+layout metadata may be ergonomic, but the real question is how much existing op
+surface it touches and whether unsupported propagation fails loudly.
+
+Implication for ticket 06:
+
+- Keep metadata attachment explicit.
+- Keep default local tensor behavior byte-for-byte unchanged when metadata is
+  absent.
+- Do not silently propagate metadata through arbitrary ops.
+
+** Plan-first simulation is the observability experiment
+
+Option C may be less native as DTensor semantics, but it is likely to produce
+the richest topology, cost, and chaos reports. It should be evaluated as a
+training-engine simulator, not as a replacement for tensor semantics.
+
+Implication for ticket 07:
+
+- Make planned collectives and executed trace comparable.
+- Treat local ~tnsr~ math as a reference oracle, not as the owner of
+  distributed semantics.
+
+* Remaining-work order
+
+1. Execute ticket 04 to complete dimension-aware reduce-scatter.
+2. Execute ticket 05 as the low-risk wrapper control.
+3. Execute ticket 06 as the native-ergonomics and blast-radius probe.
+4. Execute ticket 07 as the observability and planning probe.
+5. Execute ticket 08 using only evidence from the three option-local reports.
+
+* Risks to carry forward
+
+- Derived mesh views such as ~loss~ and ~fsdp~ are named in the spec but not yet
+  represented as first-class objects. Remaining tickets may need to document a
+  limitation rather than overfit the simulator.
+- The trace schema is stable enough for tests, but it is not yet serialized to
+  JSON. If option reports need durable artifacts beyond org text, add a small
+  trace rendering ticket rather than mixing serialization into one option.
+- The harness is foundation-model-like but still tiny and synthetic. The final
+  recommendation should not claim full TorchTitan parity until later work
+  exercises a richer forward/backward schedule.

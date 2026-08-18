@@ -252,6 +252,18 @@ Implement the effort as evidence-producing tracer bullets:
 
 Each tracer bullet must run the same scenario and report comparable results.
 
+After tickets 01-03 and the final common-substrate review, the remaining work
+is guided by:
+
+- [[file:reports/04-common-substrate-reflection.org][04 common substrate reflection]]
+- [[file:plans/2026-08-18-redistribution-substrate-plan.org][Redistribution substrate implementation plan]]
+- [[file:plans/2026-08-18-remaining-architecture-options-plan.org][Remaining architecture options implementation plan]]
+
+The reflection records the key correction from the first implementation wave:
+shape semantics are the main correctness risk. Every architecture tracer bullet
+must assert tensor rank, local shape, local data, trace evidence, and
+failure-localization quality instead of checking only that a collective ran.
+
 * Acceptance criteria
 
 The full effort is complete when:

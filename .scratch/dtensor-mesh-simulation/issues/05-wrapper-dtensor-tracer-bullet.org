@@ -9,6 +9,14 @@
 Option A tests a dedicated ~DTensor~ wrapper around local ~Tensor~ or
 ~TensorValue~ shards.
 
+Planning inputs:
+
+- [[file:../reports/04-common-substrate-reflection.org][Common substrate reflection]]
+- [[file:../plans/2026-08-18-remaining-architecture-options-plan.org][Remaining architecture options implementation plan]]
+
+The wrapper option is the low-risk control. It should reuse the common
+substrate directly and avoid changing existing local ~Tensor~ math.
+
 * Requirements
 
 - Add a narrow wrapper-DTensor interface for global shape, mesh, placements,
@@ -45,6 +53,12 @@ impl DTensor {
 - Emit the shared mesh simulation trace events.
 - Run deterministic injection scenarios and record failure-localization quality.
 - Record interface complexity and touched files in the comparison notes.
+- Include at least one multidimensional redistribution assertion that checks
+  rank preservation, local shape, and local data contents.
+- Reuse ~CollectiveSimulator~, ~ShardMap~, ~Layout~, and ~MeshTrace~ rather than
+  duplicating mesh or collective semantics.
+- Treat derived mesh views such as ~loss~ as documented limitations if the
+  common substrate cannot express them yet.
 - Write a short option-local report under
   ~.scratch/dtensor-mesh-simulation/reports/05-wrapper-dtensor.org~.
 

@@ -1,0 +1,485 @@
+#+TITLE: DTensor remaining architecture options implementation plan
+#+TYPE: plan
+#+STATUS: ready-for-agent
+#+SPEC: ../spec.org
+
+* For agentic workers
+
+Required sub-skill: use ~superpowers:subagent-driven-development~
+recommended, or ~superpowers:executing-plans~ if executing inline. Execute one
+ticket at a time in an isolated worktree. Read the parent spec, ticket 04, the
+common substrate reflection report, and the specific ticket before starting.
+
+* Goal
+
+Finish the DTensor architecture experiment by clearing the redistribution
+blocker, implementing three comparable dense-training tracer bullets, and
+writing an evidence-based recommendation.
+
+* Architecture
+
+Keep the common substrate authoritative for mesh axes, layouts, shard mapping,
+axis-local collectives, trace events, and deterministic injection. The three
+architecture tracks should differ only in where distributed semantics live:
+wrapper value, tensor metadata, or simulation plan. Each option must run the
+same dense training scenario, emit the same trace vocabulary, and write a
+short option-local report that ticket 08 can compare without reconstructing
+the implementation history.
+
+* Tech stack
+
+- Rust 2021 under Bazel.
+- Existing ~tnsr::dtensor~ common substrate.
+- Existing ~tnsr::tensor~, ~tnsr::autograd~, and transformer test harness.
+- Org-mode tracker and reports under ~.scratch/dtensor-mesh-simulation/~.
+- No new external dependencies unless a later ticket explicitly changes scope.
+
+* Spec
+
+- [[file:../spec.org][DTensor mesh simulation architecture experiment]]
+- [[file:../reports/04-common-substrate-reflection.org][Common substrate reflection]]
+- [[file:../issues/04-complete-redistribution-substrate.org][04 complete redistribution substrate]]
+- [[file:../issues/05-wrapper-dtensor-tracer-bullet.org][05 wrapper DTensor tracer bullet]]
+- [[file:../issues/06-tensor-native-layout-tracer-bullet.org][06 tensor-native layout tracer bullet]]
+- [[file:../issues/07-plan-first-simulation-tracer-bullet.org][07 plan-first simulation tracer bullet]]
+- [[file:../issues/08-comparison-report-and-recommendation.org][08 comparison report and recommendation]]
+
+* Global constraints
+
+- Dense mesh axes are exactly ~pp x dp_replicate x dp_shard x cp x tp~.
+- MoE/EP, sparse meshes, CUDA/NCCL, async collectives, recovery, uneven shards,
+  and real multi-process execution remain out of scope.
+- ~Partial(sum)~ is the only supported reduction placement.
+- Use the fixed dimension-aware reduce-scatter for ~Partial(sum) -> Shard(dim)~.
+- Reuse common trace schema ~tnsr.mesh_sim_trace.v0~.
+- Every option-local report must include:
+  - supported semantics
+  - unsupported semantics
+  - reference-correctness evidence
+  - trace and failure-localization evidence
+  - files touched
+  - interface complexity notes
+  - recommendation for or against graduating the option
+- Use pinned Bazel: ~/data02/home/philip.yang/.local/bin/bazel-9.2.0~.
+- Commit, push, pull-request creation, branch landing, and final architecture
+  selection require explicit human authorization.
+
+* Planned file structure
+
+- Modify ~ferric_continuum/tnsr/src/dtensor/collective.rs~
+  - Ticket 04: dimension-aware reduce-scatter.
+- Modify ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+  - Ticket 04 tests and any shared test helpers needed by the tracer bullets.
+- Create ~ferric_continuum/tnsr/src/dtensor/wrapper.rs~
+  - Ticket 05 wrapper-DTensor option.
+- Create ~ferric_continuum/tnsr/src/dtensor/native.rs~
+  - Ticket 06 native-layout helpers if keeping metadata adjacent to core
+    tensor types is cleaner than putting all helpers in ~tensor.rs~.
+- Modify ~ferric_continuum/tnsr/src/tensor.rs~
+  - Ticket 06 only if optional layout metadata must live in ~TensorInner~.
+- Create ~ferric_continuum/tnsr/src/dtensor/plan.rs~
+  - Ticket 07 plan-first representation and executor.
+- Modify ~ferric_continuum/tnsr/src/dtensor/mod.rs~
+  - Re-export option modules as they land.
+- Modify ~ferric_continuum/tnsr/BUILD.bazel~
+  - Add any new module source files to ~_TNSR_SRCS~.
+- Modify option tests in ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+  - Keep one focused target unless the file becomes difficult to navigate.
+- Create reports:
+  - ~.scratch/dtensor-mesh-simulation/reports/05-wrapper-dtensor.org~
+  - ~.scratch/dtensor-mesh-simulation/reports/06-tensor-native-layout.org~
+  - ~.scratch/dtensor-mesh-simulation/reports/07-plan-first-simulation.org~
+  - ~.scratch/dtensor-mesh-simulation/reports/08-comparison.org~
+
+* Task 1: Execute ticket 04 redistribution blocker
+
+** Files
+
+- Modify: ~ferric_continuum/tnsr/src/dtensor/collective.rs~
+- Modify: ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+- Modify: ~.scratch/dtensor-mesh-simulation/issues/04-complete-redistribution-substrate.org~
+
+** Interfaces
+
+Consumes:
+
+#+begin_src rust
+pub fn reduce_scatter_sum(
+    &mut self,
+    axis: MeshAxis,
+    shard_dim: usize,
+    phase: TrainingPhase,
+    shards: &[TensorValue],
+) -> Result<Vec<TensorValue>, CollectiveError>;
+#+end_src
+
+Produces:
+
+- Dimension-aware ~Partial(sum) -> Shard(dim)~ substrate for tickets 05-07.
+- Closed ticket 04 with exact verification evidence.
+
+** Steps
+
+- [ ] Execute [[file:2026-08-18-redistribution-substrate-plan.org][the redistribution substrate plan]] exactly.
+- [ ] Run:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:context_parallel_gqa_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+Expected: PASS for all 4 targets.
+
+- [ ] Append completion evidence under ticket 04 ~* Answer~.
+- [ ] Commit code and ticket evidence with the required trailer.
+
+* Task 2: Implement Option A wrapper DTensor tracer bullet
+
+** Files
+
+- Create: ~ferric_continuum/tnsr/src/dtensor/wrapper.rs~
+- Modify: ~ferric_continuum/tnsr/src/dtensor/mod.rs~
+- Modify: ~ferric_continuum/tnsr/BUILD.bazel~
+- Modify: ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+- Create: ~.scratch/dtensor-mesh-simulation/reports/05-wrapper-dtensor.org~
+- Modify: ~.scratch/dtensor-mesh-simulation/issues/05-wrapper-dtensor-tracer-bullet.org~
+
+** Interfaces
+
+Consumes:
+
+- ~Shape~, ~TensorValue~
+- ~Layout~, ~Placement~, ~ReduceOp~
+- ~ParallelDims5D~, ~MeshAxis~
+- ~ShardMap~
+- ~CollectiveSimulator~
+- ~TrainingPhase~
+
+Produces:
+
+#+begin_src rust
+#[derive(Debug, Clone, PartialEq)]
+pub struct DTensor {
+    pub global_shape: Shape,
+    pub layout: Layout,
+    pub dims: ParallelDims5D,
+    pub shards: Vec<TensorValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DtError {
+    Layout(LayoutError),
+    Shard(ShardError),
+    Collective(CollectiveError),
+    UnsupportedRedistribution { src: String, dst: String },
+    RankCountMismatch { expected: usize, got: usize },
+}
+
+impl DTensor {
+    pub fn from_replicated(
+        value: TensorValue,
+        layout: Layout,
+        dims: ParallelDims5D,
+    ) -> Result<Self, DtError>;
+
+    pub fn redistribute(
+        &self,
+        dst: Layout,
+        sim: &mut CollectiveSimulator,
+        phase: TrainingPhase,
+    ) -> Result<Self, DtError>;
+
+    pub fn full_tensor(&self) -> Result<TensorValue, DtError>;
+}
+#+end_src
+
+** Steps
+
+- [ ] Add a failing test named
+      ~wrapper_dtensor_replicate_shard_reconstructs_and_traces~. It must:
+  - create ~dims = ParallelDims5D::new(1, 1, 1, 1, 2)~
+  - wrap a replicated ~Shape(vec![2, 4])~ tensor
+  - redistribute to ~Layout::new(vec![(MeshAxis::Tp, Placement::Shard(1))])~
+  - assert per-rank local shapes/data
+  - reconstruct with ~full_tensor()~
+  - assert one layout or collective trace event.
+- [ ] Add a failing test named
+      ~wrapper_dtensor_partial_to_shard_uses_dimension_aware_reduce_scatter~.
+      It must use a multidimensional ~Shape(vec![2, 4])~ partial tensor over
+      ~dp_shard = 2~ and assert local ~Shape(vec![2, 2])~ outputs.
+- [ ] Implement ~wrapper.rs~ with explicit redistribution branches:
+  - identical layout returns a clone and records no collective
+  - ~Replicate -> Shard(dim)~ uses ~CollectiveSimulator::local_slice~
+  - ~Shard(dim) -> Replicate~ uses ~CollectiveSimulator::all_gather~ plus
+    reconstruction through ~ShardMap~ when needed
+  - ~Partial(sum) -> Replicate~ uses ~all_reduce_sum~
+  - ~Partial(sum) -> Shard(dim)~ uses fixed ~reduce_scatter_sum(axis, dim, ...)~
+  - unsupported transitions return ~DtError::UnsupportedRedistribution~
+- [ ] Re-export wrapper types from ~dtensor/mod.rs~.
+- [ ] Add ~src/dtensor/wrapper.rs~ to ~_TNSR_SRCS~ in ~BUILD.bazel~.
+- [ ] Write ~reports/05-wrapper-dtensor.org~ with:
+  - supported redistribution table
+  - test evidence
+  - trace evidence
+  - failure-localization evidence
+  - files touched
+  - interface complexity notes
+  - recommendation as wrapper option evidence, not final architecture choice.
+- [ ] Append ticket 05 ~* Answer~ with commit hash, report path, and test
+      command output summary.
+- [ ] Run:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+Expected: PASS for both targets.
+
+- [ ] Commit code, tests, report, and ticket evidence with the required trailer.
+
+* Task 3: Implement Option B tensor-native layout tracer bullet
+
+** Files
+
+- Modify: ~ferric_continuum/tnsr/src/tensor.rs~
+- Create: ~ferric_continuum/tnsr/src/dtensor/native.rs~
+- Modify: ~ferric_continuum/tnsr/src/dtensor/mod.rs~
+- Modify: ~ferric_continuum/tnsr/BUILD.bazel~
+- Modify: ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+- Create: ~.scratch/dtensor-mesh-simulation/reports/06-tensor-native-layout.org~
+- Modify: ~.scratch/dtensor-mesh-simulation/issues/06-tensor-native-layout-tracer-bullet.org~
+
+** Interfaces
+
+Produces:
+
+#+begin_src rust
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TensorLayoutMeta {
+    pub global_shape: Shape,
+    pub layout: Layout,
+    pub dims: ParallelDims5D,
+    pub rank: usize,
+}
+
+impl Tensor {
+    pub fn with_layout_meta(self, meta: TensorLayoutMeta) -> Self;
+    pub fn layout_meta(&self) -> Option<TensorLayoutMeta>;
+}
+#+end_src
+
+** Steps
+
+- [ ] Add a failing test named ~tensor_layout_meta_attaches_without_changing_value~.
+      It must create a local ~Tensor~, attach metadata, assert metadata can be
+      read back, and assert shape/data remain unchanged.
+- [ ] Add a failing test named
+      ~tensor_without_layout_meta_preserves_existing_local_behavior~. It must
+      run a small existing local op path without metadata and assert the result
+      equals the pre-change expected value.
+- [ ] Add a failing test named
+      ~native_layout_unsupported_propagation_fails_loudly~. It must call the
+      native-layout tracer-bullet helper on an unsupported layout transition and
+      assert a typed error rather than silent metadata propagation.
+- [ ] Add ~TensorLayoutMeta~ storage. Prefer adding
+      ~pub layout_meta: Option<TensorLayoutMeta>~ to ~TensorInner~ only if the
+      helper cannot live adjacent to ~Tensor~ cleanly.
+- [ ] Implement ~with_layout_meta~ by mutating or rebuilding the tensor metadata
+      without changing ~TensorValue~, autograd producer, version, or gradient
+      fields.
+- [ ] Implement ~layout_meta~ as a clone-returning accessor.
+- [ ] Add a native-layout tracer-bullet helper in ~dtensor/native.rs~ that uses
+      common substrate redistribution at explicit training-step boundaries; do
+      not modify arbitrary existing ops to propagate layouts.
+- [ ] Re-export native metadata/helper types from ~dtensor/mod.rs~ if they live
+      under ~dtensor/native.rs~.
+- [ ] Write ~reports/06-tensor-native-layout.org~ with:
+  - exact core files touched
+  - unsupported propagation points
+  - local-behavior preservation evidence
+  - trace/failure evidence
+  - assessment of ergonomics versus blast radius.
+- [ ] Append ticket 06 ~* Answer~ with commit hash, report path, and test
+      command output summary.
+- [ ] Run:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:lib_tests \
+  //ferric_continuum/tnsr:tnsr_tests
+#+end_src
+
+Expected: PASS for all 3 targets.
+
+- [ ] Commit code, tests, report, and ticket evidence with the required trailer.
+
+* Task 4: Implement Option C plan-first simulation tracer bullet
+
+** Files
+
+- Create: ~ferric_continuum/tnsr/src/dtensor/plan.rs~
+- Modify: ~ferric_continuum/tnsr/src/dtensor/mod.rs~
+- Modify: ~ferric_continuum/tnsr/BUILD.bazel~
+- Modify: ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+- Create: ~.scratch/dtensor-mesh-simulation/reports/07-plan-first-simulation.org~
+- Modify: ~.scratch/dtensor-mesh-simulation/issues/07-plan-first-simulation-tracer-bullet.org~
+
+** Interfaces
+
+Produces:
+
+#+begin_src rust
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeshSimPlan {
+    pub dims: ParallelDims5D,
+    pub steps: Vec<MeshSimStep>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MeshSimStep {
+    Tensor { name: String, global_shape: Shape, layout: Layout },
+    Redistribute { tensor: String, src: Layout, dst: Layout, phase: TrainingPhase },
+    Collective { kind: CollectiveKind, axis: MeshAxis, tensor: String, phase: TrainingPhase },
+    Injection { event: InjectionEvent },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeshSimPlanReport {
+    pub trace: MeshTrace,
+    pub planned_collectives: usize,
+    pub executed_collectives: usize,
+    pub failures: Vec<FailureRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlanError {
+    Collective(CollectiveError),
+    Layout(LayoutError),
+    Shard(ShardError),
+    MissingTensor { name: String },
+    UnsupportedStep { message: String },
+}
+
+impl MeshSimPlan {
+    pub fn tiny_dense_training(dims: ParallelDims5D) -> Result<Self, PlanError>;
+    pub fn execute(&self, injections: Option<&InjectionPlan>) -> Result<MeshSimPlanReport, PlanError>;
+}
+#+end_src
+
+** Steps
+
+- [ ] Add a failing test named
+      ~plan_first_tiny_dense_training_records_planned_collectives~. It must
+      build the tiny dense plan, assert it includes tensor, redistribution,
+      collective, and phase information, and assert planned collective count.
+- [ ] Add a failing test named
+      ~plan_first_execution_emits_common_mesh_trace~. It must execute the plan
+      and assert reduce-scatter, all-reduce, and local-slice evidence in
+      ~MeshTrace~.
+- [ ] Add a failing test named
+      ~plan_first_injection_is_represented_in_plan_and_trace~. It must include
+      one ~InjectionEvent~ and assert both plan step and trace/failure output.
+- [ ] Implement ~plan.rs~ as an explicit plan representation with no hidden
+      mutation of ~Tensor~ or ~DTensor~.
+- [ ] Implement execution by driving ~CollectiveSimulator~ and common trace
+      events from plan steps. Use local ~tnsr~ math only for reference checks
+      where the plan explicitly asks for it.
+- [ ] Re-export plan types from ~dtensor/mod.rs~.
+- [ ] Add ~src/dtensor/plan.rs~ to ~_TNSR_SRCS~ in ~BUILD.bazel~.
+- [ ] Write ~reports/07-plan-first-simulation.org~ with:
+  - planned versus executed collective count
+  - trace quality assessment
+  - chaos localization evidence
+  - reference-check evidence
+  - assessment of simulator usefulness versus DTensor-native ergonomics.
+- [ ] Append ticket 07 ~* Answer~ with commit hash, report path, and test
+      command output summary.
+- [ ] Run:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+Expected: PASS for all 3 targets.
+
+- [ ] Commit code, tests, report, and ticket evidence with the required trailer.
+
+* Task 5: Write comparison report and next tickets
+
+** Files
+
+- Create: ~.scratch/dtensor-mesh-simulation/reports/08-comparison.org~
+- Modify: ~.scratch/dtensor-mesh-simulation/spec.org~
+- Modify: ~.scratch/dtensor-mesh-simulation/issues/08-comparison-report-and-recommendation.org~
+- Create follow-up tickets under ~.scratch/dtensor-mesh-simulation/issues/~ if
+  and only if the evidence supports continuing.
+
+** Inputs
+
+- ~reports/05-wrapper-dtensor.org~
+- ~reports/06-tensor-native-layout.org~
+- ~reports/07-plan-first-simulation.org~
+- Test evidence recorded in tickets 05-07.
+
+** Steps
+
+- [ ] Read all three option reports before writing the comparison.
+- [ ] Create ~reports/08-comparison.org~ with a decision table whose rows are:
+  - Wrapper DTensor
+  - Tensor-native layout
+  - Plan-first simulation
+- [ ] Include these columns exactly:
+  - interface size
+  - files touched
+  - unsupported semantics
+  - trace quality
+  - chaos localization quality
+  - reference correctness evidence
+  - risk to existing ~tnsr~ local tensor/autograd behavior
+  - recommendation
+- [ ] Write a recommendation section that separates:
+  - durable architecture candidate
+  - shared infrastructure to keep regardless of the winner
+  - pieces to discard or keep only as test infrastructure
+  - follow-up work before full forward/backward foundation-model simulation.
+- [ ] Create at least one follow-up ticket for the selected durable direction.
+- [ ] Create at least one follow-up ticket for the first non-dense extension
+      only if the evidence supports continuing toward MoE/EP or sparse meshes.
+- [ ] Update ~spec.org~ with a short pointer to ~reports/08-comparison.org~ and
+      the selected durable direction. Do not rewrite the original approved
+      design history.
+- [ ] Append ticket 08 ~* Answer~ with report path and follow-up ticket links.
+- [ ] Run:
+
+#+begin_src sh
+rg -n "reports/05-wrapper-dtensor|reports/06-tensor-native-layout|reports/07-plan-first-simulation|reports/08-comparison" \
+  .scratch/dtensor-mesh-simulation
+git diff --check
+#+end_src
+
+Expected: report links are discoverable and no whitespace errors are present.
+
+- [ ] Commit report, spec pointer, ticket answer, and follow-up tickets with
+      the required trailer.
+
+* Self-review checklist
+
+- [ ] Ticket 04 is the only blocker before the architecture tracks.
+- [ ] Tickets 05-07 all reuse the common substrate and do not fork private mesh
+      or collective semantics.
+- [ ] Tickets 05-07 all produce option-local reports under ~reports/~.
+- [ ] Ticket 08 consumes evidence from reports rather than picking the initial
+      favorite.
+- [ ] No task adds MoE/EP, CUDA/NCCL, async collectives, real process groups, or
+      recovery.
+- [ ] Every verification command uses the pinned Bazel binary where Bazel is
+      required.

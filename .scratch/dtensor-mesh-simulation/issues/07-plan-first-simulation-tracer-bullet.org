@@ -10,6 +10,15 @@ Option C tests keeping distributed semantics in a planner/simulator layer that
 can call local ~tnsr~ math for reference checks without making tensors
 themselves distributed.
 
+Planning inputs:
+
+- [[file:../reports/04-common-substrate-reflection.org][Common substrate reflection]]
+- [[file:../plans/2026-08-18-remaining-architecture-options-plan.org][Remaining architecture options implementation plan]]
+
+This option is the observability and chaos-exploration experiment. It should be
+judged by how clearly it represents the training mesh and failures, while being
+honest about any distance from DTensor-native ergonomics.
+
 * Requirements
 
 - Define a plan representation for training phases, tensor layouts,
@@ -41,6 +50,11 @@ pub enum MeshSimStep {
 - Compare whether this model gives better observability and chaos exploration,
   and whether it loses too much connection to actual tensor/autograd behavior.
 - Include a deterministic report of planned versus executed collectives.
+- Make planned collectives and executed ~MeshTrace~ events comparable in tests.
+- Treat local ~tnsr~ math as a reference oracle, not as the owner of
+  distributed semantics.
+- Include at least one injected failure that appears both in the plan and in
+  the executed trace/failure report.
 - Write a short option-local report under
   ~.scratch/dtensor-mesh-simulation/reports/07-plan-first-simulation.org~.
 
