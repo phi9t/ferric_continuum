@@ -1,7 +1,7 @@
 #+TITLE: Comparison report and recommendation
 #+TYPE: task
 #+STATUS: ready-for-agent
-#+BLOCKED_BY: 04-wrapper-dtensor-tracer-bullet, 05-tensor-native-layout-tracer-bullet, 06-plan-first-simulation-tracer-bullet
+#+BLOCKED_BY: 05-wrapper-dtensor-tracer-bullet, 06-tensor-native-layout-tracer-bullet, 07-plan-first-simulation-tracer-bullet
 #+PARENT: ../spec.org
 
 * Context
@@ -27,6 +27,23 @@ preselected architecture.
 - Identify discarded or deferred pieces and why.
 - Record follow-up work for MoE/EP, asynchronous collectives, real backends, or
   richer recovery if the evidence supports them.
+- Read the three option-local reports:
+  - ~.scratch/dtensor-mesh-simulation/reports/05-wrapper-dtensor.org~
+  - ~.scratch/dtensor-mesh-simulation/reports/06-tensor-native-layout.org~
+  - ~.scratch/dtensor-mesh-simulation/reports/07-plan-first-simulation.org~
+- Write the final comparison report to
+  ~.scratch/dtensor-mesh-simulation/reports/08-comparison.org~.
+- Include a decision table with one row per architecture and these columns:
+  - interface size
+  - files touched
+  - unsupported semantics
+  - trace quality
+  - chaos localization quality
+  - reference correctness evidence
+  - risk to existing ~tnsr~ local tensor/autograd behavior
+  - recommendation
+- Update ~../spec.org~ with a short pointer to the selected durable direction
+  only after the evidence report is complete.
 
 * Out of scope
 
@@ -40,5 +57,12 @@ preselected architecture.
   from each tracer bullet.
 - Every blocking finding or unknown is either resolved or converted into an
   explicit follow-up ticket.
+- The recommendation is evidence-based and does not select an architecture only
+  because it was initially preferred.
+- The report includes at least one follow-up ticket for the durable direction
+  and one for the first deferred non-dense extension if the evidence supports
+  continuing.
 
 * Comments
+
+* Answer

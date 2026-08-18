@@ -1,0 +1,73 @@
+#+TITLE: Complete redistribution substrate
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 03-collective-simulator-trace-injection
+#+PARENT: ../spec.org
+
+* Context
+
+The common substrate branch added ~reduce_scatter_sum~, ~broadcast~, and
+~local_slice~, but final scoped re-review found a real remaining gap:
+~reduce_scatter_sum~ does not yet model ~Partial(sum) -> Shard(dim)~ because
+it has no tensor-dimension parameter and returns flattened local tensors.
+
+This ticket blocks the three architecture tracer bullets. They need a reliable
+redistribution substrate before their ergonomics can be compared fairly.
+
+* Requirements
+
+- Update reduce-scatter semantics so ~Partial(sum) -> Shard(dim)~ preserves the
+  original tensor rank and shards the requested tensor dimension.
+- Add a dimension-aware API. A concrete acceptable surface is:
+
+#+begin_src rust
+pub fn reduce_scatter_sum(
+    &mut self,
+    axis: MeshAxis,
+    shard_dim: usize,
+    phase: TrainingPhase,
+    shards: &[TensorValue],
+) -> Result<Vec<TensorValue>, CollectiveError>;
+#+end_src
+
+- Validate that ~shard_dim~ is in range and the dimension is evenly divisible
+  by the axis size. Return typed errors instead of panicking.
+- Preserve axis-local rank groups. A reduce-scatter along ~dp_shard~ must reduce
+  only ranks that differ on ~dp_shard~ while sharing the other 5D coordinates.
+- Return local shapes with only ~shard_dim~ reduced by the axis size.
+- Record a ~MeshTraceEvent::Collective~ with ~CollectiveKind::ReduceScatter~,
+  axis, bytes, and participating ranks.
+- Keep ~broadcast~ and ~local_slice~ semantics aligned with the same
+  dimension-aware shape model where relevant.
+- Update the smoke path or tests only as needed to exercise the fixed
+  semantics; do not start any architecture tracer bullet here.
+
+* Out of scope
+
+- Multi-axis shard order.
+- Uneven/ragged shards.
+- Async collectives.
+- Real process/NCCL/CUDA execution.
+- MoE/EP.
+- Full DTensor wrapper/native/plan tracer bullets.
+
+* Verification
+
+- Add a multidimensional reduce-scatter test, for example a rank group reducing
+  full local ~[2, 4]~ tensors into ~[2, 2]~ shards along tensor dimension 1.
+- Test the shape and contents for at least two independent axis-local groups.
+- Test typed errors for out-of-range ~shard_dim~ and uneven divisibility.
+- Keep existing smoke and collective tests green.
+- Run:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:context_parallel_gqa_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+* Comments
+
+* Answer

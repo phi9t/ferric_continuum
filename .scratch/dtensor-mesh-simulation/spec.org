@@ -244,10 +244,11 @@ Implement the effort as evidence-producing tracer bullets:
 1. Baseline spec and harness.
 2. Common mesh semantics.
 3. Collective simulator, trace recorder, and injection hooks.
-4. Option A wrapper DTensor tracer bullet.
-5. Option B tensor-native layout tracer bullet.
-6. Option C plan-first simulation tracer bullet.
-7. Comparison report and recommendation.
+4. Complete dimension-aware redistribution substrate.
+5. Option A wrapper DTensor tracer bullet.
+6. Option B tensor-native layout tracer bullet.
+7. Option C plan-first simulation tracer bullet.
+8. Comparison report and recommendation.
 
 Each tracer bullet must run the same scenario and report comparable results.
 
@@ -284,10 +285,11 @@ The goal is not for all three options to become production ready.
 - [[file:issues/01-baseline-harness-and-reference.org][01 baseline harness and reference]]
 - [[file:issues/02-common-mesh-layout-semantics.org][02 common mesh layout semantics]]
 - [[file:issues/03-collective-simulator-trace-injection.org][03 collective simulator trace injection]]
-- [[file:issues/04-wrapper-dtensor-tracer-bullet.org][04 wrapper DTensor tracer bullet]]
-- [[file:issues/05-tensor-native-layout-tracer-bullet.org][05 tensor-native layout tracer bullet]]
-- [[file:issues/06-plan-first-simulation-tracer-bullet.org][06 plan-first simulation tracer bullet]]
-- [[file:issues/07-comparison-report-and-recommendation.org][07 comparison report and recommendation]]
+- [[file:issues/04-complete-redistribution-substrate.org][04 complete redistribution substrate]]
+- [[file:issues/05-wrapper-dtensor-tracer-bullet.org][05 wrapper DTensor tracer bullet]]
+- [[file:issues/06-tensor-native-layout-tracer-bullet.org][06 tensor-native layout tracer bullet]]
+- [[file:issues/07-plan-first-simulation-tracer-bullet.org][07 plan-first simulation tracer bullet]]
+- [[file:issues/08-comparison-report-and-recommendation.org][08 comparison report and recommendation]]
 
 * Verification matrix
 

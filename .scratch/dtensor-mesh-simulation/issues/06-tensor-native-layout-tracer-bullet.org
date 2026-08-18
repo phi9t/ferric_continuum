@@ -1,7 +1,7 @@
 #+TITLE: Tensor-native layout tracer bullet
 #+TYPE: task
 #+STATUS: ready-for-agent
-#+BLOCKED_BY: 03-collective-simulator-trace-injection
+#+BLOCKED_BY: 04-complete-redistribution-substrate
 #+PARENT: ../spec.org
 
 * Context
@@ -14,6 +14,23 @@ operation distributed-aware in one step.
 
 - Add optional distribution metadata to ~TensorInner~ or a closely adjacent
   core type.
+- Prefer the least invasive native surface that still answers the ergonomics
+  question. A concrete acceptable surface is:
+
+#+begin_src rust
+pub struct TensorLayoutMeta {
+    pub global_shape: Shape,
+    pub layout: Layout,
+    pub dims: ParallelDims5D,
+    pub rank: usize,
+}
+
+impl Tensor {
+    pub fn with_layout_meta(self, meta: TensorLayoutMeta) -> Self;
+    pub fn layout_meta(&self) -> Option<TensorLayoutMeta>;
+}
+#+end_src
+
 - Keep layout propagation constrained to the shared training-step harness.
 - Reuse the common mesh, placement, shard map, collective simulator, trace, and
   injection semantics.
@@ -22,6 +39,10 @@ operation distributed-aware in one step.
 - Emit shared telemetry and deterministic failure records.
 - Compare how native semantics affect interface complexity, locality, and
   normal local tensor code.
+- Prove that existing local tensor behavior is unchanged when no layout metadata
+  is attached.
+- Write a short option-local report under
+  ~.scratch/dtensor-mesh-simulation/reports/06-tensor-native-layout.org~.
 
 * Out of scope
 
@@ -29,6 +50,8 @@ operation distributed-aware in one step.
 - Allowing silent layout propagation for unsupported ops.
 - Replacing the wrapper or plan-first tracks.
 - Real distributed execution.
+- Multi-axis placement propagation.
+- Changing existing op math.
 
 * Verification
 
@@ -37,9 +60,20 @@ operation distributed-aware in one step.
 - Harness output matches the unsharded reference for supported slices.
 - Unsupported layout propagation fails loudly.
 - Trace and injection tests match the common schema.
+- Tests cover at least:
+  - attaching and reading layout metadata
+  - a local op that preserves no metadata unless explicitly supported
+  - one explicitly supported training-step boundary that consumes metadata
+  - failure on unsupported native-layout propagation
+  - unchanged existing autograd/lib tests
 
 #+begin_src sh
-bazel test //ferric_continuum/tnsr:lib_tests
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:lib_tests \
+  //ferric_continuum/tnsr:tnsr_tests
 #+end_src
 
 * Comments
+
+* Answer

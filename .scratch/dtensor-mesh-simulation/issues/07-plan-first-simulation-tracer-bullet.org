@@ -1,7 +1,7 @@
 #+TITLE: Plan-first simulation tracer bullet
 #+TYPE: task
 #+STATUS: ready-for-agent
-#+BLOCKED_BY: 03-collective-simulator-trace-injection
+#+BLOCKED_BY: 04-complete-redistribution-substrate
 #+PARENT: ../spec.org
 
 * Context
@@ -14,6 +14,23 @@ themselves distributed.
 
 - Define a plan representation for training phases, tensor layouts,
   redistribution, collectives, costs, and failure sites.
+- Keep the plan representation explicit and serializable enough to inspect in
+  tests. A concrete acceptable surface is:
+
+#+begin_src rust
+pub struct MeshSimPlan {
+    pub dims: ParallelDims5D,
+    pub steps: Vec<MeshSimStep>,
+}
+
+pub enum MeshSimStep {
+    Tensor { name: String, global_shape: Shape, layout: Layout },
+    Redistribute { tensor: String, src: Layout, dst: Layout, phase: TrainingPhase },
+    Collective { kind: CollectiveKind, axis: MeshAxis, tensor: String, phase: TrainingPhase },
+    Injection { event: InjectionEvent },
+}
+#+end_src
+
 - Run the same dense foundation-model-like harness scenario as the other
   tracks.
 - Use local ~tnsr~ math where useful for reference checks, while keeping the
@@ -23,12 +40,17 @@ themselves distributed.
 - Emit shared telemetry and deterministic failure records.
 - Compare whether this model gives better observability and chaos exploration,
   and whether it loses too much connection to actual tensor/autograd behavior.
+- Include a deterministic report of planned versus executed collectives.
+- Write a short option-local report under
+  ~.scratch/dtensor-mesh-simulation/reports/07-plan-first-simulation.org~.
 
 * Out of scope
 
 - Replacing ~tnsr~ autograd with a full planner runtime.
 - Claiming DTensor-native ergonomics if the semantics stay plan-only.
 - Real distributed execution.
+- Optimizing schedules.
+- Recovery or rescheduling after injected faults.
 
 * Verification
 
@@ -38,9 +60,20 @@ themselves distributed.
   transitions.
 - Injection tests localize failures to plan phase, rank/axis, tensor/layout,
   and collective context.
+- Tests cover:
+  - plan construction for the shared dense training-step scenario
+  - execution into ~MeshTrace~
+  - one reduce-scatter, one all-reduce, one local-slice redistribution
+  - one injected failure represented both in the plan and trace
+  - comparison against unsharded reference where the plan executes local math
 
 #+begin_src sh
-bazel test //ferric_continuum/tnsr:distributed_tests
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:lib_tests
 #+end_src
 
 * Comments
+
+* Answer

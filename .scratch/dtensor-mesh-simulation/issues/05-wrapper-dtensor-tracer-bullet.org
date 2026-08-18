@@ -1,0 +1,77 @@
+#+TITLE: Wrapper DTensor tracer bullet
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 04-complete-redistribution-substrate
+#+PARENT: ../spec.org
+
+* Context
+
+Option A tests a dedicated ~DTensor~ wrapper around local ~Tensor~ or
+~TensorValue~ shards.
+
+* Requirements
+
+- Add a narrow wrapper-DTensor interface for global shape, mesh, placements,
+  and rank-local simulated shards.
+- Keep the wrapper interface deliberately small. A concrete acceptable surface
+  is:
+
+#+begin_src rust
+pub struct DTensor {
+    pub global_shape: Shape,
+    pub layout: Layout,
+    pub dims: ParallelDims5D,
+    pub shards: Vec<TensorValue>,
+}
+
+impl DTensor {
+    pub fn from_replicated(value: TensorValue, layout: Layout, dims: ParallelDims5D) -> Result<Self, DtError>;
+    pub fn redistribute(&self, dst: Layout, sim: &mut CollectiveSimulator, phase: TrainingPhase) -> Result<Self, DtError>;
+    pub fn full_tensor(&self) -> Result<TensorValue, DtError>;
+}
+#+end_src
+
+- Keep existing ~Tensor~ math local.
+- Implement explicit wrapping, redistribution, and unwrapping/reference checks.
+- Run the shared harness through the wrapper interface.
+- Exercise this minimum dense training-step slice:
+  - replicated synthetic activation to ~Shard(2)~ on ~tp~
+  - ~Partial(sum) -> Shard(dim)~ on ~dp_shard~ using the fixed reduce-scatter
+  - ~Partial(sum) -> Replicate~ on ~dp_replicate~ using all-reduce
+  - ~Shard(dim) -> Replicate~ using all-gather
+  - ~Replicate -> Shard(dim)~ using local slicing
+  - one loss-style reduction over the derived ~loss~ mesh or a documented
+    placeholder if the common substrate cannot express the derived mesh yet
+- Emit the shared mesh simulation trace events.
+- Run deterministic injection scenarios and record failure-localization quality.
+- Record interface complexity and touched files in the comparison notes.
+- Write a short option-local report under
+  ~.scratch/dtensor-mesh-simulation/reports/05-wrapper-dtensor.org~.
+
+* Out of scope
+
+- Full coverage of every existing ~tnsr~ op.
+- Replacing ~Tensor~ with ~DTensor~.
+- Real distributed execution.
+- Tensor-native layout propagation.
+- Plan-first graph simulation.
+
+* Verification
+
+- Harness output matches the unsharded reference for supported slices.
+- Trace tests cover at least one redistribution and one collective.
+- Injection tests fail with structured context.
+- ~full_tensor()~ reconstructs replicated and sharded test tensors exactly for
+  divisible shapes.
+- Unsupported placements or impossible redistributions return typed errors.
+- Existing local tensor tests remain valid:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+* Comments
+
+* Answer
