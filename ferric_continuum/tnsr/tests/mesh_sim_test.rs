@@ -1,5 +1,8 @@
 use tnsr::dtensor::harness::TrainingStepScenario;
-use tnsr::dtensor::{MeshAxis, MeshError, ParallelDims5D, RankCoord5D};
+use tnsr::dtensor::{
+    Layout, MeshAxis, MeshError, ParallelDims5D, Placement, RankCoord5D, ShardMap,
+};
+use tnsr::tensor::{Shape, TensorValue};
 
 #[test]
 fn unsharded_reference_training_step_is_deterministic_shape_wise() {
@@ -63,4 +66,35 @@ fn parallel_dims_coords_are_row_major_with_tp_fastest() {
             world_size: 32
         })
     );
+}
+
+#[test]
+fn shard_map_slices_and_reconstructs_divisible_tensor() {
+    let dims = ParallelDims5D::new(1, 1, 1, 1, 2);
+    let layout = Layout::new(vec![(MeshAxis::Tp, Placement::Shard(1))]).unwrap();
+    let value = TensorValue::from_vec(
+        Shape(vec![2, 4]),
+        vec![0.0, 1.0, 2.0, 3.0, 10.0, 11.0, 12.0, 13.0],
+    );
+    let map = ShardMap::new(value.shape.clone(), layout, dims).unwrap();
+
+    assert_eq!(map.local_shape_for_rank(0).unwrap(), Shape(vec![2, 2]));
+    let shards: Vec<_> = (0..dims.world_size())
+        .map(|rank| map.shard_tensor_for_rank(&value, rank).unwrap())
+        .collect();
+    assert_eq!(shards[0].data.as_ref(), &vec![0.0, 1.0, 10.0, 11.0]);
+    assert_eq!(shards[1].data.as_ref(), &vec![2.0, 3.0, 12.0, 13.0]);
+
+    let reconstructed = map.reconstruct_from_rank_shards(&shards).unwrap();
+    assert_eq!(reconstructed.shape, value.shape);
+    assert_eq!(reconstructed.data.as_ref(), value.data.as_ref());
+}
+
+#[test]
+fn layout_rejects_ambiguous_duplicate_shard_dim() {
+    assert!(Layout::new(vec![
+        (MeshAxis::Tp, Placement::Shard(1)),
+        (MeshAxis::Cp, Placement::Shard(1)),
+    ])
+    .is_err());
 }
