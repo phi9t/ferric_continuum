@@ -1,0 +1,67 @@
+#+TITLE: Baseline harness and unsharded reference
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY:
+#+PARENT: ../spec.org
+
+* Context
+
+The DTensor mesh simulation effort compares three architecture options. They
+need one shared experiment harness so differences in results come from the
+semantic model, not from each option testing a different scenario.
+
+* Requirements
+
+- Define the shared dense foundation-model-like training-step scenario.
+- Use synthetic inputs and existing ~tnsr~ tensor/model conventions.
+- Include forward, loss, backward, and optimizer/update accounting phases.
+- Provide an unsharded reference path for supported math checks.
+- Define the evidence record each architecture option must produce:
+  semantic expressiveness, correctness, collectives/costs, telemetry, failure
+  localization, and interface complexity.
+- Keep the harness independent from the three architecture-specific surfaces.
+
+* Out of scope
+
+- DTensor placement implementation.
+- Chaos injection implementation.
+- Real Qwen3 weights, tokenizer, or checkpoint loading.
+- Real distributed execution.
+
+* Verification
+
+- Add focused tests or a skeleton test target that proves the unsharded
+  reference scenario runs deterministically.
+- Verify existing relevant tests still pass:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+* Comments
+
+* Answer
+
+Implemented in:
+
+- ~ferric_continuum/tnsr/src/dtensor/harness.rs~
+- ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+
+The baseline harness now exposes ~HarnessSmokeReport~ and
+~TrainingStepScenario::run_common_substrate_smoke~. The smoke path runs the
+existing unsharded reference step, reports its finite reference loss, and feeds
+that same scenario into the common mesh/layout/shard/collective/injection
+substrate.
+
+Focused test target:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Verification evidence:
+
+- Red bar: ~mesh_sim_tests~ failed to build because
+  ~TrainingStepScenario::run_common_substrate_smoke~ did not exist.
+- Green bar: ~mesh_sim_tests~ passed after adding the harness smoke method and
+  smoke test.

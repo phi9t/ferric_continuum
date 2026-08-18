@@ -3,6 +3,11 @@ use crate::ops::{linear, loss};
 use crate::tensor::{Shape, Tensor};
 use crate::transformer::{TransformerBlock, TransformerConfig};
 
+use super::{
+    CollectiveSimulator, InjectionPlan, Layout, MeshAxis, ParallelDims5D, Placement, ShardMap,
+    TrainingPhase,
+};
+
 pub struct TrainingStepScenario {
     pub cfg: TransformerConfig,
     pub vocab: usize,
@@ -13,6 +18,13 @@ pub struct TrainingStepReference {
     pub loss: f32,
     pub output_shape: Shape,
     pub parameter_grad_shapes: Vec<Shape>,
+}
+
+pub struct HarnessSmokeReport {
+    pub reference_loss: f32,
+    pub world_size: usize,
+    pub trace_events: usize,
+    pub failures: usize,
 }
 
 impl TrainingStepScenario {
@@ -60,6 +72,44 @@ impl TrainingStepScenario {
             loss: loss_value,
             output_shape: hidden.shape(),
             parameter_grad_shapes,
+        }
+    }
+
+    pub fn run_common_substrate_smoke(
+        &self,
+        dims: ParallelDims5D,
+        injection_plan: Option<&InjectionPlan>,
+    ) -> HarnessSmokeReport {
+        let reference = self.run_unsharded_reference();
+        let global = crate::tensor::TensorValue::from_vec(
+            crate::tensor::Shape(vec![self.cfg.batch, self.cfg.seq, self.cfg.d_model]),
+            vec![1.0; self.cfg.batch * self.cfg.seq * self.cfg.d_model],
+        );
+        let layout = Layout::new(vec![(MeshAxis::Tp, Placement::Shard(2))]).unwrap();
+        let shard_map = ShardMap::new(global.shape.clone(), layout, dims).unwrap();
+        let mut shards: Vec<_> = (0..dims.world_size())
+            .map(|rank| shard_map.shard_tensor_for_rank(&global, rank).unwrap())
+            .collect();
+
+        let mut failures = 0usize;
+        if let Some(plan) = injection_plan {
+            for (rank, shard) in shards.iter_mut().enumerate() {
+                failures += plan
+                    .apply_to_shard(TrainingPhase::Backward, rank, shard)
+                    .len();
+            }
+        }
+
+        let mut simulator = CollectiveSimulator::new(dims);
+        let _ = simulator
+            .all_reduce_sum(MeshAxis::DpReplicate, TrainingPhase::Backward, &shards)
+            .unwrap();
+
+        HarnessSmokeReport {
+            reference_loss: reference.loss,
+            world_size: dims.world_size(),
+            trace_events: simulator.trace.events.len(),
+            failures,
         }
     }
 }

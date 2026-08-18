@@ -21,6 +21,26 @@ fn unsharded_reference_training_step_is_deterministic_shape_wise() {
 }
 
 #[test]
+fn common_substrate_smoke_connects_reference_mesh_collective_and_injection() {
+    let scenario = TrainingStepScenario::tiny_dense();
+    let dims = ParallelDims5D::new(1, 2, 1, 1, 2);
+    let plan = InjectionPlan::new(vec![InjectionEvent {
+        label: "missing_rank".to_string(),
+        phase: TrainingPhase::Backward,
+        rank: 0,
+        axis: Some(MeshAxis::DpReplicate),
+        kind: InjectionKind::MissingParticipant,
+    }]);
+
+    let report = scenario.run_common_substrate_smoke(dims, Some(&plan));
+
+    assert!(report.reference_loss.is_finite());
+    assert_eq!(report.world_size, 4);
+    assert_eq!(report.trace_events, 1);
+    assert_eq!(report.failures, 1);
+}
+
+#[test]
 fn parallel_dims_validate_torchtitan_dense_product() {
     let dims = ParallelDims5D::new(2, 2, 3, 4, 5);
     assert_eq!(dims.world_size(), 240);

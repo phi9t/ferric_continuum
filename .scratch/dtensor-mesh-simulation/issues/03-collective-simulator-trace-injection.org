@@ -1,0 +1,76 @@
+#+TITLE: Collective simulator, trace recorder, and injection hooks
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 02-common-mesh-layout-semantics
+#+PARENT: ../spec.org
+
+* Context
+
+The three architecture options need a shared simulation substrate for
+collectives, telemetry, and deterministic chaos injection.
+
+* Requirements
+
+- Implement a synchronous single-process collective simulator over logical
+  rank groups.
+- Support all-reduce, all-gather, reduce-scatter, broadcast, and local slice
+  transitions required by redistribution.
+- Record deterministic mesh simulation telemetry under a schema namespace such
+  as ~tnsr.mesh_sim_trace~.
+- Include mesh axes, rank coordinates, tensor ids/shapes/layouts, training
+  phase, layout transitions, collectives, bytes moved, injections, and detected
+  failures.
+- Add deterministic seeded injection plans for:
+  - missing collective participant
+  - corrupted shard before all-reduce
+  - delayed rank group
+  - mismatched placement annotation
+  - NaN in one local shard
+- Fail loudly with structured error records. Recovery is not required.
+
+* Out of scope
+
+- Asynchronous collectives.
+- Real network, process, NCCL, or CUDA communication.
+- Fault recovery or retry policy.
+- Architecture-specific tensor surfaces.
+
+* Verification
+
+- Collective tests match existing distributed simulation invariants where
+  applicable.
+- Trace schema tests are deterministic and diffable.
+- Injection tests report rank, axis, phase, tensor/layout, and collective
+  context.
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:distributed_tests
+#+end_src
+
+* Comments
+
+* Answer
+
+Implemented in:
+
+- ~ferric_continuum/tnsr/src/dtensor/harness.rs~
+- ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+
+The common substrate smoke path applies an optional ~InjectionPlan~ to each
+rank-local shard during ~TrainingPhase::Backward~, counts structured failure
+records, then runs ~CollectiveSimulator::all_reduce_sum~ over
+~MeshAxis::DpReplicate~. The returned ~HarnessSmokeReport~ exposes both the
+number of injected failures and the number of recorded mesh trace events.
+
+Focused test target:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Verification evidence:
+
+- Red bar: ~mesh_sim_tests~ failed to build because
+  ~TrainingStepScenario::run_common_substrate_smoke~ was missing.
+- Green bar: ~mesh_sim_tests~ passed and the new smoke test asserted one
+  collective trace event and one injected missing-participant failure.

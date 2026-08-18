@@ -1,0 +1,71 @@
+#+TITLE: Common mesh and layout semantics
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 01-baseline-harness-and-reference
+#+PARENT: ../spec.org
+
+* Context
+
+Every architecture option needs the same mesh, placement, layout, and shard
+mapping semantics so the comparison is fair.
+
+* Requirements
+
+- Implement or specify a 5D dense mesh model:
+  ~pp x dp_replicate x dp_shard x cp x tp~.
+- Validate ~pp * dp_replicate * dp_shard * cp * tp == world_size~.
+- Preserve derived views: ~batch~, ~loss~, and derived-only ~fsdp~.
+- Keep ~dp_shard~ and ~cp~ separate in full-DTensor dense semantics.
+- Define placements: ~Replicate~, ~Shard(tensor_dim)~, ~Partial(sum)~, and
+  ~Local~.
+- Define layout validation and fail loudly on unsupported multi-axis shard
+  order, uneven shards, or ambiguous placement transitions.
+- Define shard mapping from global shape and layout to rank-local slices.
+
+* Out of scope
+
+- Real collective execution.
+- Architecture-specific DTensor interfaces.
+- MoE/EP.
+- Uneven shard support.
+
+* Verification
+
+- Tests reject invalid world-size products.
+- Tests map ranks to 5D row-major coordinates.
+- Tests validate derived mesh sizes.
+- Tests reconstruct divisible sharded tensors from local shards.
+- Existing distributed tests remain valid:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:distributed_tests
+#+end_src
+
+* Comments
+
+* Answer
+
+Implemented in:
+
+- ~ferric_continuum/tnsr/src/dtensor/harness.rs~
+- ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+
+The common substrate smoke path constructs ~ParallelDims5D::new(1, 2, 1, 1,
+2)~, builds a tensor-parallel ~Layout~ with ~Placement::Shard(2)~, creates a
+~ShardMap~, and materializes one local shard per rank before collectives run.
+The smoke report records the derived ~world_size~ so the harness-to-simulator
+path proves the shared mesh semantics are wired through a real training-step
+scenario.
+
+Focused test target:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Verification evidence:
+
+- Red bar: ~mesh_sim_tests~ failed to build because the harness smoke API was
+  absent.
+- Green bar: ~mesh_sim_tests~ passed and the new smoke test asserted
+  ~world_size == 4~.
