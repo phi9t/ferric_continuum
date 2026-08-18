@@ -1,0 +1,448 @@
+#+TITLE: DTensor redistribution substrate implementation plan
+#+TYPE: plan
+#+STATUS: ready-for-agent
+#+SPEC: ../issues/04-complete-redistribution-substrate.org
+
+* For agentic workers
+
+Required sub-skill: use ~superpowers:subagent-driven-development~ recommended,
+or ~superpowers:executing-plans~ if executing inline. Steps use checkbox syntax
+for tracking. Read the parent spec and ticket 04 before starting.
+
+* Goal
+
+Finish the common redistribution substrate by making ~Partial(sum) ->
+Shard(dim)~ reduce-scatter dimension-aware, typed-error-safe, and suitable as
+the blocker-clearing base for the three architecture tracer bullets.
+
+* Architecture
+
+Keep redistribution inside ~tnsr::dtensor::collective~ and do not introduce a
+DTensor wrapper, tensor-native layout propagation, or plan-first API in this
+ticket. The implementation should model reduce-scatter as two explicit local
+steps: axis-local elementwise sum across each rank group, then contiguous
+slicing of the requested tensor dimension using that rank's coordinate on the
+collective axis. This mirrors the existing ~local_slice~ and ~ShardMap~ shape
+model instead of flattening multidimensional tensors.
+
+* Tech stack
+
+- Rust 2021 under Bazel.
+- Existing ~tnsr::tensor::{Shape, TensorValue}~.
+- Existing ~tnsr::dtensor::{ParallelDims5D, MeshAxis, TrainingPhase,
+  MeshTraceEvent, CollectiveKind}~.
+- No new external dependencies.
+
+* Spec
+
+- [[file:../spec.org][DTensor mesh simulation architecture experiment]]
+- [[file:../issues/04-complete-redistribution-substrate.org][04 complete redistribution substrate]]
+
+* Global constraints
+
+- Dense mesh axes are exactly ~pp x dp_replicate x dp_shard x cp x tp~.
+- Preserve axis-local rank groups. A collective along one axis only groups
+  ranks that differ on that axis and match all other 5D coordinates.
+- ~Partial(sum) -> Shard(dim)~ lowers to reduce-scatter.
+- Return typed errors instead of panicking for invalid dimensions, uneven
+  divisibility, shape mismatches, empty input, or rank-count mismatches.
+- Keep ~broadcast~ and ~local_slice~ behavior green.
+- Do not start wrapper-DTensor, tensor-native, or plan-first tracer bullets.
+- Do not add CUDA, NCCL, async collectives, MoE/EP, uneven shards, or multi-axis
+  shard ordering.
+- Use pinned Bazel: ~/data02/home/philip.yang/.local/bin/bazel-9.2.0~.
+
+* Planned file structure
+
+- Modify ~ferric_continuum/tnsr/src/dtensor/collective.rs~
+  - Change ~reduce_scatter_sum~ to take ~shard_dim: usize~.
+  - Add typed dimension/divisibility validation.
+  - Reuse or add a private dimension-aware slice helper for summed tensors.
+  - Keep trace recording as ~MeshTraceEvent::Collective~ with
+    ~CollectiveKind::ReduceScatter~.
+- Modify ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+  - Update the existing one-dimensional reduce-scatter call site.
+  - Add multidimensional, multi-group content tests.
+  - Add typed-error tests for out-of-range ~shard_dim~ and uneven divisibility.
+  - Keep existing collective, smoke, and injection tests intact.
+- Modify ~.scratch/dtensor-mesh-simulation/issues/04-complete-redistribution-substrate.org~
+  - Append completion evidence under ~* Answer~ after implementation.
+
+* Task 1: Lock the dimension-aware reduce-scatter contract with tests
+
+** Files
+
+- Modify: ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+
+** Interfaces
+
+Consumes:
+
+#+begin_src rust
+pub fn reduce_scatter_sum(
+    &mut self,
+    axis: MeshAxis,
+    shard_dim: usize,
+    phase: TrainingPhase,
+    shards: &[TensorValue],
+) -> Result<Vec<TensorValue>, CollectiveError>;
+#+end_src
+
+Produces:
+
+- A red test proving reduce-scatter preserves tensor rank and shards only the
+  requested tensor dimension.
+- Red tests for typed invalid-dimension and uneven-shard errors.
+- No commit yet. The first durable checkpoint happens after Task 2 turns these
+  tests green, so the branch does not intentionally retain a failing commit.
+
+** Steps
+
+- [ ] Update the existing one-dimensional reduce-scatter test call so it
+      targets tensor dimension 0:
+
+#+begin_src rust
+let out = sim
+    .reduce_scatter_sum(MeshAxis::DpReplicate, 0, TrainingPhase::Backward, &shards)
+    .unwrap();
+#+end_src
+
+- [ ] Add this multidimensional test after the existing one-dimensional
+      reduce-scatter test:
+
+#+begin_src rust
+#[test]
+fn collective_reduce_scatter_slices_requested_tensor_dim_across_axis_groups() {
+    let dims = ParallelDims5D::new(1, 2, 1, 1, 2);
+    let shards = vec![
+        TensorValue::from_vec(
+            Shape(vec![2, 4]),
+            vec![1.0, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0],
+        ),
+        TensorValue::from_vec(
+            Shape(vec![2, 4]),
+            vec![1000.0, 2000.0, 3000.0, 4000.0, 10000.0, 20000.0, 30000.0, 40000.0],
+        ),
+        TensorValue::from_vec(
+            Shape(vec![2, 4]),
+            vec![100.0, 200.0, 300.0, 400.0, 1000.0, 2000.0, 3000.0, 4000.0],
+        ),
+        TensorValue::from_vec(
+            Shape(vec![2, 4]),
+            vec![
+                100000.0, 200000.0, 300000.0, 400000.0, 1000000.0, 2000000.0, 3000000.0,
+                4000000.0,
+            ],
+        ),
+    ];
+    let mut sim = CollectiveSimulator::new(dims);
+
+    let out = sim
+        .reduce_scatter_sum(MeshAxis::DpReplicate, 1, TrainingPhase::Backward, &shards)
+        .unwrap();
+
+    assert_eq!(out.len(), 4);
+    assert_eq!(out[0].shape, Shape(vec![2, 2]));
+    assert_eq!(out[0].data.as_ref(), &vec![101.0, 202.0, 1010.0, 2020.0]);
+    assert_eq!(out[2].shape, Shape(vec![2, 2]));
+    assert_eq!(out[2].data.as_ref(), &vec![303.0, 404.0, 3030.0, 4040.0]);
+    assert_eq!(out[1].shape, Shape(vec![2, 2]));
+    assert_eq!(
+        out[1].data.as_ref(),
+        &vec![101000.0, 202000.0, 1010000.0, 2020000.0]
+    );
+    assert_eq!(out[3].shape, Shape(vec![2, 2]));
+    assert_eq!(
+        out[3].data.as_ref(),
+        &vec![303000.0, 404000.0, 3030000.0, 4040000.0]
+    );
+    assert_eq!(
+        sim.trace.events[0],
+        MeshTraceEvent::Collective {
+            phase: TrainingPhase::Backward,
+            kind: CollectiveKind::ReduceScatter,
+            axis: MeshAxis::DpReplicate,
+            bytes: 32,
+            ranks: vec![0, 2, 1, 3],
+        }
+    );
+}
+#+end_src
+
+- [ ] Add this out-of-range-dimension test:
+
+#+begin_src rust
+#[test]
+fn collective_reduce_scatter_rejects_out_of_range_shard_dim() {
+    let dims = ParallelDims5D::new(1, 2, 1, 1, 1);
+    let shards = vec![
+        TensorValue::from_vec(Shape(vec![2, 4]), vec![0.0; 8]),
+        TensorValue::from_vec(Shape(vec![2, 4]), vec![1.0; 8]),
+    ];
+    let mut sim = CollectiveSimulator::new(dims);
+
+    let err = match sim.reduce_scatter_sum(
+        MeshAxis::DpReplicate,
+        2,
+        TrainingPhase::Backward,
+        &shards,
+    ) {
+        Ok(_) => panic!("out-of-range shard dim unexpectedly reduced"),
+        Err(err) => err,
+    };
+
+    assert_eq!(
+        err,
+        CollectiveError::SliceDimOutOfRange {
+            dim: 2,
+            rank: 0,
+        }
+    );
+}
+#+end_src
+
+- [ ] Add this uneven-divisibility test:
+
+#+begin_src rust
+#[test]
+fn collective_reduce_scatter_rejects_uneven_requested_dim() {
+    let dims = ParallelDims5D::new(1, 2, 1, 1, 1);
+    let shards = vec![
+        TensorValue::from_vec(Shape(vec![2, 3]), vec![0.0; 6]),
+        TensorValue::from_vec(Shape(vec![2, 3]), vec![1.0; 6]),
+    ];
+    let mut sim = CollectiveSimulator::new(dims);
+
+    let err = match sim.reduce_scatter_sum(
+        MeshAxis::DpReplicate,
+        1,
+        TrainingPhase::Backward,
+        &shards,
+    ) {
+        Ok(_) => panic!("uneven shard dim unexpectedly reduced"),
+        Err(err) => err,
+    };
+
+    assert_eq!(
+        err,
+        CollectiveError::UnevenLocalSlice {
+            dim: 1,
+            size: 3,
+            parts: 2,
+        }
+    );
+}
+#+end_src
+
+- [ ] Run the focused red bar:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Expected: FAIL to compile because ~reduce_scatter_sum~ still has the old
+four-argument signature.
+
+* Task 2: Implement dimension-aware reduce-scatter
+
+** Files
+
+- Modify: ~ferric_continuum/tnsr/src/dtensor/collective.rs~
+
+** Interfaces
+
+Consumes:
+
+- Tests from Task 1.
+- Existing private helpers:
+  - ~validate_rank_values(dims, shards)~
+  - ~validate_same_shape(shards)~
+  - ~rank_groups_for_axis(dims, axis)~
+  - ~coord_axis(coord, axis)~
+  - ~contiguous_slice_along_dim(value, dim, part, parts)~
+
+Produces:
+
+#+begin_src rust
+pub fn reduce_scatter_sum(
+    &mut self,
+    axis: MeshAxis,
+    shard_dim: usize,
+    phase: TrainingPhase,
+    shards: &[TensorValue],
+) -> Result<Vec<TensorValue>, CollectiveError>;
+#+end_src
+
+** Steps
+
+- [ ] Change the public method signature:
+
+#+begin_src rust
+pub fn reduce_scatter_sum(
+    &mut self,
+    axis: MeshAxis,
+    shard_dim: usize,
+    phase: TrainingPhase,
+    shards: &[TensorValue],
+) -> Result<Vec<TensorValue>, CollectiveError> {
+#+end_src
+
+- [ ] Replace the method body with dimension-aware validation, axis-local
+      summation, and per-rank dimension slicing:
+
+#+begin_src rust
+validate_rank_values(self.dims, shards)?;
+let shape = validate_same_shape(shards)?;
+let axis_size = self.dims.axis_size(axis);
+if shard_dim >= shape.0.len() {
+    return Err(CollectiveError::SliceDimOutOfRange {
+        dim: shard_dim,
+        rank: 0,
+    });
+}
+let full = shape.0[shard_dim];
+if full % axis_size != 0 {
+    return Err(CollectiveError::UnevenLocalSlice {
+        dim: shard_dim,
+        size: full,
+        parts: axis_size,
+    });
+}
+
+let groups = rank_groups_for_axis(self.dims, axis);
+let mut out = shards.to_vec();
+for group in &groups {
+    let mut sum = vec![0.0f32; shape.numel()];
+    for &rank in group {
+        for (dst, src) in sum.iter_mut().zip(shards[rank].data.iter()) {
+            *dst += *src;
+        }
+    }
+    let summed = TensorValue::from_vec(shape.clone(), sum);
+    for &rank in group {
+        let coord = self.dims.coord(rank).expect("rank group was built from valid ranks");
+        out[rank] =
+            contiguous_slice_along_dim(&summed, shard_dim, coord_axis(coord, axis), axis_size);
+    }
+}
+self.trace.record(MeshTraceEvent::Collective {
+    phase,
+    kind: CollectiveKind::ReduceScatter,
+    axis,
+    bytes: collective_bytes(axis_size, shape.bytes_f32() as u64, 1),
+    ranks: groups.into_iter().flatten().collect(),
+});
+Ok(out)
+#+end_src
+
+- [ ] Keep the existing ~contiguous_slice_along_dim~ helper unchanged unless the
+      compiler forces a signature change. Its current row-major slicing model is
+      the desired behavior for both ~local_slice~ and reduce-scatter.
+
+- [ ] Run the focused green bar:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Expected: PASS.
+
+- [ ] Commit the implementation:
+
+#+begin_src sh
+git add ferric_continuum/tnsr/src/dtensor/collective.rs \
+  ferric_continuum/tnsr/tests/mesh_sim_test.rs
+git commit -m "fix: make reduce-scatter shard dimension aware
+
+Co-authored-by: TRAE CLI <noreply@bytedance.com>"
+#+end_src
+
+* Task 3: Verify broader substrate and close ticket 04
+
+** Files
+
+- Modify: ~.scratch/dtensor-mesh-simulation/issues/04-complete-redistribution-substrate.org~
+
+** Interfaces
+
+Consumes:
+
+- Task 1 tests.
+- Task 2 implementation.
+
+Produces:
+
+- Fresh verification evidence in ticket 04.
+- Clean worktree ready for review or subsequent architecture tracer bullets.
+
+** Steps
+
+- [ ] Run the required verification matrix:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:context_parallel_gqa_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+Expected: PASS for all 4 targets.
+
+- [ ] Inspect the diff for unintended scope:
+
+#+begin_src sh
+git diff --stat HEAD~1..HEAD
+git diff --check HEAD~1..HEAD
+#+end_src
+
+Expected: only ~collective.rs~ and ~mesh_sim_test.rs~ changed in the code
+commit, and no whitespace errors.
+
+- [ ] Append an answer to ticket 04 with exact commit hashes and test evidence:
+
+#+begin_src org
+* Answer
+
+Implemented dimension-aware ~Partial(sum) -> Shard(dim)~ reduce-scatter.
+
+- API: ~CollectiveSimulator::reduce_scatter_sum(axis, shard_dim, phase, shards)~.
+- Semantics: axis-local elementwise sum, then contiguous row-major slicing of
+  ~shard_dim~ using each rank's coordinate on the collective axis.
+- Validation: typed errors for out-of-range ~shard_dim~ and uneven requested
+  tensor dimension.
+- Trace: records ~MeshTraceEvent::Collective~ with
+  ~CollectiveKind::ReduceScatter~, axis, bytes, and participating ranks.
+
+Code commit:
+- Record the exact hash printed by ~git rev-parse HEAD~ after the
+  implementation commit.
+
+Verification:
+- ~/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:lib_tests~
+- Result: 4/4 targets passed.
+#+end_src
+
+- [ ] Commit the tracker update:
+
+#+begin_src sh
+git add .scratch/dtensor-mesh-simulation/issues/04-complete-redistribution-substrate.org
+git commit -m "docs: close redistribution substrate ticket
+
+Co-authored-by: TRAE CLI <noreply@bytedance.com>"
+#+end_src
+
+* Self-review checklist
+
+- [ ] Spec coverage: ticket 04 requirements map to tests or implementation
+      steps above.
+- [ ] Placeholder scan: no placeholder markers or vague "add tests"
+      instructions are present.
+- [ ] Type consistency: every ~reduce_scatter_sum~ call includes
+      ~(axis, shard_dim, phase, shards)~.
+- [ ] Scope: no wrapper DTensor, tensor-native layout, plan-first simulation,
+      CUDA, NCCL, async collective, MoE/EP, or uneven-shard support is added.
+- [ ] Verification: pinned Bazel command is included and uses
+      ~--cache_test_results=no~.
