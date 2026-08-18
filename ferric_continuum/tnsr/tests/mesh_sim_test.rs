@@ -1,6 +1,7 @@
 use tnsr::dtensor::harness::TrainingStepScenario;
 use tnsr::dtensor::{
-    Layout, MeshAxis, MeshError, ParallelDims5D, Placement, RankCoord5D, ShardError, ShardMap,
+    CollectiveKind, Layout, MeshAxis, MeshError, MeshTrace, MeshTraceEvent, ParallelDims5D,
+    Placement, RankCoord5D, ShardError, ShardMap, TrainingPhase, MESH_SIM_TRACE_SCHEMA,
 };
 use tnsr::tensor::{Shape, TensorValue};
 
@@ -135,6 +136,31 @@ fn reconstruct_rejects_wrong_local_shard_shape_without_panicking() {
         ShardError::ShapeMismatch {
             expected: Shape(vec![2, 2]),
             got: Shape(vec![2, 3])
+        }
+    );
+}
+
+#[test]
+fn mesh_trace_schema_and_events_are_stable() {
+    let mut trace = MeshTrace::default();
+    trace.record(MeshTraceEvent::Collective {
+        phase: TrainingPhase::Backward,
+        kind: CollectiveKind::AllReduce,
+        axis: MeshAxis::DpReplicate,
+        bytes: 128,
+        ranks: vec![0, 1],
+    });
+
+    assert_eq!(trace.schema, MESH_SIM_TRACE_SCHEMA);
+    assert_eq!(trace.events.len(), 1);
+    assert_eq!(
+        trace.events[0],
+        MeshTraceEvent::Collective {
+            phase: TrainingPhase::Backward,
+            kind: CollectiveKind::AllReduce,
+            axis: MeshAxis::DpReplicate,
+            bytes: 128,
+            ranks: vec![0, 1]
         }
     );
 }
