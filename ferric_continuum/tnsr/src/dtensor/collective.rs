@@ -10,6 +10,23 @@ pub enum CollectiveError {
         expected: Shape,
         got: Shape,
     },
+    UnevenScatter {
+        elements: usize,
+        parts: usize,
+    },
+    BroadcastRootOutOfRange {
+        root_axis_index: usize,
+        axis_size: usize,
+    },
+    SliceDimOutOfRange {
+        dim: usize,
+        rank: usize,
+    },
+    UnevenLocalSlice {
+        dim: usize,
+        size: usize,
+        parts: usize,
+    },
     RankCountMismatch {
         expected: usize,
         got: usize,
@@ -110,6 +127,121 @@ impl CollectiveSimulator {
         });
         Ok(out)
     }
+
+    pub fn reduce_scatter_sum(
+        &mut self,
+        axis: MeshAxis,
+        phase: TrainingPhase,
+        shards: &[TensorValue],
+    ) -> Result<Vec<TensorValue>, CollectiveError> {
+        validate_rank_values(self.dims, shards)?;
+        let shape = validate_same_shape(shards)?;
+        let axis_size = self.dims.axis_size(axis);
+        if shape.numel() % axis_size != 0 {
+            return Err(CollectiveError::UnevenScatter {
+                elements: shape.numel(),
+                parts: axis_size,
+            });
+        }
+        let chunk = shape.numel() / axis_size;
+        let groups = rank_groups_for_axis(self.dims, axis);
+        let mut out = shards.to_vec();
+        for group in &groups {
+            let mut sum = vec![0.0f32; shape.numel()];
+            for &rank in group {
+                for (dst, src) in sum.iter_mut().zip(shards[rank].data.iter()) {
+                    *dst += *src;
+                }
+            }
+            for (part, &rank) in group.iter().enumerate() {
+                let start = part * chunk;
+                let end = start + chunk;
+                out[rank] = TensorValue::from_vec(Shape(vec![chunk]), sum[start..end].to_vec());
+            }
+        }
+        self.trace.record(MeshTraceEvent::Collective {
+            phase,
+            kind: CollectiveKind::ReduceScatter,
+            axis,
+            bytes: collective_bytes(axis_size, shape.bytes_f32() as u64, 1),
+            ranks: groups.into_iter().flatten().collect(),
+        });
+        Ok(out)
+    }
+
+    pub fn broadcast(
+        &mut self,
+        axis: MeshAxis,
+        phase: TrainingPhase,
+        root_axis_index: usize,
+        shards: &[TensorValue],
+    ) -> Result<Vec<TensorValue>, CollectiveError> {
+        validate_rank_values(self.dims, shards)?;
+        let shape = validate_same_shape(shards)?;
+        let axis_size = self.dims.axis_size(axis);
+        if root_axis_index >= axis_size {
+            return Err(CollectiveError::BroadcastRootOutOfRange {
+                root_axis_index,
+                axis_size,
+            });
+        }
+        let groups = rank_groups_for_axis(self.dims, axis);
+        let mut out = shards.to_vec();
+        for group in &groups {
+            let root_rank = group[root_axis_index];
+            for &rank in group {
+                out[rank] = shards[root_rank].clone();
+            }
+        }
+        self.trace.record(MeshTraceEvent::Collective {
+            phase,
+            kind: CollectiveKind::Broadcast,
+            axis,
+            bytes: collective_bytes(axis_size, shape.bytes_f32() as u64, 1),
+            ranks: groups.into_iter().flatten().collect(),
+        });
+        Ok(out)
+    }
+
+    pub fn local_slice(
+        &mut self,
+        axis: MeshAxis,
+        phase: TrainingPhase,
+        tensor: &str,
+        dim: usize,
+        shards: &[TensorValue],
+    ) -> Result<Vec<TensorValue>, CollectiveError> {
+        validate_rank_values(self.dims, shards)?;
+        let axis_size = self.dims.axis_size(axis);
+        let mut out = Vec::with_capacity(shards.len());
+        for (rank, shard) in shards.iter().enumerate() {
+            if dim >= shard.shape.0.len() {
+                return Err(CollectiveError::SliceDimOutOfRange { dim, rank });
+            }
+            let full = shard.shape.0[dim];
+            if full % axis_size != 0 {
+                return Err(CollectiveError::UnevenLocalSlice {
+                    dim,
+                    size: full,
+                    parts: axis_size,
+                });
+            }
+            let coord = self.dims.coord(rank).expect("rank count was validated");
+            out.push(contiguous_slice_along_dim(
+                shard,
+                dim,
+                coord_axis(coord, axis),
+                axis_size,
+            ));
+        }
+        self.trace.record(MeshTraceEvent::LayoutTransition {
+            phase,
+            tensor: tensor.to_string(),
+            src: "Replicate".to_string(),
+            dst: "Local".to_string(),
+        });
+        Ok(out)
+    }
 }
 
 fn validate_rank_values(
@@ -126,6 +258,19 @@ fn validate_rank_values(
         });
     }
     Ok(())
+}
+
+fn validate_same_shape(shards: &[TensorValue]) -> Result<Shape, CollectiveError> {
+    let shape = shards[0].shape.clone();
+    for shard in shards {
+        if shard.shape != shape {
+            return Err(CollectiveError::ShapeMismatch {
+                expected: shape,
+                got: shard.shape.clone(),
+            });
+        }
+    }
+    Ok(shape)
 }
 
 fn rank_groups_for_axis(dims: ParallelDims5D, axis: MeshAxis) -> Vec<Vec<usize>> {
@@ -179,6 +324,39 @@ fn rank_groups_for_axis(dims: ParallelDims5D, axis: MeshAxis) -> Vec<Vec<usize>>
         groups.push(group);
     }
     groups
+}
+
+fn coord_axis(coord: super::mesh::RankCoord5D, axis: MeshAxis) -> usize {
+    match axis {
+        MeshAxis::Pp => coord.pp,
+        MeshAxis::DpReplicate => coord.dp_replicate,
+        MeshAxis::DpShard => coord.dp_shard,
+        MeshAxis::Cp => coord.cp,
+        MeshAxis::Tp => coord.tp,
+    }
+}
+
+fn contiguous_slice_along_dim(
+    value: &TensorValue,
+    dim: usize,
+    part: usize,
+    parts: usize,
+) -> TensorValue {
+    let mut local_shape = value.shape.clone();
+    let full = value.shape.0[dim];
+    let chunk = full / parts;
+    local_shape.0[dim] = chunk;
+    let outer: usize = value.shape.0[..dim].iter().product();
+    let inner: usize = value.shape.0[dim + 1..].iter().product();
+    let mut out = Vec::with_capacity(local_shape.numel());
+    let data = value.data.as_ref();
+    for outer_i in 0..outer {
+        let row_base = outer_i * full * inner;
+        let start = row_base + part * chunk * inner;
+        let end = start + chunk * inner;
+        out.extend_from_slice(&data[start..end]);
+    }
+    TensorValue::from_vec(local_shape, out)
 }
 
 fn collective_bytes(axis_size: usize, logical_bytes: u64, multiplier: u64) -> u64 {

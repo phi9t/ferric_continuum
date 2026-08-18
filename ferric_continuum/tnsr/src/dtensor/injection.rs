@@ -18,6 +18,7 @@ pub struct InjectionEvent {
     pub phase: TrainingPhase,
     pub rank: usize,
     pub axis: Option<MeshAxis>,
+    pub collective: Option<CollectiveKind>,
     pub kind: InjectionKind,
 }
 
@@ -72,7 +73,7 @@ impl InjectionPlan {
                     rank: Some(rank),
                     axis: event.axis,
                     tensor: None,
-                    collective: Some(CollectiveKind::AllReduce),
+                    collective: event.collective,
                 }),
             }
         }

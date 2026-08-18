@@ -3,6 +3,7 @@ use crate::ops::{linear, loss};
 use crate::tensor::{Shape, Tensor};
 use crate::transformer::{TransformerBlock, TransformerConfig};
 
+use super::trace::{MeshTrace, MeshTraceEvent};
 use super::{
     CollectiveSimulator, InjectionPlan, Layout, MeshAxis, ParallelDims5D, Placement, ShardMap,
     TrainingPhase,
@@ -24,6 +25,7 @@ pub struct HarnessSmokeReport {
     pub reference_loss: f32,
     pub world_size: usize,
     pub trace_events: usize,
+    pub trace: MeshTrace,
     pub failures: usize,
 }
 
@@ -38,7 +40,11 @@ impl TrainingStepScenario {
         };
         let vocab = 11;
         let targets = (0..cfg.batch * cfg.seq).map(|i| i % vocab).collect();
-        Self { cfg, vocab, targets }
+        Self {
+            cfg,
+            vocab,
+            targets,
+        }
     }
 
     pub fn run_unsharded_reference(&self) -> TrainingStepReference {
@@ -52,8 +58,7 @@ impl TrainingStepScenario {
         });
         let x = Tensor::randn_scaled(&[self.cfg.batch, self.cfg.seq, self.cfg.d_model], 0.02)
             .requires_grad();
-        let logits_w =
-            Tensor::randn_scaled(&[self.cfg.d_model, self.vocab], 0.02).requires_grad();
+        let logits_w = Tensor::randn_scaled(&[self.cfg.d_model, self.vocab], 0.02).requires_grad();
 
         let hidden = block.forward(&x);
         let logits = linear::linear(&hidden, &logits_w, "mesh_sim_logits");
@@ -91,16 +96,26 @@ impl TrainingStepScenario {
             .map(|rank| shard_map.shard_tensor_for_rank(&global, rank).unwrap())
             .collect();
 
+        let mut simulator = CollectiveSimulator::new(dims);
         let mut failures = 0usize;
         if let Some(plan) = injection_plan {
             for (rank, shard) in shards.iter_mut().enumerate() {
-                failures += plan
-                    .apply_to_shard(TrainingPhase::Backward, rank, shard)
-                    .len();
+                let matching = plan.matching_events(TrainingPhase::Backward, rank);
+                for event in &matching {
+                    simulator.trace.record(MeshTraceEvent::Injection {
+                        phase: event.phase,
+                        label: event.label.clone(),
+                        rank: event.rank,
+                    });
+                }
+                let records = plan.apply_to_shard(TrainingPhase::Backward, rank, shard);
+                failures += records.len();
+                for record in records {
+                    simulator.trace.record(MeshTraceEvent::Failure(record));
+                }
             }
         }
 
-        let mut simulator = CollectiveSimulator::new(dims);
         let _ = simulator
             .all_reduce_sum(MeshAxis::DpReplicate, TrainingPhase::Backward, &shards)
             .unwrap();
@@ -109,6 +124,7 @@ impl TrainingStepScenario {
             reference_loss: reference.loss,
             world_size: dims.world_size(),
             trace_events: simulator.trace.events.len(),
+            trace: simulator.trace,
             failures,
         }
     }

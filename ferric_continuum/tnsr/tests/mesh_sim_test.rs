@@ -29,6 +29,7 @@ fn common_substrate_smoke_connects_reference_mesh_collective_and_injection() {
         phase: TrainingPhase::Backward,
         rank: 0,
         axis: Some(MeshAxis::DpReplicate),
+        collective: Some(CollectiveKind::AllReduce),
         kind: InjectionKind::MissingParticipant,
     }]);
 
@@ -36,8 +37,14 @@ fn common_substrate_smoke_connects_reference_mesh_collective_and_injection() {
 
     assert!(report.reference_loss.is_finite());
     assert_eq!(report.world_size, 4);
-    assert_eq!(report.trace_events, 1);
+    assert_eq!(report.trace_events, 3);
     assert_eq!(report.failures, 1);
+    assert!(report.trace.events.iter().any(
+        |event| matches!(event, MeshTraceEvent::Injection { label, .. } if label == "missing_rank")
+    ));
+    assert!(report.trace.events.iter().any(
+        |event| matches!(event, MeshTraceEvent::Failure(record) if record.message == "missing_rank")
+    ));
 }
 
 #[test]
@@ -241,6 +248,118 @@ fn collective_all_gather_gathers_axis_groups_and_records_trace() {
 }
 
 #[test]
+fn collective_reduce_scatter_sums_then_scatters_axis_groups_and_records_trace() {
+    let dims = ParallelDims5D::new(1, 2, 1, 1, 2);
+    let shards = vec![
+        TensorValue::from_vec(Shape(vec![4]), vec![1.0, 2.0, 3.0, 4.0]),
+        TensorValue::from_vec(Shape(vec![4]), vec![10.0, 20.0, 30.0, 40.0]),
+        TensorValue::from_vec(Shape(vec![4]), vec![100.0, 200.0, 300.0, 400.0]),
+        TensorValue::from_vec(Shape(vec![4]), vec![1000.0, 2000.0, 3000.0, 4000.0]),
+    ];
+    let mut sim = CollectiveSimulator::new(dims);
+    let out = sim
+        .reduce_scatter_sum(MeshAxis::DpReplicate, TrainingPhase::Backward, &shards)
+        .unwrap();
+
+    assert_eq!(out.len(), 4);
+    assert_eq!(out[0].shape, Shape(vec![2]));
+    assert_eq!(out[0].data.as_ref(), &vec![101.0, 202.0]);
+    assert_eq!(out[1].data.as_ref(), &vec![1010.0, 2020.0]);
+    assert_eq!(out[2].data.as_ref(), &vec![303.0, 404.0]);
+    assert_eq!(out[3].data.as_ref(), &vec![3030.0, 4040.0]);
+    assert_eq!(
+        sim.trace.events[0],
+        MeshTraceEvent::Collective {
+            phase: TrainingPhase::Backward,
+            kind: CollectiveKind::ReduceScatter,
+            axis: MeshAxis::DpReplicate,
+            bytes: 8,
+            ranks: vec![0, 2, 1, 3],
+        }
+    );
+}
+
+#[test]
+fn collective_broadcast_copies_axis_group_root_and_records_trace() {
+    let dims = ParallelDims5D::new(1, 2, 1, 1, 2);
+    let shards = vec![
+        TensorValue::from_vec(Shape(vec![2]), vec![1.0, 2.0]),
+        TensorValue::from_vec(Shape(vec![2]), vec![10.0, 20.0]),
+        TensorValue::from_vec(Shape(vec![2]), vec![100.0, 200.0]),
+        TensorValue::from_vec(Shape(vec![2]), vec![1000.0, 2000.0]),
+    ];
+    let mut sim = CollectiveSimulator::new(dims);
+    let out = sim
+        .broadcast(MeshAxis::DpReplicate, TrainingPhase::Forward, 1, &shards)
+        .unwrap();
+
+    assert_eq!(out.len(), 4);
+    assert_eq!(out[0].data.as_ref(), &vec![100.0, 200.0]);
+    assert_eq!(out[1].data.as_ref(), &vec![1000.0, 2000.0]);
+    assert_eq!(out[2].data.as_ref(), &vec![100.0, 200.0]);
+    assert_eq!(out[3].data.as_ref(), &vec![1000.0, 2000.0]);
+    assert_eq!(
+        sim.trace.events[0],
+        MeshTraceEvent::Collective {
+            phase: TrainingPhase::Forward,
+            kind: CollectiveKind::Broadcast,
+            axis: MeshAxis::DpReplicate,
+            bytes: 4,
+            ranks: vec![0, 2, 1, 3],
+        }
+    );
+}
+
+#[test]
+fn collective_local_slice_selects_axis_local_chunk_and_records_layout_transition() {
+    let dims = ParallelDims5D::new(1, 2, 1, 1, 2);
+    let shards = vec![
+        TensorValue::from_vec(
+            Shape(vec![2, 4]),
+            vec![0.0, 1.0, 2.0, 3.0, 10.0, 11.0, 12.0, 13.0],
+        ),
+        TensorValue::from_vec(
+            Shape(vec![2, 4]),
+            vec![20.0, 21.0, 22.0, 23.0, 30.0, 31.0, 32.0, 33.0],
+        ),
+        TensorValue::from_vec(
+            Shape(vec![2, 4]),
+            vec![40.0, 41.0, 42.0, 43.0, 50.0, 51.0, 52.0, 53.0],
+        ),
+        TensorValue::from_vec(
+            Shape(vec![2, 4]),
+            vec![60.0, 61.0, 62.0, 63.0, 70.0, 71.0, 72.0, 73.0],
+        ),
+    ];
+    let mut sim = CollectiveSimulator::new(dims);
+    let out = sim
+        .local_slice(
+            MeshAxis::DpReplicate,
+            TrainingPhase::Forward,
+            "activation",
+            1,
+            &shards,
+        )
+        .unwrap();
+
+    assert_eq!(out.len(), 4);
+    assert_eq!(out[0].shape, Shape(vec![2, 2]));
+    assert_eq!(out[0].data.as_ref(), &vec![0.0, 1.0, 10.0, 11.0]);
+    assert_eq!(out[1].data.as_ref(), &vec![20.0, 21.0, 30.0, 31.0]);
+    assert_eq!(out[2].data.as_ref(), &vec![42.0, 43.0, 52.0, 53.0]);
+    assert_eq!(out[3].data.as_ref(), &vec![62.0, 63.0, 72.0, 73.0]);
+    assert_eq!(
+        sim.trace.events[0],
+        MeshTraceEvent::LayoutTransition {
+            phase: TrainingPhase::Forward,
+            tensor: "activation".to_string(),
+            src: "Replicate".to_string(),
+            dst: "Local".to_string(),
+        }
+    );
+}
+
+#[test]
 fn collective_rejects_bad_rank_count_before_grouping() {
     let dims = ParallelDims5D::new(1, 2, 1, 1, 2);
     let shards = vec![TensorValue::from_vec(Shape(vec![1]), vec![1.0])];
@@ -268,6 +387,7 @@ fn injection_plan_corrupts_and_reports_deterministically() {
             phase: TrainingPhase::Backward,
             rank: 0,
             axis: Some(MeshAxis::DpReplicate),
+            collective: None,
             kind: InjectionKind::InjectNan { offset: 1 },
         },
         InjectionEvent {
@@ -275,6 +395,7 @@ fn injection_plan_corrupts_and_reports_deterministically() {
             phase: TrainingPhase::Backward,
             rank: 0,
             axis: Some(MeshAxis::DpReplicate),
+            collective: Some(CollectiveKind::ReduceScatter),
             kind: InjectionKind::MissingParticipant,
         },
     ]);
@@ -285,4 +406,5 @@ fn injection_plan_corrupts_and_reports_deterministically() {
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].rank, Some(0));
     assert_eq!(failures[0].axis, Some(MeshAxis::DpReplicate));
+    assert_eq!(failures[0].collective, Some(CollectiveKind::ReduceScatter));
 }
