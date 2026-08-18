@@ -1,6 +1,6 @@
 use tnsr::dtensor::harness::TrainingStepScenario;
 use tnsr::dtensor::{
-    Layout, MeshAxis, MeshError, ParallelDims5D, Placement, RankCoord5D, ShardMap,
+    Layout, MeshAxis, MeshError, ParallelDims5D, Placement, RankCoord5D, ShardError, ShardMap,
 };
 use tnsr::tensor::{Shape, TensorValue};
 
@@ -97,4 +97,44 @@ fn layout_rejects_ambiguous_duplicate_shard_dim() {
         (MeshAxis::Cp, Placement::Shard(1)),
     ])
     .is_err());
+}
+
+#[test]
+fn shard_tensor_rejects_out_of_range_shard_dim_without_panicking() {
+    let dims = ParallelDims5D::new(1, 1, 1, 1, 2);
+    let layout = Layout::new(vec![(MeshAxis::Tp, Placement::Shard(2))]).unwrap();
+    let value = TensorValue::from_vec(
+        Shape(vec![2, 4]),
+        vec![0.0, 1.0, 2.0, 3.0, 10.0, 11.0, 12.0, 13.0],
+    );
+    let map = ShardMap::new(value.shape.clone(), layout, dims).unwrap();
+
+    let err = match map.shard_tensor_for_rank(&value, 0) {
+        Ok(_) => panic!("out-of-range shard dim unexpectedly produced a shard"),
+        Err(err) => err,
+    };
+    assert_eq!(err, ShardError::ShardDimOutOfRange { dim: 2, rank: 0 });
+}
+
+#[test]
+fn reconstruct_rejects_wrong_local_shard_shape_without_panicking() {
+    let dims = ParallelDims5D::new(1, 1, 1, 1, 2);
+    let layout = Layout::new(vec![(MeshAxis::Tp, Placement::Shard(1))]).unwrap();
+    let map = ShardMap::new(Shape(vec![2, 4]), layout, dims).unwrap();
+    let shards = vec![
+        TensorValue::from_vec(Shape(vec![2, 2]), vec![0.0, 1.0, 10.0, 11.0]),
+        TensorValue::from_vec(Shape(vec![2, 3]), vec![2.0, 3.0, 4.0, 12.0, 13.0, 14.0]),
+    ];
+
+    let err = match map.reconstruct_from_rank_shards(&shards) {
+        Ok(_) => panic!("wrong local shard shape unexpectedly reconstructed"),
+        Err(err) => err,
+    };
+    assert_eq!(
+        err,
+        ShardError::ShapeMismatch {
+            expected: Shape(vec![2, 2]),
+            got: Shape(vec![2, 3])
+        }
+    );
 }

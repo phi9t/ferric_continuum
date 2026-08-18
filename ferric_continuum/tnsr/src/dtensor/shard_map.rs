@@ -79,6 +79,7 @@ impl ShardMap {
         }
         if let Some((axis, dim)) = single_shard_axis(&self.layout) {
             let coord = self.dims.coord(rank).map_err(ShardError::Mesh)?;
+            self.local_shape_for_rank(rank)?;
             let axis_index = coord_axis(coord, axis);
             contiguous_slice_along_dim(value, dim, axis_index, self.dims.axis_size(axis))
         } else {
@@ -97,6 +98,9 @@ impl ShardMap {
                 got: shards.len(),
             });
         }
+        for (rank, shard) in shards.iter().enumerate() {
+            self.validate_local_shape(&shard.shape, rank)?;
+        }
         if let Some((axis, dim)) = single_shard_axis(&self.layout) {
             let parts = self.dims.axis_size(axis);
             let mut selected = Vec::with_capacity(parts);
@@ -111,6 +115,18 @@ impl ShardMap {
             concat_along_dim(&selected, dim, self.global_shape.clone())
         } else {
             Ok(shards[0].clone())
+        }
+    }
+
+    fn validate_local_shape(&self, got: &Shape, rank: usize) -> Result<(), ShardError> {
+        let expected = self.local_shape_for_rank(rank)?;
+        if *got == expected {
+            Ok(())
+        } else {
+            Err(ShardError::ShapeMismatch {
+                expected,
+                got: got.clone(),
+            })
         }
     }
 }
