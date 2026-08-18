@@ -5,3 +5,6 @@
 //! semantics.
 
 pub mod harness;
+pub mod mesh;
+
+pub use mesh::{MeshAxis, MeshError, ParallelDims5D, RankCoord5D};
