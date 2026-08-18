@@ -1,0 +1,43 @@
+#+TITLE: Wrapper DTensor tracer bullet
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 03-collective-simulator-trace-injection
+#+PARENT: ../spec.org
+
+* Context
+
+Option A tests a dedicated ~DTensor~ wrapper around local ~Tensor~ or
+~TensorValue~ shards.
+
+* Requirements
+
+- Add a narrow wrapper-DTensor interface for global shape, mesh, placements,
+  and rank-local simulated shards.
+- Keep existing ~Tensor~ math local.
+- Implement explicit wrapping, redistribution, and unwrapping/reference checks.
+- Run the shared harness through the wrapper interface.
+- Exercise tensor-parallel matmul, context-parallel sequence sharding,
+  dp-shard parameter/gradient transitions, dp-replicate reductions, pipeline
+  phase boundaries, and loss reduction as far as the tracer bullet supports.
+- Emit the shared mesh simulation trace events.
+- Run deterministic injection scenarios and record failure-localization quality.
+- Record interface complexity and touched files in the comparison notes.
+
+* Out of scope
+
+- Full coverage of every existing ~tnsr~ op.
+- Replacing ~Tensor~ with ~DTensor~.
+- Real distributed execution.
+
+* Verification
+
+- Harness output matches the unsharded reference for supported slices.
+- Trace tests cover at least one redistribution and one collective.
+- Injection tests fail with structured context.
+- Existing local tensor tests remain valid:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+* Comments

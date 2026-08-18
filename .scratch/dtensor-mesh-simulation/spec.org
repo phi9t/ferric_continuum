@@ -1,0 +1,316 @@
+#+TITLE: DTensor mesh simulation architecture experiment
+#+TYPE: spec
+#+STATUS: approved
+
+* Goal
+
+Evaluate three competing designs for native Torch DTensor-style semantics in
+~ferric_continuum/tnsr~, using evidence from dense foundation-model training
+mesh simulation.
+
+The first milestone is runtime-shaped semantics with a deterministic
+single-process simulator. It should be able to model a dense TorchTitan-style
+5D mesh, run a small foundation-model-like training step, inject deterministic
+faults, and emit structured observability telemetry. It does not need to launch
+real multi-process or GPU collectives.
+
+* Approved scope
+
+The dense mesh follows current TorchTitan full-DTensor semantics:
+
+#+begin_src text
+pp x dp_replicate x dp_shard x cp x tp
+#+end_src
+
+Where:
+
+- ~pp~ models pipeline stages.
+- ~dp_replicate~ models DDP/HSDP replica groups.
+- ~dp_shard~ models FSDP/ZeRO-style parameter, gradient, and optimizer-state
+  sharding.
+- ~cp~ models context-parallel sequence sharding.
+- ~tp~ models tensor parallelism.
+
+MoE and expert parallelism are a follow-up. This effort should leave room for
+~ep~ and sparse meshes later, but dense semantics are enough for the first
+decision.
+
+* Architecture options under comparison
+
+Do not prematurely collapse the design into one option. The purpose of this
+effort is to implement comparable tracer bullets and decide from evidence.
+
+** Option A: Wrapper DTensor
+
+Add a ~dtensor~ module whose main interface is a distributed tensor value:
+global shape, mesh, placements, and simulated local shards backed by ordinary
+~Tensor~ or ~TensorValue~ values.
+
+Existing tensor math stays local. Distributed operations consume and produce
+~DTensor~ values. Redistribution is explicit and emits telemetry.
+
+Expected strengths:
+
+- Clean seam around distributed semantics.
+- Minimal disturbance to existing ~Tensor~ and op code.
+- Easy to compare local shard state across ranks.
+
+Main risk:
+
+- Callers must cross between local ~Tensor~ and ~DTensor~ explicitly, so it may
+  feel less native than Torch.
+
+** Option B: Tensor-native layout
+
+Add optional distribution metadata to ~TensorInner~ or a closely adjacent core
+type. Existing ops can inspect or propagate layout metadata, and future callers
+can treat local and distributed tensors as one conceptual type.
+
+Expected strengths:
+
+- Tests whether native semantics are ergonomic enough to justify moving layout
+  into the core tensor type.
+- Closer to the user-facing feel of Torch DTensor.
+
+Main risk:
+
+- Layout propagation could spread partial semantics through many existing ops.
+  The tracer bullet must keep this constrained to the training-step surface.
+
+** Option C: Plan-first simulation
+
+Keep distributed semantics in a planner/simulator layer. It builds a graph of
+training phases, tensor layouts, collectives, and costs, and optionally calls
+local ~tnsr~ math for reference checks.
+
+Expected strengths:
+
+- Fits the existing ~scaling::distributed~ teaching and cost-model style.
+- Likely best for observability, chaos experiments, and topology inspection.
+
+Main risk:
+
+- May become a simulator beside the tensor system rather than DTensor semantics
+  inside it.
+
+* Common semantic contract
+
+Every option must support the same conceptual model so the comparison is fair.
+
+** Mesh
+
+Introduce a 5D dense mesh model equivalent to:
+
+#+begin_src rust
+ParallelDims {
+    pp,
+    dp_replicate,
+    dp_shard,
+    cp,
+    tp,
+    world_size,
+}
+#+end_src
+
+Validation requires:
+
+#+begin_src text
+pp * dp_replicate * dp_shard * cp * tp == world_size
+#+end_src
+
+The model should preserve TorchTitan's distinction between physical axes and
+derived views:
+
+- ~batch = dp_replicate * dp_shard~
+- ~loss = dp_replicate * dp_shard * cp~
+- ~fsdp = dp_shard * cp~ as a derived view only
+
+For dense full-DTensor semantics, ~dp_shard~ and ~cp~ must remain separate
+primary axes.
+
+** Placement and layout
+
+Support Torch-like placements:
+
+- ~Replicate~: the full value exists across a mesh axis.
+- ~Shard(tensor_dim)~: the tensor dimension is partitioned across a mesh axis.
+- ~Partial(sum)~: each rank holds an unreduced sum contribution.
+- ~Local~: no distributed tensor semantics.
+
+Reject unsupported or ambiguous layouts rather than guessing. The first
+milestone assumes equal divisibility for all sharded dimensions.
+
+** Redistribution
+
+Redistribution must be explicit and traceable:
+
+- ~Partial(sum) -> Replicate~ lowers to all-reduce.
+- ~Partial(sum) -> Shard(dim)~ lowers to reduce-scatter when supported.
+- ~Shard(dim) -> Replicate~ lowers to all-gather.
+- ~Replicate -> Shard(dim)~ lowers to local slicing.
+- Identical layouts are no-ops.
+
+Multi-axis shard order, uneven shards, and unsupported placement transitions
+should fail loudly with structured errors.
+
+** Simulation runtime
+
+The simulator tracks logical ranks, 5D coordinates, rank groups, local shard
+tensors, collective events, bytes moved, injected faults, and telemetry events.
+
+Initial limits:
+
+- Dense models only; no EP/MoE.
+- CPU f32 local math first.
+- Synchronous collectives first.
+- Single-process simulator first.
+- ~Partial(sum)~ only.
+- Minimal placement propagation for a small transformer training step, not
+  every existing ~tnsr~ op.
+
+* Experiment harness
+
+The harness is separate from the three architecture tracks. It runs the same
+foundation-model-like scenario through each option and collects comparable
+evidence.
+
+The first proof target is a small dense Qwen3-like transformer block or
+two-block training step using synthetic inputs and existing ~tnsr~ shapes:
+
+- embeddings or synthetic activations
+- attention or GQA
+- MLP
+- loss
+- backward
+- optimizer/update accounting
+
+It should model:
+
+- tensor-parallel column/row matmul
+- context-parallel sequence sharding
+- FSDP-style parameter all-gather and gradient reduce-scatter on ~dp_shard~
+- DDP/HSDP-style gradient reduction on ~dp_replicate~
+- pipeline stage boundaries on ~pp~
+- loss reduction over the derived ~loss~ mesh
+
+The harness reports:
+
+- semantic expressiveness
+- correctness against an unsharded reference where supported
+- collective, bytes, and topology trace
+- failure localization quality under deterministic injections
+- interface complexity and touched surface area
+
+* Chaos injection
+
+Add deterministic injection plans with seeded events. Initial injections:
+
+- missing collective participant
+- corrupted shard before all-reduce
+- delayed rank group
+- mismatched placement annotation
+- NaN injected into one local shard
+
+The first milestone should fail loudly with structured failure records. Recovery
+or rescheduling is out of scope.
+
+* Observability
+
+Extend the existing ~tnsr.debug_trace~ style rather than inventing an unrelated
+log format. Add a mesh simulation trace namespace such as:
+
+#+begin_src text
+tnsr.mesh_sim_trace
+#+end_src
+
+Trace records should be deterministic and testable. Include:
+
+- mesh axes and sizes
+- rank coordinates
+- tensor ids, global shapes, local shard shapes, and layouts
+- training phase
+- layout transitions
+- collective events
+- bytes moved
+- injected events
+- detected failures
+
+Human-readable reports should be derived from the same structured events.
+
+* Rollout
+
+Implement the effort as evidence-producing tracer bullets:
+
+1. Baseline spec and harness.
+2. Common mesh semantics.
+3. Collective simulator, trace recorder, and injection hooks.
+4. Option A wrapper DTensor tracer bullet.
+5. Option B tensor-native layout tracer bullet.
+6. Option C plan-first simulation tracer bullet.
+7. Comparison report and recommendation.
+
+Each tracer bullet must run the same scenario and report comparable results.
+
+* Acceptance criteria
+
+The full effort is complete when:
+
+- The repo has a written comparison of all three options.
+- The common 5D mesh semantics are tested.
+- The harness can simulate a dense foundation-model-like training step.
+- Each option has comparable tracer-bullet evidence.
+- Deterministic chaos injections produce structured failures with rank, axis,
+  phase, tensor/layout, and collective context.
+- Telemetry is schema-stable enough to diff in tests.
+- A final recommendation identifies which architecture should graduate to
+  durable implementation and which pieces remain as testing or observability
+  infrastructure.
+
+The goal is not for all three options to become production ready.
+
+* Out of scope
+
+- Real multi-process collectives.
+- NCCL or CUDA execution.
+- MoE, EP, sparse meshes, or expert dispatch.
+- Uneven/ragged tensor sharding.
+- Asynchronous collectives.
+- Fault recovery.
+- Tokenizer/checkpoint integration or real-weight Qwen3 compatibility.
+- Replacing existing ~tnsr~ tensor, autograd, or scaling modules wholesale.
+
+* Implementation tickets
+
+- [[file:issues/01-baseline-harness-and-reference.org][01 baseline harness and reference]]
+- [[file:issues/02-common-mesh-layout-semantics.org][02 common mesh layout semantics]]
+- [[file:issues/03-collective-simulator-trace-injection.org][03 collective simulator trace injection]]
+- [[file:issues/04-wrapper-dtensor-tracer-bullet.org][04 wrapper DTensor tracer bullet]]
+- [[file:issues/05-tensor-native-layout-tracer-bullet.org][05 tensor-native layout tracer bullet]]
+- [[file:issues/06-plan-first-simulation-tracer-bullet.org][06 plan-first simulation tracer bullet]]
+- [[file:issues/07-comparison-report-and-recommendation.org][07 comparison report and recommendation]]
+
+* Verification matrix
+
+Focused checks should be added per ticket. The final batch should include:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:distributed_tests
+bazel test //ferric_continuum/tnsr:context_parallel_gqa_tests
+bazel test //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+New test targets should cover:
+
+- mesh validation
+- layout validation
+- shard mapping and reconstruction
+- collective simulation
+- trace schema stability
+- deterministic injection behavior
+- each architecture tracer bullet against the shared harness
+
+* Human authority
+
+This spec authorizes design and implementation planning only. Commits, pushes,
+pull requests, branch landing, or choosing the final durable architecture
+require explicit human approval.

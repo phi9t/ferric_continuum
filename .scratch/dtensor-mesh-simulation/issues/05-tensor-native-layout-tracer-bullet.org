@@ -1,0 +1,45 @@
+#+TITLE: Tensor-native layout tracer bullet
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 03-collective-simulator-trace-injection
+#+PARENT: ../spec.org
+
+* Context
+
+Option B tests native layout metadata in or next to the core ~Tensor~ type.
+The goal is to measure ergonomics and blast radius, not to make every existing
+operation distributed-aware in one step.
+
+* Requirements
+
+- Add optional distribution metadata to ~TensorInner~ or a closely adjacent
+  core type.
+- Keep layout propagation constrained to the shared training-step harness.
+- Reuse the common mesh, placement, shard map, collective simulator, trace, and
+  injection semantics.
+- Run the same harness scenario as the other tracks.
+- Record which existing op seams had to change.
+- Emit shared telemetry and deterministic failure records.
+- Compare how native semantics affect interface complexity, locality, and
+  normal local tensor code.
+
+* Out of scope
+
+- Making every ~tnsr~ op layout-aware.
+- Allowing silent layout propagation for unsupported ops.
+- Replacing the wrapper or plan-first tracks.
+- Real distributed execution.
+
+* Verification
+
+- Existing local tensor behavior remains unchanged when no layout metadata is
+  present.
+- Harness output matches the unsharded reference for supported slices.
+- Unsupported layout propagation fails loudly.
+- Trace and injection tests match the common schema.
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+* Comments

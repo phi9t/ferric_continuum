@@ -1,0 +1,1682 @@
+#+TITLE: DTensor mesh simulation common substrate implementation plan
+#+TYPE: plan
+#+STATUS: ready-for-human
+#+SPEC: ../spec.org
+
+* For agentic workers
+
+Required sub-skill: use ~superpowers:subagent-driven-development~
+recommended, or ~superpowers:executing-plans~ if executing inline. Steps use
+checkbox syntax for tracking. Read the spec and the referenced ticket before
+starting a task.
+
+* Goal
+
+Build the shared harness, 5D mesh/layout semantics, collective simulator,
+deterministic injection hooks, and trace substrate needed before the three
+DTensor architecture tracer bullets.
+
+* Architecture
+
+Add a new ~tnsr::dtensor~ module for common distributed semantics without
+changing existing local ~Tensor~ behavior. The module owns mesh/layout/shard
+mapping, the shared training-step harness, collective simulation, trace events,
+and injection plans. Existing ~scaling::distributed~ remains intact and is used
+as a reference for collective invariants.
+
+* Tech stack
+
+- Rust 2021 under Bazel.
+- Existing ~tnsr~ library types: ~Tensor~, ~TensorValue~, ~Shape~,
+  ~TransformerBlock~, and ~Engine~.
+- Existing Bazel target style in ~ferric_continuum/tnsr/BUILD.bazel~.
+- No new external dependencies.
+
+* Spec
+
+- [[file:../spec.org][DTensor mesh simulation architecture experiment]]
+- [[file:../issues/01-baseline-harness-and-reference.org][01 baseline harness and reference]]
+- [[file:../issues/02-common-mesh-layout-semantics.org][02 common mesh layout semantics]]
+- [[file:../issues/03-collective-simulator-trace-injection.org][03 collective simulator trace injection]]
+
+* Global constraints
+
+- Dense mesh axes are exactly ~pp x dp_replicate x dp_shard x cp x tp~.
+- Validate ~pp * dp_replicate * dp_shard * cp * tp == world_size~.
+- Keep ~dp_shard~ and ~cp~ separate in full-DTensor dense semantics.
+- MoE, EP, sparse meshes, expert dispatch, uneven shards, async collectives,
+  real multi-process collectives, NCCL, CUDA execution, and recovery are out of
+  scope.
+- CPU f32 local math first.
+- Synchronous single-process simulator first.
+- ~Partial(sum)~ is the only reduction placement in this plan.
+- Do not replace existing ~tnsr~ tensor, autograd, or scaling modules.
+- Preserve Bazel as the primary validation path.
+
+* Planned file structure
+
+- Modify ~ferric_continuum/tnsr/BUILD.bazel~
+  - Add new ~dtensor~ source files to ~_TNSR_SRCS~.
+  - Add a focused ~mesh_sim_tests~ Rust test target.
+- Modify ~ferric_continuum/tnsr/src/lib.rs~
+  - Export ~pub mod dtensor;~.
+- Create ~ferric_continuum/tnsr/src/dtensor/mod.rs~
+  - Public module docs and re-exports.
+- Create ~ferric_continuum/tnsr/src/dtensor/mesh.rs~
+  - ~MeshAxis~, ~ParallelDims5D~, ~RankCoord5D~, derived mesh sizes, and rank
+    coordinate helpers.
+- Create ~ferric_continuum/tnsr/src/dtensor/layout.rs~
+  - ~Placement~, ~ReduceOp~, ~Layout~, validation helpers.
+- Create ~ferric_continuum/tnsr/src/dtensor/shard_map.rs~
+  - ~ShardSpec~, ~ShardMap~, local shape/slice mapping, reconstruction helpers.
+- Create ~ferric_continuum/tnsr/src/dtensor/trace.rs~
+  - ~MeshTrace~, ~MeshTraceEvent~, ~TrainingPhase~, ~CollectiveKind~,
+    ~FailureRecord~.
+- Create ~ferric_continuum/tnsr/src/dtensor/collective.rs~
+  - ~CollectiveSimulator~, rank-group operations, bytes accounting.
+- Create ~ferric_continuum/tnsr/src/dtensor/injection.rs~
+  - ~InjectionPlan~, ~InjectionEvent~, deterministic matching.
+- Create ~ferric_continuum/tnsr/src/dtensor/harness.rs~
+  - Shared unsharded training-step reference and scenario metadata.
+- Create ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+  - Focused tests for tickets 1-3.
+
+* Task 1: Module skeleton and deterministic unsharded harness
+
+** Files
+
+- Modify: ~ferric_continuum/tnsr/BUILD.bazel~
+- Modify: ~ferric_continuum/tnsr/src/lib.rs~
+- Create: ~ferric_continuum/tnsr/src/dtensor/mod.rs~
+- Create: ~ferric_continuum/tnsr/src/dtensor/harness.rs~
+- Create: ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+
+** Interfaces
+
+Consumes:
+
+- ~tnsr::transformer::{TransformerBlock, TransformerConfig}~
+- ~tnsr::tensor::{Shape, Tensor, TensorValue}~
+- ~tnsr::autograd::Engine~
+- ~tnsr::ops::loss::cross_entropy~
+
+Produces:
+
+#+begin_src rust
+pub struct TrainingStepScenario {
+    pub cfg: TransformerConfig,
+    pub vocab: usize,
+    pub targets: Vec<usize>,
+}
+
+pub struct TrainingStepReference {
+    pub loss: f32,
+    pub output_shape: Shape,
+    pub parameter_grad_shapes: Vec<Shape>,
+}
+
+impl TrainingStepScenario {
+    pub fn tiny_dense() -> Self;
+    pub fn run_unsharded_reference(&self) -> TrainingStepReference;
+}
+#+end_src
+
+** Steps
+
+- [ ] Add the module export to ~src/lib.rs~:
+
+#+begin_src rust
+pub mod dtensor;
+#+end_src
+
+- [ ] Add ~src/dtensor/mod.rs~:
+
+#+begin_src rust
+//! Experimental DTensor-style mesh simulation substrate.
+//!
+//! This module is deliberately separate from the core local `Tensor` type while
+//! the repo compares wrapper, tensor-native, and plan-first distributed
+//! semantics.
+
+pub mod harness;
+#+end_src
+
+- [ ] Add ~src/dtensor/harness.rs~ with the public types and reference runner:
+
+#+begin_src rust
+use crate::autograd::Engine;
+use crate::ops::{linear, loss};
+use crate::tensor::{Shape, Tensor};
+use crate::transformer::{TransformerBlock, TransformerConfig};
+
+pub struct TrainingStepScenario {
+    pub cfg: TransformerConfig,
+    pub vocab: usize,
+    pub targets: Vec<usize>,
+}
+
+pub struct TrainingStepReference {
+    pub loss: f32,
+    pub output_shape: Shape,
+    pub parameter_grad_shapes: Vec<Shape>,
+}
+
+impl TrainingStepScenario {
+    pub fn tiny_dense() -> Self {
+        let cfg = TransformerConfig {
+            batch: 2,
+            seq: 4,
+            d_model: 8,
+            d_ff: 16,
+            n_heads: 1,
+        };
+        let vocab = 11;
+        let targets = (0..cfg.batch * cfg.seq).map(|i| i % vocab).collect();
+        Self { cfg, vocab, targets }
+    }
+
+    pub fn run_unsharded_reference(&self) -> TrainingStepReference {
+        let mut engine = Engine::new();
+        let block = TransformerBlock::new(TransformerConfig {
+            batch: self.cfg.batch,
+            seq: self.cfg.seq,
+            d_model: self.cfg.d_model,
+            d_ff: self.cfg.d_ff,
+            n_heads: self.cfg.n_heads,
+        });
+        let x = Tensor::randn_scaled(
+            &[self.cfg.batch, self.cfg.seq, self.cfg.d_model],
+            0.02,
+        )
+        .requires_grad();
+        let logits_w = Tensor::randn_scaled(&[self.cfg.d_model, self.vocab], 0.02)
+            .requires_grad();
+
+        let hidden = block.forward(&x);
+        let logits = linear::linear(&hidden, &logits_w, "mesh_sim_logits");
+        let loss = loss::cross_entropy(&logits, &self.targets, "mesh_sim_loss");
+        engine.backward(&loss);
+
+        let mut parameter_grad_shapes: Vec<Shape> = block
+            .parameters()
+            .into_iter()
+            .filter_map(|p| p.grad().map(|g| g.shape))
+            .collect();
+        parameter_grad_shapes.push(logits_w.grad().expect("logits grad").shape);
+
+        TrainingStepReference {
+            loss: loss.inner.borrow().value.data[0],
+            output_shape: hidden.shape(),
+            parameter_grad_shapes,
+        }
+    }
+}
+#+end_src
+
+- [ ] Add ~tests/mesh_sim_test.rs~:
+
+#+begin_src rust
+use tnsr::dtensor::harness::TrainingStepScenario;
+
+#[test]
+fn unsharded_reference_training_step_is_deterministic_shape_wise() {
+    let scenario = TrainingStepScenario::tiny_dense();
+    let reference = scenario.run_unsharded_reference();
+
+    assert!(reference.loss.is_finite());
+    assert_eq!(reference.output_shape.0, vec![2, 4, 8]);
+    assert_eq!(reference.parameter_grad_shapes.len(), 11);
+    assert!(reference
+        .parameter_grad_shapes
+        .iter()
+        .all(|shape| shape.numel() > 0));
+}
+#+end_src
+
+- [ ] Update ~BUILD.bazel~. Insert the two source paths in ~_TNSR_SRCS~ after
+  ~"src/debug.rs",~ so the local block starts like this:
+
+#+begin_src python
+_TNSR_SRCS = [
+    "src/lib.rs",
+    "src/autograd.rs",
+    "src/checkpoint.rs",
+    "src/cuda_ffi.rs",
+    "src/debug.rs",
+    "src/dtensor/mod.rs",
+    "src/dtensor/harness.rs",
+    "src/grad_mode.rs",
+]
+#+end_src
+
+Add this test target near the other ~rust_test~ entries:
+
+#+begin_src python
+rust_test(
+    name = "mesh_sim_tests",
+    srcs = ["tests/mesh_sim_test.rs"],
+    crate_name = "mesh_sim_test",
+    edition = "2021",
+    deps = [":tnsr"],
+)
+#+end_src
+
+The final ~_TNSR_SRCS~ list must still include every pre-existing source path.
+
+- [ ] Run the focused test and verify it passes:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+- [ ] Run the existing library test:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+- [ ] Update ticket status only after tests pass:
+
+#+begin_src org
+#+STATUS: ready-for-agent
+#+end_src
+
+Keep Ticket 1 as ~ready-for-agent~ until the implementing branch is reviewed;
+do not mark it resolved during implementation without review.
+
+* Task 2: 5D mesh semantics
+
+** Files
+
+- Modify: ~ferric_continuum/tnsr/BUILD.bazel~
+- Modify: ~ferric_continuum/tnsr/src/dtensor/mod.rs~
+- Create: ~ferric_continuum/tnsr/src/dtensor/mesh.rs~
+- Modify: ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+
+** Interfaces
+
+Consumes:
+
+- No task-local dependencies beyond the module skeleton.
+
+Produces:
+
+#+begin_src rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MeshAxis {
+    Pp,
+    DpReplicate,
+    DpShard,
+    Cp,
+    Tp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParallelDims5D {
+    pub pp: usize,
+    pub dp_replicate: usize,
+    pub dp_shard: usize,
+    pub cp: usize,
+    pub tp: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RankCoord5D {
+    pub pp: usize,
+    pub dp_replicate: usize,
+    pub dp_shard: usize,
+    pub cp: usize,
+    pub tp: usize,
+}
+
+impl ParallelDims5D {
+    pub fn new(pp: usize, dp_replicate: usize, dp_shard: usize, cp: usize, tp: usize) -> Self;
+    pub fn world_size(self) -> usize;
+    pub fn validate_world_size(self, world_size: usize) -> Result<(), MeshError>;
+    pub fn axis_size(self, axis: MeshAxis) -> usize;
+    pub fn batch_size(self) -> usize;
+    pub fn loss_size(self) -> usize;
+    pub fn fsdp_size(self) -> usize;
+    pub fn coord(self, rank: usize) -> Result<RankCoord5D, MeshError>;
+}
+#+end_src
+
+** Steps
+
+- [ ] Add ~pub mod mesh;~ and re-exports in ~dtensor/mod.rs~:
+
+#+begin_src rust
+pub mod harness;
+pub mod mesh;
+
+pub use mesh::{MeshAxis, MeshError, ParallelDims5D, RankCoord5D};
+#+end_src
+
+- [ ] Add ~src/dtensor/mesh.rs~:
+
+#+begin_src rust
+use std::fmt;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MeshAxis {
+    Pp,
+    DpReplicate,
+    DpShard,
+    Cp,
+    Tp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MeshError {
+    ZeroAxis { axis: MeshAxis },
+    WorldSizeMismatch { expected: usize, got: usize },
+    RankOutOfRange { rank: usize, world_size: usize },
+}
+
+impl fmt::Display for MeshError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MeshError::ZeroAxis { axis } => write!(f, "mesh axis {axis:?} must be >= 1"),
+            MeshError::WorldSizeMismatch { expected, got } => {
+                write!(f, "world size mismatch: expected {expected}, got {got}")
+            }
+            MeshError::RankOutOfRange { rank, world_size } => {
+                write!(f, "rank {rank} out of range for world size {world_size}")
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParallelDims5D {
+    pub pp: usize,
+    pub dp_replicate: usize,
+    pub dp_shard: usize,
+    pub cp: usize,
+    pub tp: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RankCoord5D {
+    pub pp: usize,
+    pub dp_replicate: usize,
+    pub dp_shard: usize,
+    pub cp: usize,
+    pub tp: usize,
+}
+
+impl ParallelDims5D {
+    pub fn new(pp: usize, dp_replicate: usize, dp_shard: usize, cp: usize, tp: usize) -> Self {
+        for (axis, size) in [
+            (MeshAxis::Pp, pp),
+            (MeshAxis::DpReplicate, dp_replicate),
+            (MeshAxis::DpShard, dp_shard),
+            (MeshAxis::Cp, cp),
+            (MeshAxis::Tp, tp),
+        ] {
+            assert!(size >= 1, "mesh axis {axis:?} must be >= 1");
+        }
+        Self {
+            pp,
+            dp_replicate,
+            dp_shard,
+            cp,
+            tp,
+        }
+    }
+
+    pub fn world_size(self) -> usize {
+        self.pp * self.dp_replicate * self.dp_shard * self.cp * self.tp
+    }
+
+    pub fn validate_world_size(self, world_size: usize) -> Result<(), MeshError> {
+        let expected = self.world_size();
+        if expected == world_size {
+            Ok(())
+        } else {
+            Err(MeshError::WorldSizeMismatch {
+                expected,
+                got: world_size,
+            })
+        }
+    }
+
+    pub fn axis_size(self, axis: MeshAxis) -> usize {
+        match axis {
+            MeshAxis::Pp => self.pp,
+            MeshAxis::DpReplicate => self.dp_replicate,
+            MeshAxis::DpShard => self.dp_shard,
+            MeshAxis::Cp => self.cp,
+            MeshAxis::Tp => self.tp,
+        }
+    }
+
+    pub fn batch_size(self) -> usize {
+        self.dp_replicate * self.dp_shard
+    }
+
+    pub fn loss_size(self) -> usize {
+        self.dp_replicate * self.dp_shard * self.cp
+    }
+
+    pub fn fsdp_size(self) -> usize {
+        self.dp_shard * self.cp
+    }
+
+    pub fn coord(self, rank: usize) -> Result<RankCoord5D, MeshError> {
+        let world_size = self.world_size();
+        if rank >= world_size {
+            return Err(MeshError::RankOutOfRange { rank, world_size });
+        }
+        let mut r = rank;
+        let tp = r % self.tp;
+        r /= self.tp;
+        let cp = r % self.cp;
+        r /= self.cp;
+        let dp_shard = r % self.dp_shard;
+        r /= self.dp_shard;
+        let dp_replicate = r % self.dp_replicate;
+        r /= self.dp_replicate;
+        let pp = r % self.pp;
+        Ok(RankCoord5D {
+            pp,
+            dp_replicate,
+            dp_shard,
+            cp,
+            tp,
+        })
+    }
+}
+#+end_src
+
+- [ ] Add tests to ~mesh_sim_test.rs~:
+
+#+begin_src rust
+use tnsr::dtensor::{MeshAxis, MeshError, ParallelDims5D, RankCoord5D};
+
+#[test]
+fn parallel_dims_validate_torchtitan_dense_product() {
+    let dims = ParallelDims5D::new(2, 2, 3, 4, 5);
+    assert_eq!(dims.world_size(), 240);
+    assert_eq!(dims.batch_size(), 6);
+    assert_eq!(dims.loss_size(), 24);
+    assert_eq!(dims.fsdp_size(), 12);
+    assert_eq!(dims.axis_size(MeshAxis::DpShard), 3);
+    assert_eq!(dims.validate_world_size(240), Ok(()));
+    assert_eq!(
+        dims.validate_world_size(241),
+        Err(MeshError::WorldSizeMismatch {
+            expected: 240,
+            got: 241
+        })
+    );
+}
+
+#[test]
+fn parallel_dims_coords_are_row_major_with_tp_fastest() {
+    let dims = ParallelDims5D::new(2, 2, 2, 2, 2);
+    assert_eq!(
+        dims.coord(0).unwrap(),
+        RankCoord5D {
+            pp: 0,
+            dp_replicate: 0,
+            dp_shard: 0,
+            cp: 0,
+            tp: 0
+        }
+    );
+    assert_eq!(
+        dims.coord(31).unwrap(),
+        RankCoord5D {
+            pp: 1,
+            dp_replicate: 1,
+            dp_shard: 1,
+            cp: 1,
+            tp: 1
+        }
+    );
+    assert_eq!(
+        dims.coord(32),
+        Err(MeshError::RankOutOfRange {
+            rank: 32,
+            world_size: 32
+        })
+    );
+}
+#+end_src
+
+- [ ] Add ~src/dtensor/mesh.rs~ to ~_TNSR_SRCS~.
+
+- [ ] Run:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+* Task 3: Layout and shard mapping
+
+** Files
+
+- Modify: ~ferric_continuum/tnsr/BUILD.bazel~
+- Modify: ~ferric_continuum/tnsr/src/dtensor/mod.rs~
+- Create: ~ferric_continuum/tnsr/src/dtensor/layout.rs~
+- Create: ~ferric_continuum/tnsr/src/dtensor/shard_map.rs~
+- Modify: ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+
+** Interfaces
+
+Consumes:
+
+- ~MeshAxis~
+- ~ParallelDims5D~
+- ~Shape~
+- ~TensorValue~
+
+Produces:
+
+#+begin_src rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReduceOp { Sum }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placement {
+    Replicate,
+    Shard(usize),
+    Partial(ReduceOp),
+    Local,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Layout {
+    pub axes: Vec<(MeshAxis, Placement)>,
+}
+
+impl Layout {
+    pub fn new(axes: Vec<(MeshAxis, Placement)>) -> Result<Self, LayoutError>;
+    pub fn placement(&self, axis: MeshAxis) -> Option<Placement>;
+}
+
+pub struct ShardMap {
+    pub global_shape: Shape,
+    pub layout: Layout,
+    pub dims: ParallelDims5D,
+}
+
+impl ShardMap {
+    pub fn new(global_shape: Shape, layout: Layout, dims: ParallelDims5D) -> Result<Self, ShardError>;
+    pub fn local_shape_for_rank(&self, rank: usize) -> Result<Shape, ShardError>;
+    pub fn shard_tensor_for_rank(&self, value: &TensorValue, rank: usize) -> Result<TensorValue, ShardError>;
+    pub fn reconstruct_from_rank_shards(&self, shards: &[TensorValue]) -> Result<TensorValue, ShardError>;
+}
+#+end_src
+
+** Steps
+
+- [ ] Add modules and re-exports in ~dtensor/mod.rs~:
+
+#+begin_src rust
+pub mod layout;
+pub mod shard_map;
+
+pub use layout::{Layout, LayoutError, Placement, ReduceOp};
+pub use shard_map::{ShardError, ShardMap};
+#+end_src
+
+- [ ] Add ~layout.rs~:
+
+#+begin_src rust
+use std::collections::HashSet;
+
+use super::mesh::MeshAxis;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReduceOp {
+    Sum,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placement {
+    Replicate,
+    Shard(usize),
+    Partial(ReduceOp),
+    Local,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LayoutError {
+    DuplicateAxis(MeshAxis),
+    LocalMixedWithDistributed,
+    DuplicateShardDim(usize),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Layout {
+    pub axes: Vec<(MeshAxis, Placement)>,
+}
+
+impl Layout {
+    pub fn new(axes: Vec<(MeshAxis, Placement)>) -> Result<Self, LayoutError> {
+        let mut seen_axes = HashSet::new();
+        let mut seen_shard_dims = HashSet::new();
+        let mut has_local = false;
+        let mut has_distributed = false;
+        for (axis, placement) in &axes {
+            if !seen_axes.insert(*axis) {
+                return Err(LayoutError::DuplicateAxis(*axis));
+            }
+            match placement {
+                Placement::Local => has_local = true,
+                Placement::Shard(dim) => {
+                    has_distributed = true;
+                    if !seen_shard_dims.insert(*dim) {
+                        return Err(LayoutError::DuplicateShardDim(*dim));
+                    }
+                }
+                Placement::Replicate | Placement::Partial(ReduceOp::Sum) => {
+                    has_distributed = true;
+                }
+            }
+        }
+        if has_local && has_distributed {
+            return Err(LayoutError::LocalMixedWithDistributed);
+        }
+        Ok(Self { axes })
+    }
+
+    pub fn placement(&self, axis: MeshAxis) -> Option<Placement> {
+        self.axes
+            .iter()
+            .find_map(|(a, p)| if *a == axis { Some(*p) } else { None })
+    }
+}
+#+end_src
+
+- [ ] Add ~shard_map.rs~. Implement only single-shard-dimension mapping in this
+  task; reject multiple shard axes clearly:
+
+#+begin_src rust
+use crate::tensor::{Shape, TensorValue};
+
+use super::layout::{Layout, Placement};
+use super::mesh::{MeshAxis, MeshError, ParallelDims5D};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShardError {
+    Mesh(MeshError),
+    MultipleShardAxesUnsupported,
+    ShardDimOutOfRange { dim: usize, rank: usize },
+    UnevenShard { dim: usize, size: usize, parts: usize },
+    ShapeMismatch { expected: Shape, got: Shape },
+    RankShardCountMismatch { expected: usize, got: usize },
+}
+
+#[derive(Debug, Clone)]
+pub struct ShardMap {
+    pub global_shape: Shape,
+    pub layout: Layout,
+    pub dims: ParallelDims5D,
+}
+
+impl ShardMap {
+    pub fn new(global_shape: Shape, layout: Layout, dims: ParallelDims5D) -> Result<Self, ShardError> {
+        if shard_axes(&layout).len() > 1 {
+            return Err(ShardError::MultipleShardAxesUnsupported);
+        }
+        Ok(Self {
+            global_shape,
+            layout,
+            dims,
+        })
+    }
+
+    pub fn local_shape_for_rank(&self, rank: usize) -> Result<Shape, ShardError> {
+        let mut shape = self.global_shape.clone();
+        if let Some((axis, dim)) = single_shard_axis(&self.layout) {
+            self.dims.coord(rank).map_err(ShardError::Mesh)?;
+            if dim >= shape.0.len() {
+                return Err(ShardError::ShardDimOutOfRange { dim, rank });
+            }
+            let parts = self.dims.axis_size(axis);
+            let size = shape.0[dim];
+            if size % parts != 0 {
+                return Err(ShardError::UnevenShard { dim, size, parts });
+            }
+            shape.0[dim] = size / parts;
+        }
+        Ok(shape)
+    }
+
+    pub fn shard_tensor_for_rank(&self, value: &TensorValue, rank: usize) -> Result<TensorValue, ShardError> {
+        if value.shape != self.global_shape {
+            return Err(ShardError::ShapeMismatch {
+                expected: self.global_shape.clone(),
+                got: value.shape.clone(),
+            });
+        }
+        if let Some((axis, dim)) = single_shard_axis(&self.layout) {
+            let coord = self.dims.coord(rank).map_err(ShardError::Mesh)?;
+            let axis_index = coord_axis(coord, axis);
+            contiguous_slice_along_dim(value, dim, axis_index, self.dims.axis_size(axis))
+        } else {
+            Ok(value.clone())
+        }
+    }
+
+    pub fn reconstruct_from_rank_shards(&self, shards: &[TensorValue]) -> Result<TensorValue, ShardError> {
+        let world = self.dims.world_size();
+        if shards.len() != world {
+            return Err(ShardError::RankShardCountMismatch {
+                expected: world,
+                got: shards.len(),
+            });
+        }
+        if let Some((axis, dim)) = single_shard_axis(&self.layout) {
+            let parts = self.dims.axis_size(axis);
+            let mut selected = Vec::with_capacity(parts);
+            for part in 0..parts {
+                let rank = (0..world)
+                    .find(|rank| self.dims.coord(*rank).ok().map(|c| coord_axis(c, axis)) == Some(part))
+                    .expect("part rank exists");
+                selected.push(shards[rank].clone());
+            }
+            concat_along_dim(&selected, dim, self.global_shape.clone())
+        } else {
+            Ok(shards[0].clone())
+        }
+    }
+}
+
+fn shard_axes(layout: &Layout) -> Vec<(MeshAxis, usize)> {
+    layout
+        .axes
+        .iter()
+        .filter_map(|(axis, placement)| match placement {
+            Placement::Shard(dim) => Some((*axis, *dim)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn single_shard_axis(layout: &Layout) -> Option<(MeshAxis, usize)> {
+    shard_axes(layout).into_iter().next()
+}
+
+fn coord_axis(coord: super::mesh::RankCoord5D, axis: MeshAxis) -> usize {
+    match axis {
+        MeshAxis::Pp => coord.pp,
+        MeshAxis::DpReplicate => coord.dp_replicate,
+        MeshAxis::DpShard => coord.dp_shard,
+        MeshAxis::Cp => coord.cp,
+        MeshAxis::Tp => coord.tp,
+    }
+}
+
+fn contiguous_slice_along_dim(
+    value: &TensorValue,
+    dim: usize,
+    part: usize,
+    parts: usize,
+) -> Result<TensorValue, ShardError> {
+    let mut local_shape = value.shape.clone();
+    let full = value.shape.0[dim];
+    if full % parts != 0 {
+        return Err(ShardError::UnevenShard { dim, size: full, parts });
+    }
+    let chunk = full / parts;
+    local_shape.0[dim] = chunk;
+    let outer: usize = value.shape.0[..dim].iter().product();
+    let inner: usize = value.shape.0[dim + 1..].iter().product();
+    let mut out = Vec::with_capacity(local_shape.numel());
+    let data = value.data.as_ref();
+    for outer_i in 0..outer {
+        let row_base = outer_i * full * inner;
+        let start = row_base + part * chunk * inner;
+        let end = start + chunk * inner;
+        out.extend_from_slice(&data[start..end]);
+    }
+    Ok(TensorValue::from_vec(local_shape, out))
+}
+
+fn concat_along_dim(
+    shards: &[TensorValue],
+    dim: usize,
+    global_shape: Shape,
+) -> Result<TensorValue, ShardError> {
+    let parts = shards.len();
+    let chunk = shards[0].shape.0[dim];
+    let outer: usize = global_shape.0[..dim].iter().product();
+    let inner: usize = global_shape.0[dim + 1..].iter().product();
+    let mut out = vec![0.0f32; global_shape.numel()];
+    for (part, shard) in shards.iter().enumerate() {
+        for outer_i in 0..outer {
+            let dst_base = outer_i * global_shape.0[dim] * inner + part * chunk * inner;
+            let src_base = outer_i * chunk * inner;
+            out[dst_base..dst_base + chunk * inner]
+                .copy_from_slice(&shard.data[src_base..src_base + chunk * inner]);
+        }
+    }
+    debug_assert_eq!(parts * chunk, global_shape.0[dim]);
+    Ok(TensorValue::from_vec(global_shape, out))
+}
+#+end_src
+
+- [ ] Add tests:
+
+#+begin_src rust
+use tnsr::dtensor::{Layout, Placement, ShardMap};
+use tnsr::tensor::{Shape, TensorValue};
+
+#[test]
+fn shard_map_slices_and_reconstructs_divisible_tensor() {
+    let dims = ParallelDims5D::new(1, 1, 1, 1, 2);
+    let layout = Layout::new(vec![(MeshAxis::Tp, Placement::Shard(1))]).unwrap();
+    let value = TensorValue::from_vec(
+        Shape(vec![2, 4]),
+        vec![0.0, 1.0, 2.0, 3.0, 10.0, 11.0, 12.0, 13.0],
+    );
+    let map = ShardMap::new(value.shape.clone(), layout, dims).unwrap();
+
+    assert_eq!(map.local_shape_for_rank(0).unwrap(), Shape(vec![2, 2]));
+    let shards: Vec<_> = (0..dims.world_size())
+        .map(|rank| map.shard_tensor_for_rank(&value, rank).unwrap())
+        .collect();
+    assert_eq!(shards[0].data.as_ref(), &vec![0.0, 1.0, 10.0, 11.0]);
+    assert_eq!(shards[1].data.as_ref(), &vec![2.0, 3.0, 12.0, 13.0]);
+
+    let reconstructed = map.reconstruct_from_rank_shards(&shards).unwrap();
+    assert_eq!(reconstructed.shape, value.shape);
+    assert_eq!(reconstructed.data.as_ref(), value.data.as_ref());
+}
+
+#[test]
+fn layout_rejects_ambiguous_duplicate_shard_dim() {
+    assert!(Layout::new(vec![
+        (MeshAxis::Tp, Placement::Shard(1)),
+        (MeshAxis::Cp, Placement::Shard(1)),
+    ])
+    .is_err());
+}
+#+end_src
+
+- [ ] Add the new source files to ~_TNSR_SRCS~.
+
+- [ ] Run:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+* Task 4: Trace event schema
+
+** Files
+
+- Modify: ~ferric_continuum/tnsr/BUILD.bazel~
+- Modify: ~ferric_continuum/tnsr/src/dtensor/mod.rs~
+- Create: ~ferric_continuum/tnsr/src/dtensor/trace.rs~
+- Modify: ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+
+** Interfaces
+
+Consumes:
+
+- ~MeshAxis~
+- ~Placement~
+- ~Shape~
+
+Produces:
+
+#+begin_src rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrainingPhase { Forward, Loss, Backward, Optimizer }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CollectiveKind { AllReduce, AllGather, ReduceScatter, Broadcast }
+
+pub struct MeshTrace { pub schema: &'static str, pub events: Vec<MeshTraceEvent> }
+
+pub enum MeshTraceEvent {
+    LayoutTransition { phase: TrainingPhase, tensor: String, src: String, dst: String },
+    Collective { phase: TrainingPhase, kind: CollectiveKind, axis: MeshAxis, bytes: u64, ranks: Vec<usize> },
+    Injection { phase: TrainingPhase, label: String, rank: usize },
+    Failure(FailureRecord),
+}
+
+pub struct FailureRecord {
+    pub phase: TrainingPhase,
+    pub message: String,
+    pub rank: Option<usize>,
+    pub axis: Option<MeshAxis>,
+    pub tensor: Option<String>,
+    pub collective: Option<CollectiveKind>,
+}
+#+end_src
+
+** Steps
+
+- [ ] Add ~trace.rs~ with the types and helper methods:
+
+#+begin_src rust
+use super::layout::Placement;
+use super::mesh::MeshAxis;
+
+pub const MESH_SIM_TRACE_SCHEMA: &str = "tnsr.mesh_sim_trace.v0";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrainingPhase {
+    Forward,
+    Loss,
+    Backward,
+    Optimizer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CollectiveKind {
+    AllReduce,
+    AllGather,
+    ReduceScatter,
+    Broadcast,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeshTrace {
+    pub schema: &'static str,
+    pub events: Vec<MeshTraceEvent>,
+}
+
+impl Default for MeshTrace {
+    fn default() -> Self {
+        Self {
+            schema: MESH_SIM_TRACE_SCHEMA,
+            events: Vec::new(),
+        }
+    }
+}
+
+impl MeshTrace {
+    pub fn record(&mut self, event: MeshTraceEvent) {
+        self.events.push(event);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MeshTraceEvent {
+    LayoutTransition {
+        phase: TrainingPhase,
+        tensor: String,
+        src: String,
+        dst: String,
+    },
+    Collective {
+        phase: TrainingPhase,
+        kind: CollectiveKind,
+        axis: MeshAxis,
+        bytes: u64,
+        ranks: Vec<usize>,
+    },
+    Injection {
+        phase: TrainingPhase,
+        label: String,
+        rank: usize,
+    },
+    Failure(FailureRecord),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FailureRecord {
+    pub phase: TrainingPhase,
+    pub message: String,
+    pub rank: Option<usize>,
+    pub axis: Option<MeshAxis>,
+    pub tensor: Option<String>,
+    pub collective: Option<CollectiveKind>,
+}
+
+pub fn placement_label(placement: Placement) -> String {
+    match placement {
+        Placement::Replicate => "Replicate".to_string(),
+        Placement::Shard(dim) => format!("Shard({dim})"),
+        Placement::Partial(_) => "Partial(sum)".to_string(),
+        Placement::Local => "Local".to_string(),
+    }
+}
+#+end_src
+
+- [ ] Re-export trace types from ~dtensor/mod.rs~.
+
+- [ ] Add ~trace.rs~ to ~_TNSR_SRCS~.
+
+- [ ] Add tests:
+
+#+begin_src rust
+use tnsr::dtensor::{
+    CollectiveKind, MeshTrace, MeshTraceEvent, TrainingPhase, MESH_SIM_TRACE_SCHEMA,
+};
+
+#[test]
+fn mesh_trace_schema_and_events_are_stable() {
+    let mut trace = MeshTrace::default();
+    trace.record(MeshTraceEvent::Collective {
+        phase: TrainingPhase::Backward,
+        kind: CollectiveKind::AllReduce,
+        axis: MeshAxis::DpReplicate,
+        bytes: 128,
+        ranks: vec![0, 1],
+    });
+
+    assert_eq!(trace.schema, MESH_SIM_TRACE_SCHEMA);
+    assert_eq!(trace.events.len(), 1);
+    assert_eq!(
+        trace.events[0],
+        MeshTraceEvent::Collective {
+            phase: TrainingPhase::Backward,
+            kind: CollectiveKind::AllReduce,
+            axis: MeshAxis::DpReplicate,
+            bytes: 128,
+            ranks: vec![0, 1]
+        }
+    );
+}
+#+end_src
+
+- [ ] Run:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+* Task 5: Collective simulator
+
+** Files
+
+- Modify: ~ferric_continuum/tnsr/BUILD.bazel~
+- Modify: ~ferric_continuum/tnsr/src/dtensor/mod.rs~
+- Create: ~ferric_continuum/tnsr/src/dtensor/collective.rs~
+- Modify: ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+
+** Interfaces
+
+Consumes:
+
+- ~ParallelDims5D~
+- ~MeshAxis~
+- ~MeshTrace~
+- ~CollectiveKind~
+- ~TrainingPhase~
+- ~TensorValue~
+
+Produces:
+
+#+begin_src rust
+pub struct CollectiveSimulator {
+    pub dims: ParallelDims5D,
+    pub trace: MeshTrace,
+}
+
+impl CollectiveSimulator {
+    pub fn new(dims: ParallelDims5D) -> Self;
+    pub fn all_reduce_sum(
+        &mut self,
+        axis: MeshAxis,
+        phase: TrainingPhase,
+        shards: &[TensorValue],
+    ) -> Result<Vec<TensorValue>, CollectiveError>;
+    pub fn all_gather(
+        &mut self,
+        axis: MeshAxis,
+        phase: TrainingPhase,
+        shards: &[TensorValue],
+    ) -> Result<Vec<TensorValue>, CollectiveError>;
+}
+#+end_src
+
+** Steps
+
+- [ ] Add ~collective.rs~:
+
+#+begin_src rust
+use crate::tensor::{Shape, TensorValue};
+
+use super::mesh::{MeshAxis, ParallelDims5D};
+use super::trace::{CollectiveKind, MeshTrace, MeshTraceEvent, TrainingPhase};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CollectiveError {
+    EmptyInput,
+    ShapeMismatch { expected: Shape, got: Shape },
+    RankCountMismatch { expected: usize, got: usize },
+    RankGroupShapeMismatch { rank: usize, expected: Shape, got: Shape },
+}
+
+pub struct CollectiveSimulator {
+    pub dims: ParallelDims5D,
+    pub trace: MeshTrace,
+}
+
+impl CollectiveSimulator {
+    pub fn new(dims: ParallelDims5D) -> Self {
+        Self {
+            dims,
+            trace: MeshTrace::default(),
+        }
+    }
+
+    pub fn all_reduce_sum(
+        &mut self,
+        axis: MeshAxis,
+        phase: TrainingPhase,
+        shards: &[TensorValue],
+    ) -> Result<Vec<TensorValue>, CollectiveError> {
+        validate_rank_values(self.dims, shards)?;
+        let shape = shards[0].shape.clone();
+        for shard in shards {
+            if shard.shape != shape {
+                return Err(CollectiveError::ShapeMismatch {
+                    expected: shape.clone(),
+                    got: shard.shape.clone(),
+                });
+            }
+        }
+        let groups = rank_groups_for_axis(self.dims, axis);
+        let mut out = shards.to_vec();
+        for group in &groups {
+            let mut sum = vec![0.0f32; shape.numel()];
+            for &rank in group {
+                for (dst, src) in sum.iter_mut().zip(shards[rank].data.iter()) {
+                    *dst += *src;
+                }
+            }
+            for &rank in group {
+                out[rank] = TensorValue::from_vec(shape.clone(), sum.clone());
+            }
+        }
+        self.trace.record(MeshTraceEvent::Collective {
+            phase,
+            kind: CollectiveKind::AllReduce,
+            axis,
+            bytes: collective_bytes(self.dims.axis_size(axis), shape.bytes_f32() as u64, 2),
+            ranks: groups.into_iter().flatten().collect(),
+        });
+        Ok(out)
+    }
+
+    pub fn all_gather(
+        &mut self,
+        axis: MeshAxis,
+        phase: TrainingPhase,
+        shards: &[TensorValue],
+    ) -> Result<Vec<TensorValue>, CollectiveError> {
+        validate_rank_values(self.dims, shards)?;
+        let shape = shards[0].shape.clone();
+        for shard in shards {
+            if shard.shape != shape {
+                return Err(CollectiveError::ShapeMismatch {
+                    expected: shape.clone(),
+                    got: shard.shape.clone(),
+                });
+            }
+        }
+        let groups = rank_groups_for_axis(self.dims, axis);
+        let mut out = shards.to_vec();
+        for group in &groups {
+            let mut gathered = Vec::with_capacity(shape.numel() * group.len());
+            for &rank in group {
+                gathered.extend_from_slice(shards[rank].data.as_ref());
+            }
+            let out_shape = Shape(vec![group.len(), shape.numel()]);
+            for &rank in group {
+                out[rank] = TensorValue::from_vec(out_shape.clone(), gathered.clone());
+            }
+        }
+        self.trace.record(MeshTraceEvent::Collective {
+            phase,
+            kind: CollectiveKind::AllGather,
+            axis,
+            bytes: collective_bytes(self.dims.axis_size(axis), shape.bytes_f32() as u64, 1),
+            ranks: groups.into_iter().flatten().collect(),
+        });
+        Ok(out)
+    }
+}
+
+fn validate_rank_values(dims: ParallelDims5D, shards: &[TensorValue]) -> Result<(), CollectiveError> {
+    if shards.is_empty() {
+        return Err(CollectiveError::EmptyInput);
+    }
+    if shards.len() != dims.world_size() {
+        return Err(CollectiveError::RankCountMismatch {
+            expected: dims.world_size(),
+            got: shards.len(),
+        });
+    }
+    Ok(())
+}
+
+fn rank_groups_for_axis(dims: ParallelDims5D, axis: MeshAxis) -> Vec<Vec<usize>> {
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    let mut used = vec![false; dims.world_size()];
+    for rank in 0..dims.world_size() {
+        if used[rank] {
+            continue;
+        }
+        let base = dims.coord(rank).expect("rank in range");
+        let mut group = Vec::new();
+        for candidate in 0..dims.world_size() {
+            let coord = dims.coord(candidate).expect("rank in range");
+            let same_other_axes = match axis {
+                MeshAxis::Pp => {
+                    coord.dp_replicate == base.dp_replicate
+                        && coord.dp_shard == base.dp_shard
+                        && coord.cp == base.cp
+                        && coord.tp == base.tp
+                }
+                MeshAxis::DpReplicate => {
+                    coord.pp == base.pp
+                        && coord.dp_shard == base.dp_shard
+                        && coord.cp == base.cp
+                        && coord.tp == base.tp
+                }
+                MeshAxis::DpShard => {
+                    coord.pp == base.pp
+                        && coord.dp_replicate == base.dp_replicate
+                        && coord.cp == base.cp
+                        && coord.tp == base.tp
+                }
+                MeshAxis::Cp => {
+                    coord.pp == base.pp
+                        && coord.dp_replicate == base.dp_replicate
+                        && coord.dp_shard == base.dp_shard
+                        && coord.tp == base.tp
+                }
+                MeshAxis::Tp => {
+                    coord.pp == base.pp
+                        && coord.dp_replicate == base.dp_replicate
+                        && coord.dp_shard == base.dp_shard
+                        && coord.cp == base.cp
+                }
+            };
+            if same_other_axes {
+                used[candidate] = true;
+                group.push(candidate);
+            }
+        }
+        groups.push(group);
+    }
+    groups
+}
+
+fn collective_bytes(axis_size: usize, logical_bytes: u64, multiplier: u64) -> u64 {
+    if axis_size <= 1 {
+        0
+    } else {
+        multiplier * (axis_size as u64 - 1) * logical_bytes / axis_size as u64
+    }
+}
+#+end_src
+
+- [ ] Re-export ~CollectiveSimulator~ and ~CollectiveError~.
+
+- [ ] Add tests:
+
+#+begin_src rust
+use tnsr::dtensor::{CollectiveSimulator, TrainingPhase};
+
+#[test]
+fn collective_all_reduce_sums_axis_groups_and_records_trace() {
+    let dims = ParallelDims5D::new(1, 2, 1, 1, 2);
+    let shards = vec![
+        TensorValue::from_vec(Shape(vec![2]), vec![1.0, 2.0]),
+        TensorValue::from_vec(Shape(vec![2]), vec![10.0, 20.0]),
+        TensorValue::from_vec(Shape(vec![2]), vec![100.0, 200.0]),
+        TensorValue::from_vec(Shape(vec![2]), vec![1000.0, 2000.0]),
+    ];
+    let mut sim = CollectiveSimulator::new(dims);
+    let out = sim
+        .all_reduce_sum(MeshAxis::DpReplicate, TrainingPhase::Backward, &shards)
+        .unwrap();
+
+    assert_eq!(out.len(), 4);
+    assert_eq!(out[0].data.as_ref(), &vec![101.0, 202.0]);
+    assert_eq!(out[1].data.as_ref(), &vec![1010.0, 2020.0]);
+    assert_eq!(out[2].data.as_ref(), &vec![101.0, 202.0]);
+    assert_eq!(out[3].data.as_ref(), &vec![1010.0, 2020.0]);
+    assert_eq!(sim.trace.events.len(), 1);
+}
+#+end_src
+
+- [ ] Add ~collective.rs~ to ~_TNSR_SRCS~ and run:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:mesh_sim_tests
+bazel test //ferric_continuum/tnsr:distributed_tests
+#+end_src
+
+* Task 6: Deterministic injection hooks
+
+** Files
+
+- Modify: ~ferric_continuum/tnsr/BUILD.bazel~
+- Modify: ~ferric_continuum/tnsr/src/dtensor/mod.rs~
+- Create: ~ferric_continuum/tnsr/src/dtensor/injection.rs~
+- Modify: ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+
+** Interfaces
+
+Consumes:
+
+- ~TrainingPhase~
+- ~MeshAxis~
+- ~CollectiveKind~
+- ~FailureRecord~
+- ~TensorValue~
+
+Produces:
+
+#+begin_src rust
+pub enum InjectionKind {
+    MissingParticipant,
+    CorruptShard { offset: usize, value: f32 },
+    DelayRankGroup,
+    MismatchedPlacement,
+    InjectNan { offset: usize },
+}
+
+pub struct InjectionEvent {
+    pub label: String,
+    pub phase: TrainingPhase,
+    pub rank: usize,
+    pub axis: Option<MeshAxis>,
+    pub kind: InjectionKind,
+}
+
+pub struct InjectionPlan { pub events: Vec<InjectionEvent> }
+
+impl InjectionPlan {
+    pub fn new(events: Vec<InjectionEvent>) -> Self;
+    pub fn events_for(&self, phase: TrainingPhase, rank: usize) -> impl Iterator<Item = &InjectionEvent>;
+    pub fn apply_to_shard(&self, phase: TrainingPhase, rank: usize, shard: &mut TensorValue) -> Vec<FailureRecord>;
+}
+#+end_src
+
+** Steps
+
+- [ ] Add ~injection.rs~:
+
+#+begin_src rust
+use crate::tensor::TensorValue;
+
+use super::mesh::MeshAxis;
+use super::trace::{CollectiveKind, FailureRecord, TrainingPhase};
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum InjectionKind {
+    MissingParticipant,
+    CorruptShard { offset: usize, value: f32 },
+    DelayRankGroup,
+    MismatchedPlacement,
+    InjectNan { offset: usize },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InjectionEvent {
+    pub label: String,
+    pub phase: TrainingPhase,
+    pub rank: usize,
+    pub axis: Option<MeshAxis>,
+    pub kind: InjectionKind,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InjectionPlan {
+    pub events: Vec<InjectionEvent>,
+}
+
+impl InjectionPlan {
+    pub fn new(events: Vec<InjectionEvent>) -> Self {
+        Self { events }
+    }
+
+    pub fn matching_events(&self, phase: TrainingPhase, rank: usize) -> Vec<&InjectionEvent> {
+        self.events
+            .iter()
+            .filter(|event| event.phase == phase && event.rank == rank)
+            .collect()
+    }
+
+    pub fn apply_to_shard(
+        &self,
+        phase: TrainingPhase,
+        rank: usize,
+        shard: &mut TensorValue,
+    ) -> Vec<FailureRecord> {
+        let mut failures = Vec::new();
+        for event in self.matching_events(phase, rank) {
+            match event.kind {
+                InjectionKind::CorruptShard { offset, value } => {
+                    if offset < shard.data.len() {
+                        shard.data_mut()[offset] = value;
+                    }
+                }
+                InjectionKind::InjectNan { offset } => {
+                    if offset < shard.data.len() {
+                        shard.data_mut()[offset] = f32::NAN;
+                    }
+                }
+                InjectionKind::MissingParticipant
+                | InjectionKind::DelayRankGroup
+                | InjectionKind::MismatchedPlacement => failures.push(FailureRecord {
+                    phase,
+                    message: event.label.clone(),
+                    rank: Some(rank),
+                    axis: event.axis,
+                    tensor: None,
+                    collective: Some(CollectiveKind::AllReduce),
+                }),
+            }
+        }
+        failures
+    }
+}
+#+end_src
+
+- [ ] Re-export injection types.
+
+- [ ] Add tests:
+
+#+begin_src rust
+use tnsr::dtensor::{InjectionEvent, InjectionKind, InjectionPlan};
+
+#[test]
+fn injection_plan_corrupts_and_reports_deterministically() {
+    let plan = InjectionPlan::new(vec![
+        InjectionEvent {
+            label: "rank0_nan".to_string(),
+            phase: TrainingPhase::Backward,
+            rank: 0,
+            axis: Some(MeshAxis::DpReplicate),
+            kind: InjectionKind::InjectNan { offset: 1 },
+        },
+        InjectionEvent {
+            label: "rank0_missing".to_string(),
+            phase: TrainingPhase::Backward,
+            rank: 0,
+            axis: Some(MeshAxis::DpReplicate),
+            kind: InjectionKind::MissingParticipant,
+        },
+    ]);
+    let mut shard = TensorValue::from_vec(Shape(vec![2]), vec![1.0, 2.0]);
+    let failures = plan.apply_to_shard(TrainingPhase::Backward, 0, &mut shard);
+
+    assert!(shard.data[1].is_nan());
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].rank, Some(0));
+    assert_eq!(failures[0].axis, Some(MeshAxis::DpReplicate));
+}
+#+end_src
+
+- [ ] Add ~injection.rs~ to ~_TNSR_SRCS~ and run:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+* Task 7: Harness-to-simulator smoke path and ticket updates
+
+** Files
+
+- Modify: ~ferric_continuum/tnsr/src/dtensor/harness.rs~
+- Modify: ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+- Modify: ~.scratch/dtensor-mesh-simulation/issues/01-baseline-harness-and-reference.org~
+- Modify: ~.scratch/dtensor-mesh-simulation/issues/02-common-mesh-layout-semantics.org~
+- Modify: ~.scratch/dtensor-mesh-simulation/issues/03-collective-simulator-trace-injection.org~
+
+** Interfaces
+
+Consumes:
+
+- ~TrainingStepScenario~
+- ~ParallelDims5D~
+- ~Layout~
+- ~ShardMap~
+- ~CollectiveSimulator~
+- ~InjectionPlan~
+
+Produces:
+
+#+begin_src rust
+pub struct HarnessSmokeReport {
+    pub reference_loss: f32,
+    pub world_size: usize,
+    pub trace_events: usize,
+    pub failures: usize,
+}
+
+impl TrainingStepScenario {
+    pub fn run_common_substrate_smoke(
+        &self,
+        dims: ParallelDims5D,
+        injection_plan: Option<&InjectionPlan>,
+    ) -> HarnessSmokeReport;
+}
+#+end_src
+
+** Steps
+
+- [ ] Extend ~harness.rs~ with a smoke report that proves the common substrate
+  can connect reference training, mesh semantics, collectives, and injection:
+
+#+begin_src rust
+use super::{
+    CollectiveSimulator, InjectionPlan, Layout, MeshAxis, ParallelDims5D, Placement,
+    ShardMap, TrainingPhase,
+};
+
+pub struct HarnessSmokeReport {
+    pub reference_loss: f32,
+    pub world_size: usize,
+    pub trace_events: usize,
+    pub failures: usize,
+}
+
+impl TrainingStepScenario {
+    pub fn run_common_substrate_smoke(
+        &self,
+        dims: ParallelDims5D,
+        injection_plan: Option<&InjectionPlan>,
+    ) -> HarnessSmokeReport {
+        let reference = self.run_unsharded_reference();
+        let global = crate::tensor::TensorValue::from_vec(
+            crate::tensor::Shape(vec![self.cfg.batch, self.cfg.seq, self.cfg.d_model]),
+            vec![1.0; self.cfg.batch * self.cfg.seq * self.cfg.d_model],
+        );
+        let layout = Layout::new(vec![(MeshAxis::Tp, Placement::Shard(2))]).unwrap();
+        let shard_map = ShardMap::new(global.shape.clone(), layout, dims).unwrap();
+        let mut shards: Vec<_> = (0..dims.world_size())
+            .map(|rank| shard_map.shard_tensor_for_rank(&global, rank).unwrap())
+            .collect();
+
+        let mut failures = 0usize;
+        if let Some(plan) = injection_plan {
+            for (rank, shard) in shards.iter_mut().enumerate() {
+                failures += plan
+                    .apply_to_shard(TrainingPhase::Backward, rank, shard)
+                    .len();
+            }
+        }
+
+        let mut simulator = CollectiveSimulator::new(dims);
+        let _ = simulator
+            .all_reduce_sum(MeshAxis::DpReplicate, TrainingPhase::Backward, &shards)
+            .unwrap();
+
+        HarnessSmokeReport {
+            reference_loss: reference.loss,
+            world_size: dims.world_size(),
+            trace_events: simulator.trace.events.len(),
+            failures,
+        }
+    }
+}
+#+end_src
+
+- [ ] Add a smoke test:
+
+#+begin_src rust
+#[test]
+fn common_substrate_smoke_connects_reference_mesh_collective_and_injection() {
+    let scenario = TrainingStepScenario::tiny_dense();
+    let dims = ParallelDims5D::new(1, 2, 1, 1, 2);
+    let plan = InjectionPlan::new(vec![InjectionEvent {
+        label: "missing_rank".to_string(),
+        phase: TrainingPhase::Backward,
+        rank: 0,
+        axis: Some(MeshAxis::DpReplicate),
+        kind: InjectionKind::MissingParticipant,
+    }]);
+
+    let report = scenario.run_common_substrate_smoke(dims, Some(&plan));
+
+    assert!(report.reference_loss.is_finite());
+    assert_eq!(report.world_size, 4);
+    assert_eq!(report.trace_events, 1);
+    assert_eq!(report.failures, 1);
+}
+#+end_src
+
+- [ ] Run focused checks:
+
+#+begin_src sh
+bazel test //ferric_continuum/tnsr:mesh_sim_tests
+bazel test //ferric_continuum/tnsr:distributed_tests
+bazel test //ferric_continuum/tnsr:context_parallel_gqa_tests
+bazel test //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+- [ ] Append an ~* Answer~ section to tickets 01, 02, and 03 summarizing the
+  implemented files, test target, and verification evidence. Keep ticket status
+  changes for the reviewer/maintainer if that is the repo convention in the
+  current branch.
+
+* Self-review checklist
+
+- [ ] Spec coverage: tickets 01, 02, and 03 are fully covered; tickets 04-07 are
+  intentionally deferred to follow-up plans.
+- [ ] Placeholder scan: no unfinished marker words or vague implementation
+  steps remain.
+- [ ] Type consistency: signatures in tasks match the produced interfaces.
+- [ ] Existing local tensor behavior remains unchanged when ~dtensor~ is unused.
+- [ ] All new source files are included in ~_TNSR_SRCS~.
+- [ ] Focused tests pass under Bazel.
+
+* Execution handoff
+
+After this plan is reviewed, execute it in an isolated worktree. Recommended
+execution mode is subagent-driven development with one fresh worker per task or
+small task group:
+
+- Worker A: Tasks 1-2.
+- Worker B: Task 3.
+- Worker C: Tasks 4-6.
+- Main coordinator or final worker: Task 7 and verification.
+
+Keep write sets disjoint when running workers in parallel, and merge through the
+coordinator after each task's focused tests pass.

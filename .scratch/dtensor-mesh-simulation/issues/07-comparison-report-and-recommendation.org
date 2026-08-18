@@ -1,0 +1,44 @@
+#+TITLE: Comparison report and recommendation
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 04-wrapper-dtensor-tracer-bullet, 05-tensor-native-layout-tracer-bullet, 06-plan-first-simulation-tracer-bullet
+#+PARENT: ../spec.org
+
+* Context
+
+The DTensor mesh simulation effort should conclude with evidence, not a
+preselected architecture.
+
+* Requirements
+
+- Compare all three tracer bullets against the same rubric:
+  - semantic expressiveness
+  - correctness against unsharded reference
+  - collective/cost/topology trace quality
+  - chaos failure localization
+  - interface complexity
+  - existing code touched
+  - test complexity
+  - suitability for future full forward/backward foundation-model training mesh
+    simulation
+- Recommend which architecture should graduate to durable implementation.
+- Identify shared infrastructure that should remain regardless of the winning
+  architecture.
+- Identify discarded or deferred pieces and why.
+- Record follow-up work for MoE/EP, asynchronous collectives, real backends, or
+  richer recovery if the evidence supports them.
+
+* Out of scope
+
+- Implementing the final durable architecture beyond the tracer bullets.
+- Landing a branch, pushing, or creating a pull request without explicit human
+  approval.
+
+* Verification
+
+- The comparison report cites concrete tests, trace artifacts, and code paths
+  from each tracer bullet.
+- Every blocking finding or unknown is either resolved or converted into an
+  explicit follow-up ticket.
+
+* Comments
