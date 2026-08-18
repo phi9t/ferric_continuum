@@ -12,6 +12,8 @@ _TNSR_SRCS = [
     "src/checkpoint.rs",
     "src/cuda_ffi.rs",
     "src/debug.rs",
+    "src/dtensor/mod.rs",
+    "src/dtensor/harness.rs",
     "src/grad_mode.rs",
     "src/inference.rs",
     "src/saved.rs",
@@ -169,6 +171,15 @@ rust_test(
     name = "inference_tests",
     srcs = ["tests/inference_test.rs"],
     crate_name = "inference_test",
+    edition = "2021",
+    deps = [":tnsr"],
+)
+
+# DTensor mesh simulation harness smoke tests.
+rust_test(
+    name = "mesh_sim_tests",
+    srcs = ["tests/mesh_sim_test.rs"],
+    crate_name = "mesh_sim_test",
     edition = "2021",
     deps = [":tnsr"],
 )

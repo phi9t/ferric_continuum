@@ -21,6 +21,7 @@ pub mod bpe;
 pub mod checkpoint;
 pub mod cuda_ffi;
 pub mod debug;
+pub mod dtensor;
 pub mod grad_mode;
 pub mod inference;
 pub mod ops;
