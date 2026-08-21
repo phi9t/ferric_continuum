@@ -1,0 +1,43 @@
+{
+  "workspace": {
+    "primary_repo": "ferric_continuum",
+    "repos": {
+      "ferric_continuum": {
+        "host": "repo://self",
+        "sandbox": "/workspace/ferric_continuum",
+        "mode": "rw",
+        "required": true
+      },
+      "modular": {
+        "host": "/data02/home/philip.yang/workspace/modular",
+        "sandbox": "/workspace/modular",
+        "mode": "ro",
+        "required": false
+      },
+      "torchtitan": {
+        "host": "/data02/home/philip.yang/workspace/torchtitan",
+        "sandbox": "/workspace/torchtitan",
+        "mode": "ro",
+        "required": false
+      },
+      "monarch": {
+        "host": "/data02/home/philip.yang/workspace/monarch",
+        "sandbox": "/workspace/monarch",
+        "mode": "ro",
+        "required": false
+      },
+      "nccl": {
+        "host": "/data02/home/philip.yang/workspace/nccl",
+        "sandbox": "/workspace/nccl",
+        "mode": "ro",
+        "required": false
+      },
+      "cutlass": {
+        "host": "/data02/home/philip.yang/workspace/cutlass",
+        "sandbox": "/workspace/cutlass",
+        "mode": "ro",
+        "required": false
+      }
+    }
+  }
+}

@@ -1,0 +1,77 @@
+#+TITLE: Bwrap plan and run records
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY: 01-profile-and-config
+#+PARENT: ../spec.org
+
+* Context
+
+The runner's value comes from making the execution contract explicit and
+leaving evidence behind. This ticket adds the plan and record modules without
+requiring real command execution.
+
+* Requirements
+
+- Add a ~BwrapPlan~ model for:
+  - run id
+  - rootfs
+  - resolved bwrap path
+  - target repo
+  - working directory
+  - mounts
+  - environment
+  - command argv
+  - CUDA intent
+- Build deterministic bwrap argv from a plan.
+- Compute and record ~bwrap_argv_sha256~.
+- Add run-record helpers for ~.ferric/runs/<run_id>/~.
+- Write:
+  - ~command.json~
+  - ~preflight.json~
+  - ~bwrap-plan.json~
+  - ~stdout.log~
+  - ~stderr.log~
+  - ~result.json~
+
+* Out of scope
+
+- CLI parsing.
+- Launching bwrap.
+- CUDA device/library projection.
+
+* Verification
+
+- Unit tests for mount ordering and mode translation.
+- Unit tests for stable plan JSON and argv hash.
+- Unit tests for creating an isolated run directory and writing each artifact.
+
+* Answer
+
+Implemented the bwrap plan and run-record slice.
+
+Files changed:
+- ~tools/ferric_run/bwrap.py~
+- ~tools/ferric_run/records.py~
+- ~tests/ferric_run/test_bwrap.py~
+- ~tests/ferric_run/test_records.py~
+
+Red/green evidence:
+- The slice tests cover mount ordering, read-only/read-write bwrap bind
+  translation, stable plan JSON, deterministic argv hashing, isolated run
+  directory creation, and all expected artifact writers.
+- Final green run: ~python3 -m unittest discover -s tests/ferric_run -p 'test_*.py'~
+  passed with 20 tests.
+
+Verification commands and outcomes:
+- ~python3 -m unittest discover -s tests/ferric_run -p 'test_*.py'~:
+  passed, 20 tests.
+- ~python3 -m py_compile tools/ferric_run.py tools/ferric_run/*.py~:
+  passed.
+- ~tools/ferric_run.py --dry-run --rootfs "$tmp_rootfs" -- true~:
+  passed; ~bwrap-plan.json~ was written and records Ferric as ~rw~ while
+  peer repos are ~ro~.
+- ~git diff --check~: passed.
+
+Intentional follow-up:
+- Automatic CUDA device/library projection is intentionally not included in
+  this first plan/record slice.

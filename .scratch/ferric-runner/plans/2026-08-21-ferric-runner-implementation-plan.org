@@ -1,0 +1,1360 @@
+#+TITLE: Ferric runner implementation plan
+#+TYPE: plan
+#+STATUS: ready-for-agent
+#+PARENT: ../spec.org
+
+#+begin_quote
+For agentic workers: REQUIRED SUB-SKILL: Use
+~superpowers:subagent-driven-development~ (recommended) or
+~superpowers:executing-plans~ to implement this plan task-by-task. Steps use
+checkbox syntax for tracking. Do not commit unless the user explicitly
+authorizes commits.
+#+end_quote
+
+* Goal
+
+Build a Ferric-local Python runner that executes generic commands inside an
+existing Bubblewrap rootfs, mounts Ferric plus profile-declared peer repos,
+and writes first-class run evidence under ~.ferric/runs/<run_id>/~.
+
+* Architecture
+
+The runner is a thin execution module around Ferric's existing Bazel/CUDA
+commands. It does not build a rootfs, manage packages, or replace Bazel. The
+main interface is:
+
+#+begin_src text
+CLI args -> FerricRunConfig -> PreflightReport -> BwrapPlan -> RunRecord
+#+end_src
+
+The implementation should keep the CLI shallow and put behavior behind focused
+modules:
+
+#+begin_src text
+tools/ferric_run.py
+tools/ferric_run/
+  __init__.py
+  config.py
+  bwrap.py
+  preflight.py
+  records.py
+  profiles/gpu-kernel-study.json
+tests/ferric_run/
+  test_config.py
+  test_bwrap.py
+  test_records.py
+  test_cli.py
+  test_preflight.py
+#+end_src
+
+* Tech stack
+
+- Python 3.12-compatible standard library only.
+- ~unittest~ for tests, because the repo already uses direct Python tooling and
+  does not require adding pytest for this slice.
+- Existing repo Bazel remains the build/test authority for Ferric targets.
+- Bubblewrap is executed only through the runner and may be faked in tests.
+
+* Spec
+
+Implements [[file:../spec.org][Ferric local GPU-kernel study runner]].
+
+* Global constraints
+
+- First slice requires an existing rootfs path.
+- First slice does not build, sync, or repair rootfs contents.
+- Generic command execution only; no named workflow shortcuts.
+- Ferric is primary and writable at ~/workspace/ferric_continuum~ inside bwrap.
+- Peer repos are profile-declared and default to read-only.
+- Modular is an optional read-only peer in the default GPU-kernel study profile.
+- CUDA is opt-in through ~--cuda~ and v1 records/preflights intent only.
+- Automatic CUDA device/library projection is a follow-up, not part of this
+  plan.
+- ~.ferric/~ is generated run state and should be gitignored.
+- Do not disturb existing ~.scratch/incorporate-tnsr/~ work.
+
+* File structure
+
+Create:
+
+- ~tools/ferric_run.py~: CLI adapter only.
+- ~tools/ferric_run/__init__.py~: package marker and public version string.
+- ~tools/ferric_run/config.py~: profile dataclasses, profile loading,
+  ~repo://self~ resolution, rootfs/bwrap precedence.
+- ~tools/ferric_run/bwrap.py~: mount model, ~BwrapPlan~, deterministic argv and
+  JSON conversion.
+- ~tools/ferric_run/preflight.py~: rootfs/bwrap/repo/CUDA checks.
+- ~tools/ferric_run/records.py~: run id and artifact writers.
+- ~tools/ferric_run/profiles/gpu-kernel-study.json~: checked-in default
+  multi-repo study profile.
+- ~tests/ferric_run/test_config.py~
+- ~tests/ferric_run/test_bwrap.py~
+- ~tests/ferric_run/test_records.py~
+- ~tests/ferric_run/test_cli.py~
+- ~tests/ferric_run/test_preflight.py~
+
+Modify:
+
+- ~.gitignore~: ignore generated ~.ferric/~ state.
+
+* Task 1: Profile and config model
+
+** Files
+
+- Create: ~tools/ferric_run/__init__.py~
+- Create: ~tools/ferric_run/config.py~
+- Create: ~tools/ferric_run/profiles/gpu-kernel-study.json~
+- Create: ~tests/ferric_run/test_config.py~
+
+** Interfaces
+
+Produces:
+
+#+begin_src python
+@dataclass(frozen=True)
+class RepoMount:
+    name: str
+    host: pathlib.Path
+    sandbox: str
+    mode: Literal["ro", "rw"]
+    required: bool
+
+@dataclass(frozen=True)
+class WorkspaceProfile:
+    primary_repo: str
+    repos: dict[str, RepoMount]
+
+@dataclass(frozen=True)
+class FerricRunConfig:
+    repo_root: pathlib.Path
+    profile_path: pathlib.Path
+    rootfs: pathlib.Path
+    bwrap: pathlib.Path | None
+    workspace: WorkspaceProfile
+
+def find_repo_root(start: pathlib.Path) -> pathlib.Path
+def resolve_repo_host(value: str, *, repo_root: pathlib.Path) -> pathlib.Path
+def load_profile(path: pathlib.Path, *, repo_root: pathlib.Path) -> WorkspaceProfile
+def resolve_config(
+    *,
+    repo_root: pathlib.Path,
+    profile_path: pathlib.Path,
+    rootfs_arg: str | None,
+    bwrap_arg: str | None,
+    environ: Mapping[str, str],
+) -> FerricRunConfig
+#+end_src
+
+Downstream tasks consume ~FerricRunConfig.workspace.repos~ and the resolved
+~rootfs~ / ~bwrap~ fields.
+
+** Steps
+
+- [ ] Step 1: Write failing tests for profile loading.
+
+Create ~tests/ferric_run/test_config.py~ with:
+
+#+begin_src python
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from tools.ferric_run.config import load_profile, resolve_config, resolve_repo_host
+
+
+class ConfigTests(unittest.TestCase):
+    def test_load_profile_defaults_peer_repo_to_read_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = root / "profile.json"
+            profile.write_text(json.dumps({
+                "workspace": {
+                    "primary_repo": "ferric_continuum",
+                    "repos": {
+                        "ferric_continuum": {
+                            "host": "repo://self",
+                            "sandbox": "/workspace/ferric_continuum",
+                            "mode": "rw",
+                            "required": True,
+                        },
+                        "modular": {
+                            "host": str(root / "modular"),
+                            "sandbox": "/workspace/modular",
+                            "required": False,
+                        },
+                    },
+                },
+            }))
+
+            loaded = load_profile(profile, repo_root=root)
+
+            self.assertEqual(loaded.primary_repo, "ferric_continuum")
+            self.assertEqual(loaded.repos["ferric_continuum"].mode, "rw")
+            self.assertEqual(loaded.repos["modular"].mode, "ro")
+            self.assertFalse(loaded.repos["modular"].required)
+
+    def test_repo_self_resolves_to_repo_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            self.assertEqual(resolve_repo_host("repo://self", repo_root=root), root)
+
+    def test_resolve_config_prefers_cli_over_environment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = root / "profile.json"
+            cli_rootfs = root / "cli-rootfs"
+            env_rootfs = root / "env-rootfs"
+            profile.write_text(json.dumps({
+                "workspace": {
+                    "primary_repo": "ferric_continuum",
+                    "repos": {
+                        "ferric_continuum": {
+                            "host": "repo://self",
+                            "sandbox": "/workspace/ferric_continuum",
+                            "mode": "rw",
+                            "required": True,
+                        }
+                    },
+                },
+            }))
+
+            cfg = resolve_config(
+                repo_root=root,
+                profile_path=profile,
+                rootfs_arg=str(cli_rootfs),
+                bwrap_arg="/custom/bwrap",
+                environ={"FERRIC_ROOTFS": str(env_rootfs), "FERRIC_BWRAP": "/env/bwrap"},
+            )
+
+            self.assertEqual(cfg.rootfs, cli_rootfs)
+            self.assertEqual(cfg.bwrap, Path("/custom/bwrap"))
+
+
+if __name__ == "__main__":
+    unittest.main()
+#+end_src
+
+- [ ] Step 2: Run the red tests.
+
+Run:
+
+#+begin_src sh
+python3 -m unittest tests.ferric_run.test_config
+#+end_src
+
+Expected: import failure for ~tools.ferric_run.config~.
+
+- [ ] Step 3: Implement ~tools/ferric_run/__init__.py~.
+
+#+begin_src python
+"""Ferric local rootfs runner."""
+
+__version__ = "0.1.0"
+#+end_src
+
+- [ ] Step 4: Implement ~tools/ferric_run/config.py~.
+
+Use only the standard library. Required behavior:
+
+#+begin_src python
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal, Mapping
+
+
+@dataclass(frozen=True)
+class RepoMount:
+    name: str
+    host: Path
+    sandbox: str
+    mode: Literal["ro", "rw"]
+    required: bool
+
+
+@dataclass(frozen=True)
+class WorkspaceProfile:
+    primary_repo: str
+    repos: dict[str, RepoMount]
+
+
+@dataclass(frozen=True)
+class FerricRunConfig:
+    repo_root: Path
+    profile_path: Path
+    rootfs: Path
+    bwrap: Path | None
+    workspace: WorkspaceProfile
+
+
+def find_repo_root(start: Path) -> Path:
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=start,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        return Path(out).resolve()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return start.resolve()
+
+
+def resolve_repo_host(value: str, *, repo_root: Path) -> Path:
+    if value == "repo://self":
+        return repo_root.resolve()
+    return Path(value).expanduser().resolve()
+
+
+def _require_workspace(data: object) -> dict[str, object]:
+    if not isinstance(data, dict):
+        raise ValueError("profile must be a JSON object")
+    workspace = data.get("workspace")
+    if not isinstance(workspace, dict):
+        raise ValueError("profile missing object field `workspace`")
+    return workspace
+
+
+def load_profile(path: Path, *, repo_root: Path) -> WorkspaceProfile:
+    data = json.loads(path.read_text())
+    workspace = _require_workspace(data)
+    primary = workspace.get("primary_repo")
+    repos_data = workspace.get("repos")
+    if not isinstance(primary, str) or not primary:
+        raise ValueError("workspace.primary_repo must be a non-empty string")
+    if not isinstance(repos_data, dict) or not repos_data:
+        raise ValueError("workspace.repos must be a non-empty object")
+
+    repos: dict[str, RepoMount] = {}
+    for name, raw in repos_data.items():
+        if not isinstance(name, str) or not isinstance(raw, dict):
+            raise ValueError("workspace.repos entries must be objects keyed by name")
+        host_raw = raw.get("host")
+        sandbox = raw.get("sandbox")
+        mode = raw.get("mode", "ro")
+        required = raw.get("required", False)
+        if not isinstance(host_raw, str) or not host_raw:
+            raise ValueError(f"repo `{name}` missing string host")
+        if not isinstance(sandbox, str) or not sandbox.startswith("/workspace/"):
+            raise ValueError(f"repo `{name}` sandbox must start with /workspace/")
+        if mode not in {"ro", "rw"}:
+            raise ValueError(f"repo `{name}` mode must be ro or rw")
+        if not isinstance(required, bool):
+            raise ValueError(f"repo `{name}` required must be boolean")
+        repos[name] = RepoMount(
+            name=name,
+            host=resolve_repo_host(host_raw, repo_root=repo_root),
+            sandbox=sandbox,
+            mode=mode,
+            required=required,
+        )
+    if primary not in repos:
+        raise ValueError(f"primary_repo `{primary}` is not listed in workspace.repos")
+    return WorkspaceProfile(primary_repo=primary, repos=repos)
+
+
+def resolve_config(
+    *,
+    repo_root: Path,
+    profile_path: Path,
+    rootfs_arg: str | None,
+    bwrap_arg: str | None,
+    environ: Mapping[str, str] = os.environ,
+) -> FerricRunConfig:
+    rootfs_value = rootfs_arg or environ.get("FERRIC_ROOTFS")
+    if not rootfs_value:
+        raise ValueError("rootfs is required; pass --rootfs or set FERRIC_ROOTFS")
+    bwrap_value = bwrap_arg or environ.get("FERRIC_BWRAP")
+    return FerricRunConfig(
+        repo_root=repo_root.resolve(),
+        profile_path=profile_path.resolve(),
+        rootfs=Path(rootfs_value).expanduser().resolve(),
+        bwrap=Path(bwrap_value).expanduser().resolve() if bwrap_value else None,
+        workspace=load_profile(profile_path, repo_root=repo_root),
+    )
+#+end_src
+
+- [ ] Step 5: Add the checked-in profile.
+
+Create ~tools/ferric_run/profiles/gpu-kernel-study.json~ with Ferric,
+Modular, Torchtitan, Monarch, NCCL, and Cutlass entries. Ferric is required
+~rw~ with ~repo://self~. Peers are optional ~ro~ with absolute host paths under
+~/data02/home/philip.yang/workspace/~.
+
+- [ ] Step 6: Run tests.
+
+Run:
+
+#+begin_src sh
+python3 -m unittest tests.ferric_run.test_config
+#+end_src
+
+Expected: all tests pass.
+
+* Task 2: Bwrap plan and records
+
+** Files
+
+- Create: ~tools/ferric_run/bwrap.py~
+- Create: ~tools/ferric_run/records.py~
+- Create: ~tests/ferric_run/test_bwrap.py~
+- Create: ~tests/ferric_run/test_records.py~
+
+** Interfaces
+
+Consumes:
+
+- ~RepoMount~ from ~tools.ferric_run.config~.
+
+Produces:
+
+#+begin_src python
+@dataclass(frozen=True)
+class MountSpec:
+    name: str
+    host: pathlib.Path
+    sandbox: str
+    mode: Literal["ro", "rw"]
+    required: bool
+    present: bool
+
+@dataclass(frozen=True)
+class BwrapPlan:
+    run_id: str
+    rootfs: pathlib.Path
+    bwrap: pathlib.Path
+    target_repo: str
+    cwd: str
+    mounts: list[MountSpec]
+    environment: dict[str, str]
+    command_argv: list[str]
+    cuda_requested: bool
+
+def build_bwrap_argv(plan: BwrapPlan) -> list[str]
+def plan_to_json_dict(plan: BwrapPlan) -> dict[str, object]
+def argv_sha256(argv: list[str]) -> str
+
+def new_run_id(now: datetime | None = None) -> str
+def create_run_dir(repo_root: pathlib.Path, run_id: str) -> pathlib.Path
+def write_json(path: pathlib.Path, data: Mapping[str, object]) -> pathlib.Path
+def write_text(path: pathlib.Path, text: str) -> pathlib.Path
+#+end_src
+
+** Steps
+
+- [ ] Step 1: Write failing bwrap tests.
+
+Create ~tests/ferric_run/test_bwrap.py~ with:
+
+#+begin_src python
+import tempfile
+import unittest
+from pathlib import Path
+
+from tools.ferric_run.bwrap import (
+    BwrapPlan,
+    MountSpec,
+    build_bwrap_argv,
+    plan_to_json_dict,
+)
+
+
+class BwrapPlanTests(unittest.TestCase):
+    def test_build_bwrap_argv_orders_workspace_mounts_and_modes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = BwrapPlan(
+                run_id="20260821T000000000000Z",
+                rootfs=root / "rootfs",
+                bwrap=Path("/usr/bin/bwrap"),
+                target_repo="ferric_continuum",
+                cwd="/workspace/ferric_continuum",
+                mounts=[
+                    MountSpec("workspace:modular", root / "modular", "/workspace/modular", "ro", False, True),
+                    MountSpec("workspace:ferric_continuum", root / "ferric", "/workspace/ferric_continuum", "rw", True, True),
+                ],
+                environment={"HOME": "/home/ferric", "USER": "ferric"},
+                command_argv=["true"],
+                cuda_requested=False,
+            )
+
+            argv = build_bwrap_argv(plan)
+
+            self.assertEqual(argv[0], "/usr/bin/bwrap")
+            ferric_idx = argv.index("/workspace/ferric_continuum")
+            modular_idx = argv.index("/workspace/modular")
+            self.assertLess(ferric_idx, modular_idx)
+            self.assertIn("--bind", argv)
+            self.assertIn("--ro-bind", argv)
+            self.assertEqual(argv[-2:], ["--", "true"])
+
+    def test_plan_json_contains_hash_and_mount_presence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plan = BwrapPlan(
+                run_id="20260821T000000000000Z",
+                rootfs=root / "rootfs",
+                bwrap=Path("/usr/bin/bwrap"),
+                target_repo="ferric_continuum",
+                cwd="/workspace/ferric_continuum",
+                mounts=[MountSpec("workspace:missing", root / "missing", "/workspace/missing", "ro", False, False)],
+                environment={},
+                command_argv=["true"],
+                cuda_requested=True,
+            )
+
+            data = plan_to_json_dict(plan)
+
+            self.assertEqual(data["cuda"]["requested"], True)
+            self.assertIn("bwrap_argv_sha256", data)
+            self.assertEqual(data["mounts"][0]["present"], False)
+
+
+if __name__ == "__main__":
+    unittest.main()
+#+end_src
+
+- [ ] Step 2: Write failing records tests.
+
+Create ~tests/ferric_run/test_records.py~ with:
+
+#+begin_src python
+import json
+import tempfile
+import unittest
+from datetime import UTC, datetime
+from pathlib import Path
+
+from tools.ferric_run.records import create_run_dir, new_run_id, write_json, write_text
+
+
+class RecordsTests(unittest.TestCase):
+    def test_new_run_id_is_utc_sortable(self):
+        run_id = new_run_id(datetime(2026, 8, 21, 1, 2, 3, 456789, tzinfo=UTC))
+        self.assertEqual(run_id, "20260821T010203456789Z")
+
+    def test_create_run_dir_and_write_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            run_dir = create_run_dir(repo, "run-1")
+
+            write_json(run_dir / "result.json", {"ok": True})
+            write_text(run_dir / "stdout.log", "hello\\n")
+
+            self.assertEqual(run_dir, repo / ".ferric" / "runs" / "run-1")
+            self.assertEqual(json.loads((run_dir / "result.json").read_text()), {"ok": True})
+            self.assertEqual((run_dir / "stdout.log").read_text(), "hello\\n")
+
+
+if __name__ == "__main__":
+    unittest.main()
+#+end_src
+
+- [ ] Step 3: Run red tests.
+
+Run:
+
+#+begin_src sh
+python3 -m unittest tests.ferric_run.test_bwrap tests.ferric_run.test_records
+#+end_src
+
+Expected: import failures for missing modules.
+
+- [ ] Step 4: Implement ~tools/ferric_run/bwrap.py~.
+
+Use this implementation shape:
+
+#+begin_src python
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
+
+
+@dataclass(frozen=True)
+class MountSpec:
+    name: str
+    host: Path
+    sandbox: str
+    mode: Literal["ro", "rw"]
+    required: bool
+    present: bool
+
+
+@dataclass(frozen=True)
+class BwrapPlan:
+    run_id: str
+    rootfs: Path
+    bwrap: Path
+    target_repo: str
+    cwd: str
+    mounts: list[MountSpec]
+    environment: dict[str, str]
+    command_argv: list[str]
+    cuda_requested: bool
+
+
+def build_bwrap_argv(plan: BwrapPlan) -> list[str]:
+    argv = [
+        str(plan.bwrap),
+        "--die-with-parent",
+        "--unshare-all",
+        "--share-net",
+        "--clearenv",
+        "--ro-bind",
+        str(plan.rootfs),
+        "/",
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+        "--tmpfs",
+        "/tmp",
+        "--ro-bind-try",
+        "/sys",
+        "/sys",
+    ]
+    for key in sorted(plan.environment):
+        argv.extend(["--setenv", key, plan.environment[key]])
+    for mount in sorted((m for m in plan.mounts if m.present), key=lambda m: m.sandbox):
+        argv.extend(["--bind" if mount.mode == "rw" else "--ro-bind", str(mount.host), mount.sandbox])
+    argv.extend(["--chdir", plan.cwd, "--"])
+    argv.extend(plan.command_argv)
+    return argv
+
+
+def argv_sha256(argv: list[str]) -> str:
+    payload = json.dumps(argv, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def plan_to_json_dict(plan: BwrapPlan) -> dict[str, object]:
+    argv = build_bwrap_argv(plan)
+    return {
+        "run_id": plan.run_id,
+        "rootfs": str(plan.rootfs),
+        "bwrap": str(plan.bwrap),
+        "target_repo": plan.target_repo,
+        "cwd": plan.cwd,
+        "environment": dict(sorted(plan.environment.items())),
+        "command_argv": list(plan.command_argv),
+        "cuda": {"requested": plan.cuda_requested},
+        "mounts": [
+            {
+                "name": mount.name,
+                "host": str(mount.host),
+                "sandbox": mount.sandbox,
+                "mode": mount.mode,
+                "required": mount.required,
+                "present": mount.present,
+            }
+            for mount in sorted(plan.mounts, key=lambda m: m.sandbox)
+        ],
+        "bwrap_argv": argv,
+        "bwrap_argv_sha256": argv_sha256(argv),
+    }
+#+end_src
+
+- [ ] Step 5: Implement ~tools/ferric_run/records.py~.
+
+Use this implementation:
+
+#+begin_src python
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Mapping
+
+
+def new_run_id(now: datetime | None = None) -> str:
+    current = now or datetime.now(UTC)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=UTC)
+    return current.astimezone(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+
+
+def create_run_dir(repo_root: Path, run_id: str) -> Path:
+    run_dir = repo_root / ".ferric" / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=False)
+    return run_dir
+
+
+def write_json(path: Path, data: Mapping[str, object]) -> Path:
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+    return path
+
+
+def write_text(path: Path, text: str) -> Path:
+    path.write_text(text)
+    return path
+#+end_src
+
+- [ ] Step 6: Run tests.
+
+Run:
+
+#+begin_src sh
+python3 -m unittest tests.ferric_run.test_bwrap tests.ferric_run.test_records
+#+end_src
+
+Expected: all tests pass.
+
+* Task 3: Preflight and dry-run CLI
+
+** Files
+
+- Create: ~tools/ferric_run/preflight.py~
+- Create: ~tools/ferric_run.py~
+- Create: ~tests/ferric_run/test_preflight.py~
+- Create: ~tests/ferric_run/test_cli.py~
+- Modify: ~.gitignore~
+
+** Interfaces
+
+Consumes:
+
+- ~FerricRunConfig~ and ~WorkspaceProfile~ from ~config.py~.
+- ~BwrapPlan~ and ~MountSpec~ from ~bwrap.py~.
+- Record writers from ~records.py~.
+
+Produces:
+
+#+begin_src python
+@dataclass(frozen=True)
+class PreflightCheck:
+    name: str
+    ok: bool
+    message: str
+
+@dataclass(frozen=True)
+class PreflightReport:
+    ok: bool
+    checks: list[PreflightCheck]
+    warnings: list[str]
+    mounts: list[MountSpec]
+
+def resolve_bwrap(configured: pathlib.Path | None, environ: Mapping[str, str]) -> pathlib.Path | None
+def run_preflight(config: FerricRunConfig, *, cuda_requested: bool) -> PreflightReport
+def report_to_json_dict(report: PreflightReport) -> dict[str, object]
+
+def main(argv: list[str] | None = None) -> int
+#+end_src
+
+** Steps
+
+- [ ] Step 1: Write failing preflight tests.
+
+Create ~tests/ferric_run/test_preflight.py~ with:
+
+#+begin_src python
+import tempfile
+import unittest
+from pathlib import Path
+
+from tools.ferric_run.config import FerricRunConfig, RepoMount, WorkspaceProfile
+from tools.ferric_run.preflight import evaluate_cuda_signals, run_preflight
+
+
+def make_config(root: Path, *, rootfs_exists: bool = True, peer_required: bool = False) -> FerricRunConfig:
+    rootfs = root / "rootfs"
+    bwrap = root / "bwrap"
+    ferric = root / "ferric"
+    if rootfs_exists:
+        rootfs.mkdir()
+    ferric.mkdir()
+    bwrap.write_text("#!/bin/sh\nexit 0\n")
+    bwrap.chmod(0o755)
+    repos = {
+        "ferric_continuum": RepoMount("ferric_continuum", ferric, "/workspace/ferric_continuum", "rw", True),
+        "missing_peer": RepoMount("missing_peer", root / "missing", "/workspace/missing_peer", "ro", peer_required),
+    }
+    return FerricRunConfig(
+        repo_root=ferric,
+        profile_path=root / "profile.json",
+        rootfs=rootfs,
+        bwrap=bwrap,
+        workspace=WorkspaceProfile("ferric_continuum", repos),
+    )
+
+
+class PreflightTests(unittest.TestCase):
+    def test_missing_rootfs_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = run_preflight(make_config(Path(tmp), rootfs_exists=False), cuda_requested=False)
+            self.assertFalse(report.ok)
+            self.assertTrue(any(check.name == "rootfs" for check in report.checks))
+
+    def test_missing_required_repo_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = run_preflight(make_config(Path(tmp), peer_required=True), cuda_requested=False)
+            self.assertFalse(report.ok)
+            self.assertTrue(any("missing_peer" in check.message for check in report.checks))
+
+    def test_missing_optional_repo_warns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = run_preflight(make_config(Path(tmp)), cuda_requested=False)
+            self.assertTrue(report.ok)
+            self.assertTrue(report.warnings)
+            self.assertFalse(next(m for m in report.mounts if m.name == "workspace:missing_peer").present)
+
+    def test_cuda_signal_evaluation_reports_missing_devices_and_libraries(self):
+        ok, messages = evaluate_cuda_signals(device_paths=[], library_roots=[])
+        self.assertFalse(ok)
+        self.assertTrue(any("device" in message for message in messages))
+        self.assertTrue(any("library" in message for message in messages))
+
+    def test_cuda_signal_evaluation_accepts_device_and_library_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            device = root / "nvidia0"
+            lib_root = root / "lib"
+            device.touch()
+            lib_root.mkdir()
+            ok, messages = evaluate_cuda_signals(device_paths=[device], library_roots=[lib_root])
+            self.assertTrue(ok)
+            self.assertEqual(messages, [])
+
+
+if __name__ == "__main__":
+    unittest.main()
+#+end_src
+
+- [ ] Step 2: Write failing dry-run CLI test.
+
+Create ~tests/ferric_run/test_cli.py~ with:
+
+#+begin_src python
+import json
+import os
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from tools import ferric_run
+
+
+class CliTests(unittest.TestCase):
+    def test_dry_run_writes_run_record_without_executing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = root / "profile.json"
+            rootfs = root / "rootfs"
+            bwrap = root / "bwrap"
+            ferric = root / "ferric"
+            rootfs.mkdir()
+            ferric.mkdir()
+            bwrap.write_text("#!/bin/sh\\nexit 0\\n")
+            bwrap.chmod(0o755)
+            profile.write_text(json.dumps({
+                "workspace": {
+                    "primary_repo": "ferric_continuum",
+                    "repos": {
+                        "ferric_continuum": {
+                            "host": "repo://self",
+                            "sandbox": "/workspace/ferric_continuum",
+                            "mode": "rw",
+                            "required": True,
+                        },
+                        "missing_peer": {
+                            "host": str(root / "missing"),
+                            "sandbox": "/workspace/missing_peer",
+                            "mode": "ro",
+                            "required": False,
+                        },
+                    },
+                },
+            }))
+
+            with mock.patch("tools.ferric_run.config.find_repo_root", return_value=ferric):
+                exit_code = ferric_run.main([
+                    "--profile", str(profile),
+                    "--rootfs", str(rootfs),
+                    "--bwrap", str(bwrap),
+                    "--dry-run",
+                    "--",
+                    "true",
+                ])
+
+            self.assertEqual(exit_code, 0)
+            runs = list((ferric / ".ferric" / "runs").iterdir())
+            self.assertEqual(len(runs), 1)
+            run_dir = runs[0]
+            self.assertTrue((run_dir / "command.json").exists())
+            self.assertTrue((run_dir / "preflight.json").exists())
+            self.assertTrue((run_dir / "bwrap-plan.json").exists())
+            result = json.loads((run_dir / "result.json").read_text())
+            self.assertEqual(result["executed"], False)
+            self.assertEqual(result["ok"], True)
+
+
+if __name__ == "__main__":
+    unittest.main()
+#+end_src
+
+- [ ] Step 3: Run red tests.
+
+Run:
+
+#+begin_src sh
+python3 -m unittest tests.ferric_run.test_preflight tests.ferric_run.test_cli
+#+end_src
+
+Expected: import failures or missing behavior.
+
+- [ ] Step 4: Implement ~tools/ferric_run/preflight.py~.
+
+Use this implementation shape:
+
+#+begin_src python
+from __future__ import annotations
+
+import os
+import shutil
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Mapping, Sequence
+
+from tools.ferric_run.bwrap import MountSpec
+from tools.ferric_run.config import FerricRunConfig
+
+
+@dataclass(frozen=True)
+class PreflightCheck:
+    name: str
+    ok: bool
+    message: str
+
+
+@dataclass(frozen=True)
+class PreflightReport:
+    ok: bool
+    checks: list[PreflightCheck]
+    warnings: list[str]
+    mounts: list[MountSpec]
+
+
+def resolve_bwrap(configured: Path | None, environ: Mapping[str, str] = os.environ) -> Path | None:
+    if configured is not None:
+        return configured
+    env_value = environ.get("FERRIC_BWRAP")
+    if env_value:
+        return Path(env_value).expanduser().resolve()
+    found = shutil.which("bwrap")
+    return Path(found).resolve() if found else None
+
+
+def evaluate_cuda_signals(*, device_paths: Sequence[Path], library_roots: Sequence[Path]) -> tuple[bool, list[str]]:
+    messages: list[str] = []
+    if not any(path.exists() for path in device_paths):
+        messages.append("CUDA requested but no /dev/nvidia* device path was found")
+    if not any(path.exists() for path in library_roots):
+        messages.append("CUDA requested but no likely NVIDIA/CUDA driver library root was found")
+    return (not messages, messages)
+
+
+def _discover_cuda_devices() -> list[Path]:
+    return list(Path("/dev").glob("nvidia*"))
+
+
+def _candidate_cuda_library_roots() -> list[Path]:
+    return [
+        Path("/run/nvidia-driver"),
+        Path("/usr/lib/x86_64-linux-gnu"),
+        Path("/usr/local/cuda/lib64"),
+    ]
+
+
+def run_preflight(config: FerricRunConfig, *, cuda_requested: bool) -> PreflightReport:
+    checks: list[PreflightCheck] = []
+    warnings: list[str] = []
+    mounts: list[MountSpec] = []
+
+    checks.append(PreflightCheck("rootfs", config.rootfs.is_dir(), f"rootfs: {config.rootfs}"))
+    bwrap_ok = config.bwrap is not None and config.bwrap.is_file() and os.access(config.bwrap, os.X_OK)
+    checks.append(PreflightCheck("bwrap", bwrap_ok, f"bwrap: {config.bwrap}"))
+
+    for repo in config.workspace.repos.values():
+        present = repo.host.exists()
+        mounts.append(MountSpec(f"workspace:{repo.name}", repo.host, repo.sandbox, repo.mode, repo.required, present))
+        if repo.required:
+            checks.append(PreflightCheck(f"repo:{repo.name}", present, f"required repo {repo.name}: {repo.host}"))
+        elif not present:
+            warnings.append(f"optional repo {repo.name} is missing at {repo.host}; mount omitted")
+
+    if cuda_requested:
+        cuda_ok, messages = evaluate_cuda_signals(
+            device_paths=_discover_cuda_devices(),
+            library_roots=_candidate_cuda_library_roots(),
+        )
+        checks.append(PreflightCheck("cuda", cuda_ok, "; ".join(messages) if messages else "CUDA host signals present"))
+
+    return PreflightReport(ok=all(check.ok for check in checks), checks=checks, warnings=warnings, mounts=mounts)
+
+
+def report_to_json_dict(report: PreflightReport) -> dict[str, object]:
+    return {
+        "ok": report.ok,
+        "checks": [{"name": check.name, "ok": check.ok, "message": check.message} for check in report.checks],
+        "warnings": list(report.warnings),
+        "mounts": [
+            {
+                "name": mount.name,
+                "host": str(mount.host),
+                "sandbox": mount.sandbox,
+                "mode": mount.mode,
+                "required": mount.required,
+                "present": mount.present,
+            }
+            for mount in report.mounts
+        ],
+    }
+#+end_src
+
+- [ ] Step 5: Implement ~tools/ferric_run.py~ dry-run path.
+
+Use ~argparse~ with ~nargs=argparse.REMAINDER~ for the command tail. Normalize
+an initial command-tail ~--~ away before validating the command. Write the run
+artifacts in this order: ~command.json~, ~preflight.json~, ~bwrap-plan.json~,
+~stdout.log~, ~stderr.log~, ~result.json~.
+
+The dry-run result payload is:
+
+#+begin_src python
+{
+    "run_id": run_id,
+    "executed": False,
+    "ok": report.ok,
+    "exit_code": 0 if report.ok else 1,
+}
+#+end_src
+
+The ~BwrapPlan~ created by the CLI uses:
+
+#+begin_src python
+BwrapPlan(
+    run_id=run_id,
+    rootfs=config.rootfs,
+    bwrap=resolved_bwrap,
+    target_repo=config.workspace.primary_repo,
+    cwd=config.workspace.repos[config.workspace.primary_repo].sandbox,
+    mounts=report.mounts,
+    environment={"HOME": "/home/ferric", "USER": "ferric"},
+    command_argv=command_argv,
+    cuda_requested=args.cuda,
+)
+#+end_src
+
+If preflight fails, still write all dry-run artifacts and return ~1~.
+
+- [ ] Step 6: Add ~.ferric/~ to ~.gitignore~.
+
+- [ ] Step 7: Run tests.
+
+Run:
+
+#+begin_src sh
+python3 -m unittest tests.ferric_run.test_config tests.ferric_run.test_bwrap tests.ferric_run.test_records tests.ferric_run.test_preflight tests.ferric_run.test_cli
+#+end_src
+
+Expected: all tests pass.
+
+* Task 4: CPU execution
+
+** Files
+
+- Modify: ~tools/ferric_run.py~
+- Modify: ~tools/ferric_run/records.py~ if needed for timestamps/duration.
+- Modify: ~tests/ferric_run/test_cli.py~
+
+** Interfaces
+
+Consumes the dry-run CLI from Task 3.
+
+Produces:
+
+- Real execution path using ~subprocess.run~.
+- Result JSON fields:
+  - ~executed: true~
+  - ~ok~
+  - ~exit_code~
+  - ~duration_ms~
+
+** Steps
+
+- [ ] Step 1: Add failing fake-bwrap execution test.
+
+Extend ~tests/ferric_run/test_cli.py~ with a test that creates an executable
+fake bwrap script:
+
+#+begin_src sh
+#!/bin/sh
+echo "fake stdout"
+echo "fake stderr" >&2
+exit 7
+#+end_src
+
+Run ~ferric_run.main([... "--", "ignored"])~ without ~--dry-run~ and assert:
+
+- CLI returns 7.
+- ~stdout.log~ contains ~fake stdout~.
+- ~stderr.log~ contains ~fake stderr~.
+- ~result.json~ has ~executed=true~, ~ok=false~, and ~exit_code=7~.
+
+- [ ] Step 2: Run the red CLI test.
+
+Run:
+
+#+begin_src sh
+python3 -m unittest tests.ferric_run.test_cli
+#+end_src
+
+Expected: test fails because non-dry-run is not implemented.
+
+- [ ] Step 3: Implement non-dry-run execution.
+
+Use:
+
+#+begin_src python
+completed = subprocess.run(
+    argv,
+    text=True,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    check=False,
+)
+#+end_src
+
+Always write stdout/stderr/result artifacts. Return ~completed.returncode~.
+
+- [ ] Step 4: Run CLI tests.
+
+Run:
+
+#+begin_src sh
+python3 -m unittest tests.ferric_run.test_cli
+#+end_src
+
+Expected: all CLI tests pass.
+
+- [ ] Step 5: Run full runner test suite.
+
+Run:
+
+#+begin_src sh
+python3 -m unittest discover -s tests/ferric_run -p 'test_*.py'
+#+end_src
+
+Expected: all tests pass.
+
+* Task 5: CUDA intent artifacts and docs
+
+** Files
+
+- Modify: ~tools/ferric_run/preflight.py~
+- Modify: ~tests/ferric_run/test_preflight.py~
+- Modify: ~tests/ferric_run/test_cli.py~
+- Create: ~tools/ferric_run/README.md~
+
+** Interfaces
+
+Consumes:
+
+- ~run_preflight(config, cuda_requested=True)~ from Task 3.
+
+Produces:
+
+- Confirmed v1 CUDA behavior: intent and preflight only.
+- Test coverage that ~--cuda~ is recorded in ~command.json~,
+  ~preflight.json~, and ~bwrap-plan.json~.
+- Documented follow-up boundary for actual CUDA device/library projection.
+
+#+begin_src python
+def evaluate_cuda_signals(
+    *,
+    device_paths: Sequence[pathlib.Path],
+    library_roots: Sequence[pathlib.Path],
+) -> tuple[bool, list[str]]
+#+end_src
+
+** Steps
+
+- [ ] Step 1: Add focused tests for CUDA artifact recording.
+
+Extend ~tests/ferric_run/test_cli.py~ with a dry-run test that patches
+~tools.ferric_run.preflight._discover_cuda_devices~ and
+~tools.ferric_run.preflight._candidate_cuda_library_roots~ to return existing
+temporary paths. Run:
+
+#+begin_src python
+exit_code = ferric_run.main([
+    "--profile", str(profile),
+    "--rootfs", str(rootfs),
+    "--bwrap", str(bwrap),
+    "--cuda",
+    "--dry-run",
+    "--",
+    "true",
+])
+#+end_src
+
+Assert:
+
+- CLI returns ~0~.
+- ~command.json~ contains ~"cuda": {"requested": true}~ or an equivalent
+  top-level ~cuda_requested: true~ field chosen by the Task 3 implementation.
+- ~preflight.json~ contains a passing ~cuda~ check.
+- ~bwrap-plan.json~ contains ~"cuda": {"requested": true}~.
+
+Extend ~tests/ferric_run/test_preflight.py~ only if Task 3 did not already
+cover all three helper cases: no devices/libraries fails, fake device plus fake
+library root passes, and CPU preflight does not require CUDA signals.
+
+- [ ] Step 2: Run the red tests.
+
+Run:
+
+#+begin_src sh
+python3 -m unittest tests.ferric_run.test_preflight
+#+end_src
+
+Expected: missing CLI CUDA artifact recording or incomplete CUDA helper
+behavior fails.
+
+- [ ] Step 3: Complete CUDA artifact recording.
+
+If Task 3 did not already do so, wire the CLI so ~args.cuda~ is copied into
+~command.json~ and into the ~BwrapPlan(cuda_requested=args.cuda)~ constructor.
+Keep the CUDA helper host-independent in unit tests. The production preflight
+discovers host paths with:
+
+#+begin_src python
+Path("/dev").glob("nvidia*")
+[
+    Path("/run/nvidia-driver"),
+    Path("/usr/lib/x86_64-linux-gnu"),
+    Path("/usr/local/cuda/lib64"),
+]
+#+end_src
+
+The helper returns structured messages suitable for ~preflight.json~.
+
+- [ ] Step 4: Add ~tools/ferric_run/README.md~.
+
+Include:
+
+- Purpose: Ferric-local GPU-kernel study runner.
+- Vaso influence but Ferric ownership.
+- Example dry run.
+- Example CPU run.
+- Example CUDA intent run.
+- Run-record layout.
+- Peer-repo profile behavior.
+- Explicit note that v1 does not mount CUDA devices/libraries yet.
+
+- [ ] Step 5: Run full tests and syntax checks.
+
+Run:
+
+#+begin_src sh
+python3 -m unittest discover -s tests/ferric_run -p 'test_*.py'
+python3 -m py_compile tools/ferric_run.py tools/ferric_run/*.py
+git diff --check
+#+end_src
+
+Expected: all commands exit 0.
+
+* Task 6: Final verification and tracker closeout
+
+** Files
+
+- Modify: ~.scratch/ferric-runner/issues/*.org~ with answer/evidence sections.
+- Optionally modify: ~.scratch/ferric-runner/spec.org~ if implementation
+  exposes a harmless clarification that should become durable.
+
+** Interfaces
+
+Consumes all previous task outputs.
+
+Produces final evidence that the implemented runner conforms to the spec.
+
+** Steps
+
+- [ ] Step 1: Run all runner tests.
+
+#+begin_src sh
+python3 -m unittest discover -s tests/ferric_run -p 'test_*.py'
+#+end_src
+
+Expected: all tests pass.
+
+- [ ] Step 2: Run syntax checks.
+
+#+begin_src sh
+python3 -m py_compile tools/ferric_run.py tools/ferric_run/*.py
+#+end_src
+
+Expected: exit 0.
+
+- [ ] Step 3: Run dry-run smoke from the repo root.
+
+Use a temporary rootfs directory:
+
+#+begin_src sh
+tmp_rootfs=$(mktemp -d /tmp/ferric-runner-rootfs.XXXXXX)
+tools/ferric_run.py --dry-run --rootfs "$tmp_rootfs" -- true
+#+end_src
+
+Expected:
+
+- exit 0
+- one new ~.ferric/runs/<run_id>/~ directory
+- ~bwrap-plan.json~ records Ferric as ~rw~
+- optional peer repos are present or warned depending on host checkout state
+- ~result.json~ records ~executed=false~
+
+- [ ] Step 4: Run whitespace check.
+
+#+begin_src sh
+git diff --check
+#+end_src
+
+Expected: no output, exit 0.
+
+- [ ] Step 5: Update ticket answers.
+
+For each implemented issue, append ~* Answer~ with:
+
+- files changed
+- red/green evidence
+- verification commands and outcomes
+- any intentional follow-up
+
+- [ ] Step 6: Run final status check.
+
+#+begin_src sh
+git status --short --untracked-files=all
+#+end_src
+
+Expected: only intended runner files, tests, docs, tracker updates, and any
+pre-existing unrelated dirty files.
+
+* Plan self-review checklist
+
+- [ ] Spec coverage: Tasks cover config/profile, plan/records, dry-run, CPU
+  execution, CUDA intent preflight, peer repo mounts, and verification.
+- [ ] Placeholder scan: no deferred-placeholder markers or vague implementation
+  placeholders.
+- [ ] Type consistency: function/type names match across tasks.
+- [ ] Scope check: CUDA projection, rootfs creation, named shortcuts, and agent
+  integration remain out of scope.

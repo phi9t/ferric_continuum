@@ -1,0 +1,77 @@
+#+TITLE: CUDA intent preflight
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY: 03-cli-dry-run
+#+PARENT: ../spec.org
+
+* Context
+
+CUDA is opt-in for Ferric. The first runner slice should record CUDA intent and
+fail early when the host clearly cannot support a CUDA run, but it should not
+yet implement CUDA projection mounts.
+
+* Requirements
+
+- Support ~--cuda~ as an explicit user request.
+- Record CUDA intent in:
+  - ~command.json~
+  - ~preflight.json~
+  - ~bwrap-plan.json~
+- Preflight host CUDA signals such as:
+  - ~/dev/nvidia*~
+  - likely driver library roots
+  - optional ~nvidia-smi~ path if present
+- Fail before execution when ~--cuda~ is requested and required CUDA signals are
+  absent.
+- Keep CPU runs unaffected when ~--cuda~ is absent.
+- Leave CUDA device/library projection for a follow-up ticket.
+
+* Out of scope
+
+- Mounting CUDA devices or driver libraries into bwrap.
+- Validating a CUDA toolkit.
+- Running Ferric CUDA Bazel tests.
+
+* Verification
+
+- Unit tests for CUDA preflight success/failure using temporary fake host paths.
+- CLI dry-run test proving ~--cuda~ records intent.
+- CLI dry-run test proving missing required CUDA signals fail before execution.
+
+* Answer
+
+Implemented the CUDA intent preflight slice.
+
+Files changed:
+- ~tools/ferric_run.py~
+- ~tools/ferric_run/preflight.py~
+- ~tests/ferric_run/test_cli.py~
+- ~tests/ferric_run/test_preflight.py~
+
+Red/green evidence:
+- The slice tests cover CUDA intent recording, success/failure CUDA host signal
+  checks using temporary fake paths, dry-run intent records, and missing-signal
+  failure before execution.
+- Final green run: ~python3 -m unittest discover -s tests/ferric_run -p 'test_*.py'~
+  passed with 20 tests.
+
+Verification commands and outcomes:
+- ~python3 -m unittest discover -s tests/ferric_run -p 'test_*.py'~:
+  passed, 20 tests.
+- ~python3 -m py_compile tools/ferric_run.py tools/ferric_run/*.py~:
+  passed.
+- ~tools/ferric_run.py --dry-run --rootfs "$tmp_rootfs" -- true~:
+  passed for the default CPU-intent path; ~result.json~ recorded
+  ~executed=false~.
+- ~git diff --check~: passed.
+
+Intentional follow-up:
+- CUDA device and driver-library projection into bwrap is intentionally left
+  for a follow-up. This ticket records and preflights CUDA intent only.
+
+* Final review fix
+
+Added regression coverage that compares CPU and ~--cuda~ bwrap argv for the
+same plan. The argv stays identical, confirming this v1 slice still records and
+preflights CUDA intent without adding CUDA device or driver-library projection
+mounts.

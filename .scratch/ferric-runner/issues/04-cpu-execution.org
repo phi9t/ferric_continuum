@@ -1,0 +1,80 @@
+#+TITLE: CPU bwrap execution
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY: 03-cli-dry-run
+#+PARENT: ../spec.org
+
+* Context
+
+After dry-run proves the contract, the runner should launch bwrap for ordinary
+CPU commands and preserve stdout, stderr, and result evidence.
+
+* Requirements
+
+- Execute the planned bwrap argv when ~--dry-run~ is not set.
+- Capture stdout and stderr into run-record logs.
+- Return the wrapped command's exit code from ~tools/ferric_run.py~.
+- Write ~result.json~ with:
+  - ~ok~
+  - ~exit_code~
+  - timestamps or duration
+  - dry-run/executed status
+- Keep Ferric mounted writable and peer repos mounted according to the profile.
+
+* Out of scope
+
+- CUDA device/library projection.
+- Rootfs creation.
+- Named workflow shortcuts.
+
+* Verification
+
+- Unit tests for result writing on success and failure.
+- Integration-style test that uses a fake bwrap executable to assert argv,
+  stdout, stderr, and exit-code propagation without requiring a real rootfs.
+- Manual verification with a real rootfs when available:
+
+#+begin_src sh
+tools/ferric_run.py --rootfs /path/to/rootfs -- \
+  bazel test //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+* Answer
+
+Implemented the CPU bwrap execution slice.
+
+Files changed:
+- ~tools/ferric_run.py~
+- ~tools/ferric_run/bwrap.py~
+- ~tools/ferric_run/records.py~
+- ~tests/ferric_run/test_cli.py~
+- ~tests/ferric_run/test_records.py~
+
+Red/green evidence:
+- The slice tests cover fake-bwrap command execution, stdout/stderr capture,
+  exit-code propagation, and success/failure result records without depending
+  on a real rootfs.
+- Final green run: ~python3 -m unittest discover -s tests/ferric_run -p 'test_*.py'~
+  passed with 20 tests.
+
+Verification commands and outcomes:
+- ~python3 -m unittest discover -s tests/ferric_run -p 'test_*.py'~:
+  passed, 20 tests.
+- ~python3 -m py_compile tools/ferric_run.py tools/ferric_run/*.py~:
+  passed.
+- ~tools/ferric_run.py --dry-run --rootfs "$tmp_rootfs" -- true~:
+  passed. The final smoke is dry-run by requirement, so no real bwrap command
+  was launched in Task 6.
+- ~git diff --check~: passed.
+
+Intentional follow-up:
+- Manual execution with a real rootfs path remains available through the
+  generic command interface. Task 6 required the dry-run smoke, not a real CPU
+  bwrap launch.
+
+* Final review fix
+
+Preflight now fails before CPU execution when a required present host repo lacks
+its sandbox target path inside the rootfs. Optional repos with present host
+paths but missing rootfs target paths are warned and omitted from executable
+bwrap argv through ~MountSpec.present=false~.

@@ -1,0 +1,83 @@
+#+TITLE: CLI dry-run contract
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY: 01-profile-and-config, 02-bwrap-plan-and-records
+#+PARENT: ../spec.org
+
+* Context
+
+Dry-run is the first user-visible command surface. It proves the profile,
+preflight, plan, and run-record contract without requiring a working rootfs or
+launching bwrap.
+
+* Requirements
+
+- Add ~tools/ferric_run.py~ CLI entrypoint.
+- Support:
+  - ~--profile~
+  - ~--rootfs~
+  - ~--bwrap~
+  - ~--cuda~
+  - ~--dry-run~
+  - generic command argv after ~--~
+- Implement bwrap resolution order:
+  1. ~--bwrap~
+  2. ~FERRIC_BWRAP~
+  3. ~PATH~
+- Implement rootfs resolution through CLI/env/profile defaults.
+- Create a run directory and write command, preflight, plan, and result
+  artifacts for dry runs.
+- Do not launch bwrap in dry-run mode.
+
+* Out of scope
+
+- Real execution.
+- CUDA mount projection.
+- Named workflow shortcuts.
+
+* Verification
+
+- Unit tests for CLI parsing and precedence.
+- Dry-run integration test with a temporary rootfs path and harmless command.
+- Assert expected artifacts exist and result marks the command as not executed.
+
+* Answer
+
+Implemented the CLI dry-run slice.
+
+Files changed:
+- ~tools/ferric_run.py~
+- ~tools/ferric_run/README.md~
+- ~tools/ferric_run/__init__.py~
+- ~tests/ferric_run/test_cli.py~
+
+Red/green evidence:
+- The slice tests cover CLI parsing, rootfs and bwrap precedence, dry-run
+  artifact creation, and dry-run result semantics.
+- Final green run: ~python3 -m unittest discover -s tests/ferric_run -p 'test_*.py'~
+  passed with 20 tests.
+
+Verification commands and outcomes:
+- ~python3 -m unittest discover -s tests/ferric_run -p 'test_*.py'~:
+  passed, 20 tests.
+- ~python3 -m py_compile tools/ferric_run.py tools/ferric_run/*.py~:
+  passed.
+- ~tools/ferric_run.py --dry-run --rootfs "$tmp_rootfs" -- true~:
+  passed; generated ~.ferric/runs/20260821T171559655439Z/~ with
+  ~result.json~ recording ~executed=false~ and ~ok=true~.
+- ~git diff --check~: passed.
+
+Intentional follow-up:
+- Named workflow shortcuts remain out of scope; the CLI accepts generic command
+  argv after ~--~.
+
+* Final review fix
+
+The dry-run fixtures now create the required sandbox mountpoint inside the
+temporary rootfs before expecting preflight success:
+~/workspace/ferric_continuum~ maps to
+~<rootfs>/workspace/ferric_continuum~.
+
+This preserves the dry-run artifact contract while matching bwrap's real launch
+requirement that bind targets already exist after the rootfs is mounted
+read-only.

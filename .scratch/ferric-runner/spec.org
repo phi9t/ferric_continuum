@@ -1,0 +1,295 @@
+#+TITLE: Ferric local GPU-kernel study runner
+#+TYPE: spec
+#+STATUS: approved
+
+* Goal
+
+Add a Ferric-owned execution runner inspired by Vaso, scoped to GPU-kernel
+study workflows across Ferric Continuum and peer repositories. The runner
+executes declared commands inside an existing Bubblewrap rootfs, records the
+exact execution contract, and writes repo-local run evidence.
+
+Ferric remains the primary writable experiment repo. Peer repositories such as
+~modular~, ~torchtitan~, ~monarch~, ~nccl~, and ~cutlass~ are mounted from an
+explicit profile and default to read-only study corpora unless the profile says
+otherwise.
+
+* Approved design
+
+** User interface
+
+The first slice adds a Python CLI:
+
+#+begin_src sh
+tools/ferric_run.py \
+  --profile tools/ferric_run/profiles/gpu-kernel-study.json \
+  --rootfs /path/to/rootfs \
+  -- bazel test //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+The command surface is generic:
+
+#+begin_src sh
+tools/ferric_run.py --rootfs /path/to/rootfs -- <command...>
+tools/ferric_run.py --profile <path> --rootfs /path/to/rootfs -- <command...>
+tools/ferric_run.py --cuda --rootfs /path/to/rootfs -- <command...>
+tools/ferric_run.py --dry-run --rootfs /path/to/rootfs -- <command...>
+#+end_src
+
+Named Bazel shortcuts are out of scope for the first slice. Bazel remains the
+build and test authority; the runner only supplies the rootfs execution
+substrate and evidence record.
+
+** Source layout
+
+Keep the runner small, but split testable module interfaces once the CLI would
+otherwise become a bag of helpers:
+
+#+begin_src text
+tools/ferric_run.py
+tools/ferric_run/
+  __init__.py
+  config.py
+  bwrap.py
+  preflight.py
+  records.py
+  profiles/gpu-kernel-study.json
+#+end_src
+
+Module responsibilities:
+
+- ~config.py~ loads profiles, resolves ~repo://self~, validates repo mount
+  declarations, and applies CLI/env/default precedence.
+- ~bwrap.py~ owns ~BwrapPlan~ and argv construction.
+- ~preflight.py~ checks rootfs, bwrap, repo mounts, command arguments, and CUDA
+  intent.
+- ~records.py~ owns run ids and writes ~.ferric/runs/<run_id>/~ artifacts.
+- ~tools/ferric_run.py~ is the CLI adapter that wires these modules together.
+
+** Configuration
+
+The first checked-in profile lives at:
+
+#+begin_src text
+tools/ferric_run/profiles/gpu-kernel-study.json
+#+end_src
+
+The profile declares a primary repo and a map of visible workspace repos:
+
+#+begin_src json
+{
+  "workspace": {
+    "primary_repo": "ferric_continuum",
+    "repos": {
+      "ferric_continuum": {
+        "host": "repo://self",
+        "sandbox": "/workspace/ferric_continuum",
+        "mode": "rw",
+        "required": true
+      },
+      "modular": {
+        "host": "/data02/home/philip.yang/workspace/modular",
+        "sandbox": "/workspace/modular",
+        "mode": "ro",
+        "required": false
+      },
+      "torchtitan": {
+        "host": "/data02/home/philip.yang/workspace/torchtitan",
+        "sandbox": "/workspace/torchtitan",
+        "mode": "ro",
+        "required": false
+      },
+      "monarch": {
+        "host": "/data02/home/philip.yang/workspace/monarch",
+        "sandbox": "/workspace/monarch",
+        "mode": "ro",
+        "required": false
+      }
+    }
+  }
+}
+#+end_src
+
+Peer repos default to read-only. A profile may mark a peer repo required when a
+specific study workflow cannot proceed without it. Missing optional repos should
+produce preflight warnings, not hard failures.
+
+Configuration precedence:
+
+1. CLI flags.
+2. Environment variables such as ~FERRIC_ROOTFS~ and ~FERRIC_BWRAP~.
+3. Checked-in profile defaults.
+4. Hardcoded safe defaults.
+
+Bubblewrap binary resolution:
+
+1. ~--bwrap /path/to/bwrap~.
+2. ~FERRIC_BWRAP=/path/to/bwrap~.
+3. ~PATH~ lookup.
+
+The resolved bwrap path is recorded in the plan.
+
+** Execution flow
+
+#+begin_src text
+CLI args
+  -> load profile
+  -> resolve repo://self and peer repos
+  -> resolve rootfs and bwrap binary
+  -> preflight
+  -> create .ferric/runs/<run_id>/
+  -> write command.json
+  -> write preflight.json
+  -> build bwrap argv
+  -> write bwrap-plan.json
+  -> execute unless --dry-run
+  -> capture stdout.log and stderr.log
+  -> write result.json
+#+end_src
+
+The run directory is:
+
+#+begin_src text
+.ferric/runs/<run_id>/
+  command.json
+  preflight.json
+  bwrap-plan.json
+  stdout.log
+  stderr.log
+  result.json
+#+end_src
+
+~.ferric/~ is generated state and should be ignored by git. Checked-in profiles
+and documentation live under ~tools/ferric_run/~ and the tracker.
+
+** Bwrap mount contract
+
+The first slice requires an existing rootfs path and does not build, sync, or
+repair rootfs contents.
+
+Initial mount contract:
+
+#+begin_src text
+/workspace/ferric_continuum   rw
+/workspace/<peer-repo>        ro by default, profile-declared
+/tmp                          tmpfs
+/proc                         proc
+/dev                          dev
+/sys                          ro-bind-try
+#+end_src
+
+The bwrap plan records every mount with host path, sandbox path, mode,
+required/optional status, and whether it was present at preflight time. It also
+records a stable ~bwrap_argv_sha256~ so agents can compare the declared plan to
+the launched argv.
+
+** CUDA scope
+
+CUDA is explicit:
+
+#+begin_src sh
+tools/ferric_run.py --cuda --rootfs /path/to/rootfs -- \
+  bazel test --config=cuda //ferric_continuum/tnsr:cuda_forward_tests
+#+end_src
+
+First slice behavior:
+
+- ~--cuda~ records CUDA intent in ~command.json~, ~preflight.json~, and
+  ~bwrap-plan.json~.
+- Preflight checks expected host signals such as ~/dev/nvidia*~ and likely
+  driver-library roots.
+- If ~--cuda~ is requested and required host CUDA signals are absent, fail
+  before execution.
+- The first slice does not automatically project CUDA devices or driver
+  libraries into bwrap.
+
+The immediate follow-up slice should add explicit CUDA projection mounts for
+device nodes, driver libraries, and enough runtime paths for Ferric CUDA Bazel
+targets.
+
+** Error handling
+
+- Missing rootfs: fail preflight before execution.
+- Missing bwrap: fail preflight before execution.
+- Missing required repo mount: fail preflight before execution.
+- Missing optional repo mount: write a warning and omit the mount.
+- CUDA requested but required host CUDA signals missing: fail preflight before
+  execution.
+- Command exits nonzero: preserve logs and write ~result.json~ with ~ok=false~.
+- Dry run: write command, preflight, plan, and result artifacts without
+  launching bwrap.
+
+* Out of scope
+
+- Rootfs creation or synchronization.
+- Package manager orchestration.
+- Agent runtime integration.
+- Named workflow shortcuts such as ~test-tnsr~ or ~cuda-smoke~.
+- Making Modular or any peer repo build successfully inside the rootfs.
+- Multi-repo write workflows by default.
+- Automatic CUDA driver or toolkit repair.
+
+* Verification strategy
+
+Normal tests must not require a real rootfs or CUDA device.
+
+Unit coverage:
+
+- Profile loading and validation.
+- ~repo://self~ resolution.
+- Required vs optional repo mount behavior.
+- Peer repo default mode is read-only.
+- Bwrap resolution order.
+- Mount ordering and mode to bwrap-argv translation.
+- ~BwrapPlan~ JSON and ~bwrap_argv_sha256~ stability.
+- Run id and run-record writing.
+- Dry-run behavior writes all expected artifacts without executing the command.
+- CUDA preflight failure when ~--cuda~ is requested and required host signals
+  are absent.
+
+Integration-style dry-run coverage:
+
+#+begin_src sh
+tools/ferric_run.py --dry-run --rootfs <tmpdir> -- true
+#+end_src
+
+Assertions:
+
+- ~.ferric/runs/<run_id>/command.json~ exists.
+- ~.ferric/runs/<run_id>/preflight.json~ exists.
+- ~.ferric/runs/<run_id>/bwrap-plan.json~ exists.
+- ~.ferric/runs/<run_id>/result.json~ exists.
+- Ferric mount is ~rw~.
+- Modular mount is ~ro~ when present.
+- Missing optional peer repos produce warnings rather than failure.
+
+Manual/rootfs verification once a real rootfs is available:
+
+#+begin_src sh
+tools/ferric_run.py --rootfs /path/to/rootfs -- \
+  bazel test //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+Follow-up CUDA projection verification:
+
+#+begin_src sh
+tools/ferric_run.py --cuda --rootfs /path/to/rootfs -- \
+  bazel test --config=cuda //ferric_continuum/tnsr:cuda_forward_tests
+#+end_src
+
+* Implementation tickets
+
+- [[file:issues/01-profile-and-config.org][01-profile-and-config]]
+- [[file:issues/02-bwrap-plan-and-records.org][02-bwrap-plan-and-records]]
+- [[file:issues/03-cli-dry-run.org][03-cli-dry-run]]
+- [[file:issues/04-cpu-execution.org][04-cpu-execution]]
+- [[file:issues/05-cuda-preflight.org][05-cuda-preflight]]
+
+* Design notes
+
+- Ferric owns the runner because this is a Ferric workflow and evidence store.
+- Vaso remains the architectural reference, not a vendored dependency.
+- Peer repos are mounted through a general profile mechanism so Modular is the
+  first concrete GPU-kernel study corpus rather than a hardcoded exception.
+- The design deliberately starts with an existing rootfs to avoid mixing
+  execution-contract work with rootfs materialization.

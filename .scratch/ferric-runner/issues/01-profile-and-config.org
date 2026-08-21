@@ -1,0 +1,71 @@
+#+TITLE: Profile and config model
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY:
+#+PARENT: ../spec.org
+
+* Context
+
+The Ferric runner needs a checked-in profile and a small config module before it
+can build bwrap plans or run commands. The profile makes peer-repo mounts
+explicit so Ferric can study GPU-kernel code across repositories without
+hardcoding each repo in the CLI.
+
+* Requirements
+
+- Add ~tools/ferric_run/profiles/gpu-kernel-study.json~.
+- Add config loading and validation for:
+  - primary repo name
+  - repo map
+  - host path
+  - sandbox path
+  - mode: ~ro~ or ~rw~
+  - required flag
+- Resolve ~repo://self~ to the Ferric git/worktree root.
+- Default peer repositories to read-only when mode is omitted.
+- Treat missing required repos as errors and missing optional repos as warnings.
+- Preserve CLI/env/profile precedence for rootfs and bwrap values.
+
+* Out of scope
+
+- Building bwrap argv.
+- Writing run records.
+- Executing commands.
+- CUDA checks.
+
+* Verification
+
+- Unit tests for profile loading and validation.
+- Unit tests for ~repo://self~ resolution.
+- Unit tests proving peer repos default to ~ro~.
+- Unit tests proving optional missing peers warn while missing required repos
+  fail.
+
+* Answer
+
+Implemented the profile/config slice.
+
+Files changed:
+- ~tools/ferric_run/config.py~
+- ~tools/ferric_run/profiles/gpu-kernel-study.json~
+- ~tests/ferric_run/test_config.py~
+
+Red/green evidence:
+- The slice tests cover profile loading, validation, ~repo://self~
+  resolution, CLI/env/profile precedence, read-only peer defaults, optional
+  peer warnings, and required peer failures.
+- Final green run: ~python3 -m unittest discover -s tests/ferric_run -p 'test_*.py'~
+  passed with 20 tests.
+
+Verification commands and outcomes:
+- ~python3 -m unittest discover -s tests/ferric_run -p 'test_*.py'~:
+  passed, 20 tests.
+- ~python3 -m py_compile tools/ferric_run.py tools/ferric_run/*.py~:
+  passed.
+- ~tools/ferric_run.py --dry-run --rootfs "$tmp_rootfs" -- true~:
+  passed with a generated run directory under ~.ferric/runs/~.
+- ~git diff --check~: passed.
+
+Intentional follow-up:
+- None for profile/config. CUDA device and library projection remains outside
+  this ticket by design.
