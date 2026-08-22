@@ -1,0 +1,245 @@
+#+TITLE: Plan-first simulation tracer bullet
+#+TYPE: report
+#+STATUS: complete
+
+* Summary
+
+Ticket 07 implements Option C as an explicit plan-first simulation layer under
+~tnsr::dtensor::plan~.
+
+The tracer bullet keeps distributed semantics outside ~Tensor~ and ~DTensor~.
+The plan records tensors, layouts, redistributions, planned collectives, cost
+entries, and deterministic injection sites. Execution interprets those records
+through the existing common mesh substrate and emits the shared
+~tnsr.mesh_sim_trace.v0~ trace vocabulary.
+
+* Supported semantics
+
+- Dense 5D mesh: ~pp x dp_replicate x dp_shard x cp x tp~.
+- Single-axis layouts using:
+  - ~Replicate~
+  - ~Shard(dim)~
+  - ~Partial(sum)~
+- Explicit redistribution steps:
+  - ~Replicate -> Shard(dim)~ as local slicing.
+  - ~Shard(dim) -> Replicate~ as traced all-gather plus deterministic
+    reconstruction through ~ShardMap~.
+  - ~Partial(sum) -> Shard(dim)~ as dimension-aware reduce-scatter.
+  - ~Partial(sum) -> Replicate~ as all-reduce.
+- Planned collective records comparable with executed trace-derived records.
+- Deterministic injection events represented in both the plan and the executed
+  trace/failure report.
+- Local ~tnsr~ math used only as a reference oracle for the dense unsharded
+  training-step shape/loss evidence.
+
+* Planned versus executed collectives
+
+The tiny dense training plan records three planned collectives:
+
+- ~AllGather~ on ~tp~ for ~plan_activation~ during ~Forward~.
+- ~ReduceScatter~ on ~dp_shard~ for ~plan_grad_partial~ during ~Backward~.
+- ~AllReduce~ on ~dp_replicate~ for ~plan_ddp_partial~ during ~Backward~.
+
+The executor records the same three collective records from the actual
+~CollectiveSimulator~ calls. Tests compare the planned and executed vectors
+directly.
+
+Local slicing for ~Replicate -> Shard(dim)~ is intentionally not counted as a
+planned collective; it appears as a shared ~LayoutTransition~ trace event.
+
+* Trace quality
+
+The executor reuses ~CollectiveSimulator~ for all communication-like behavior,
+so plan-first output uses the same trace event vocabulary as the common
+substrate, wrapper, and tensor-native tracer bullets.
+
+The tests assert:
+
+- ~LayoutTransition~ evidence for the activation local-slice boundary.
+- ~CollectiveKind::AllGather~ on ~MeshAxis::Tp~.
+- ~CollectiveKind::ReduceScatter~ on ~MeshAxis::DpShard~.
+- ~CollectiveKind::AllReduce~ on ~MeshAxis::DpReplicate~.
+- Exact equality between planned collective records and executed collective
+  records.
+
+* Chaos localization evidence
+
+The injection test inserts a planned ~Injection~ step before the
+~plan_grad_partial~ reduce-scatter boundary:
+
+- phase: ~TrainingPhase::Backward~
+- rank: ~Some(0)~
+- axis: ~Some(MeshAxis::DpShard)~
+- collective: ~Some(CollectiveKind::ReduceScatter)~
+- tensor: ~Some(\"plan_grad_partial\")~
+
+Execution records both a shared ~MeshTraceEvent::Injection~ and a
+~MeshTraceEvent::Failure~ with the same deterministic label.
+
+* Reference check evidence
+
+The plan executor calls ~TrainingStepScenario::tiny_dense()~ and
+~run_unsharded_reference()~ to obtain the reference loss and output shape.
+
+The supported activation slice uses
+~TrainingStepScenario::reference_activation_value()~ as a deterministic local
+oracle. The plan executes ~Replicate -> Shard -> Replicate~ and reports
+~activation_matches_reference = true~ only when the reconstructed activation has
+the same shape and exact data as that oracle.
+
+* Unsupported semantics and design limitations
+
+- Multi-axis layout propagation is rejected instead of guessed.
+- Uneven sharding remains unsupported.
+- Only ~Partial(sum)~ is modeled.
+- Derived mesh views such as ~loss = dp_replicate * dp_shard * cp~ are not
+  implemented as first-class plan axes in this tracer bullet.
+- The cost records are deterministic inspection records, not a calibrated
+  topology or bandwidth model.
+- The executor is synchronous and single-process.
+- There is no recovery, rescheduling, or retry after injected faults.
+- The plan is not integrated with ~tnsr~ autograd scheduling. Local ~tnsr~ math
+  remains a reference oracle rather than the owner of distributed semantics.
+
+* Interface complexity
+
+The public surface added for this option is:
+
+#+begin_src rust
+pub struct MeshSimPlan {
+    pub dims: ParallelDims5D,
+    pub steps: Vec<MeshSimStep>,
+}
+
+pub enum MeshSimStep {
+    Tensor { name: String, global_shape: Shape, layout: Layout },
+    Redistribute { tensor: String, src: Layout, dst: Layout, phase: TrainingPhase },
+    Collective { kind: CollectiveKind, axis: MeshAxis, tensor: String, phase: TrainingPhase },
+    Cost { tensor: String, phase: TrainingPhase, collective: CollectiveKind, axis: MeshAxis, bytes: u64 },
+    Injection { event: InjectionEvent },
+}
+
+pub struct MeshSimPlanReport {
+    pub trace: MeshTrace,
+    pub planned_collectives: usize,
+    pub executed_collectives: usize,
+    pub planned_collective_records: Vec<MeshSimCollectiveRecord>,
+    pub executed_collective_records: Vec<MeshSimCollectiveRecord>,
+    pub costs: Vec<MeshSimCost>,
+    pub failures: Vec<FailureRecord>,
+    ...
+}
+#+end_src
+
+This option has the clearest observability surface of the three tracer bullets:
+plan inspection happens before execution, and planned/executed collectives can
+be compared without decoding tensor internals. The tradeoff is weaker DTensor
+ergonomics: callers interact with a simulator plan, not a distributed tensor
+value or native tensor metadata.
+
+* Files touched
+
+- ~ferric_continuum/tnsr/src/dtensor/plan.rs~
+- ~ferric_continuum/tnsr/src/dtensor/mod.rs~
+- ~ferric_continuum/tnsr/BUILD.bazel~
+- ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+- ~.scratch/dtensor-mesh-simulation/reports/07-plan-first-simulation.org~
+- ~.scratch/dtensor-mesh-simulation/issues/07-plan-first-simulation-tracer-bullet.org~
+- ~.superpowers/sdd/2026-08-18-remaining-architecture-options-plan.org/task-07-report.md~
+
+* Verification
+
+Red bar:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: FAIL at 2026-08-21 23:25 UTC. The new tests failed to build because
+~tnsr::dtensor::MeshSimPlan~ and ~tnsr::dtensor::MeshSimStep~ were unresolved.
+
+Focused green:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: PASS at 2026-08-21 23:28 UTC.
+
+Final required command:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+Result: PASS at 2026-08-21 23:30 UTC.
+
+- ~//ferric_continuum/tnsr:mesh_sim_tests~: PASSED
+- ~//ferric_continuum/tnsr:distributed_tests~: PASSED
+- ~//ferric_continuum/tnsr:lib_tests~: PASSED
+
+* Review fix round 1
+
+The first review found two gaps:
+
+- Planned collectives were compared against an executor side vector, not records
+  derived from ~MeshTrace~ itself.
+- Injected failure localization did not include layout context.
+
+Fixes:
+
+- Added ~tensor: Option<String>~ to ~MeshTraceEvent::Collective~. Generic
+  substrate collectives record ~None~; plan-owned collectives annotate the
+  emitted shared trace event with ~Some(tensor_name)~.
+- Added ~layout: Option<String>~ to ~FailureRecord~. Generic injection records
+  default to ~None~; the plan-first executor annotates injected failures with
+  the source layout active at the failure site, for example
+  ~DpShard:Partial(sum)~.
+- Added ~MeshSimCollectiveRecord::from_trace(&MeshTrace)~ and changed
+  ~MeshSimPlan::execute~ to populate ~executed_collective_records~ from the
+  trace, not from a private side vector.
+- Updated plan-first tests to compare planned records with records derived from
+  ~MeshTrace~ and to assert injected failure layout context.
+
+Compatibility note:
+
+- The trace schema namespace remains ~tnsr.mesh_sim_trace.v0~ per the requested
+  stable namespace. This round extends in-memory Rust trace structs with
+  optional fields only. Existing non-plan collective emitters set
+  ~tensor: None~, and existing generic injection records set ~layout: None~.
+
+Round-1 red bar:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: FAIL at 2026-08-21 23:35 UTC. The adjusted tests failed to build
+because ~FailureRecord~ had no ~layout~ field and
+~MeshTraceEvent::Collective~ had no ~tensor~ field.
+
+Round-1 focused green:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: PASS at 2026-08-21 23:39 UTC.
+
+Round-1 final verification:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+Result: PASS at 2026-08-21 23:43 UTC.
+
+- ~//ferric_continuum/tnsr:mesh_sim_tests~: PASSED
+- ~//ferric_continuum/tnsr:distributed_tests~: PASSED
+- ~//ferric_continuum/tnsr:lib_tests~: PASSED

@@ -1,6 +1,6 @@
 #+TITLE: Tensor-native layout tracer bullet
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: resolved
 #+BLOCKED_BY: 04-complete-redistribution-substrate
 #+PARENT: ../spec.org
 
@@ -90,3 +90,150 @@ impl Tensor {
 * Comments
 
 * Answer
+
+Resolved in the isolated worktree without committing.
+
+Report:
+
+- [[file:../reports/06-tensor-native-layout.org][06 tensor-native layout tracer bullet report]]
+
+Implemented native tensor layout metadata:
+
+#+begin_src rust
+pub struct TensorLayoutMeta {
+    pub global_shape: Shape,
+    pub layout: Layout,
+    pub dims: ParallelDims5D,
+    pub rank: usize,
+}
+
+impl Tensor {
+    pub fn with_layout_meta(self, meta: TensorLayoutMeta) -> Self;
+    pub fn layout_meta(&self) -> Option<TensorLayoutMeta>;
+}
+#+end_src
+
+Implemented explicit training-step propagation through:
+
+#+begin_src rust
+pub fn redistribute_native_training_step_boundary(
+    tensors: &[Tensor],
+    dst: Layout,
+    sim: &mut CollectiveSimulator,
+    phase: TrainingPhase,
+    tensor_name: &str,
+) -> Result<Vec<Tensor>, NativeLayoutError>;
+#+end_src
+
+Red evidence:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: FAIL at 2026-08-21 23:04 UTC. Expected missing-feature failure:
+unresolved imports for ~redistribute_native_training_step_boundary~,
+~NativeLayoutError~, and ~TensorLayoutMeta~, plus missing
+~Tensor::with_layout_meta~ and ~Tensor::layout_meta~ methods.
+
+Second red evidence:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: FAIL at 2026-08-21 23:06 UTC. Expected missing-harness failure:
+~TrainingStepScenario::run_native_layout_tracer_bullet~ did not exist.
+
+Green evidence:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: PASS at 2026-08-21 23:07 UTC.
+
+Final required verification:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:lib_tests \
+  //ferric_continuum/tnsr:tnsr_tests
+#+end_src
+
+Result: PASS at 2026-08-21 23:09 UTC. All three targets passed:
+
+- ~//ferric_continuum/tnsr:mesh_sim_tests~
+- ~//ferric_continuum/tnsr:lib_tests~
+- ~//ferric_continuum/tnsr:tnsr_tests~
+
+Core seams touched:
+
+- ~tensor.rs~: added optional ~TensorInner::layout_meta~ plus attach/read API.
+- ~dtensor/native.rs~: added explicit native boundary helper, typed error, and
+  native tracer-bullet harness report.
+- ~dtensor/mod.rs~: re-exported native types and helper.
+- ~BUILD.bazel~: included ~src/dtensor/native.rs~ in ~_TNSR_SRCS~.
+- ~mesh_sim_test.rs~: added native metadata, no-silent-propagation, harness,
+  injection, and unsupported-propagation tests.
+
+Unsupported semantics recorded in the report:
+
+- No arbitrary op metadata propagation.
+- No multi-axis native propagation.
+- No cross-axis conversion.
+- No derived loss mesh view.
+- No distributed autograd producer wiring.
+
+** Review fix round 1
+
+Reviewer finding addressed: ~redistribute_native_training_step_boundary~ did
+not validate that ~CollectiveSimulator::dims~ matched the
+~TensorLayoutMeta::dims~ carried by native tensors. A same-world-size simulator
+with different axis factorization could compute and trace under one mesh while
+returned tensor metadata described another.
+
+Fix:
+
+- Added typed ~NativeLayoutError::SimulatorDimsMismatch { metadata, simulator }~.
+- Added the mismatch check immediately after native tensor metadata validation
+  and before any no-op return, simulator redistribution call, or trace event.
+- Added
+  ~native_layout_rejects_simulator_dims_mismatch_with_same_world_size~. The test
+  uses metadata dims ~ParallelDims5D::new(1,1,1,1,4)~ and simulator dims
+  ~ParallelDims5D::new(1,1,2,1,2)~. Both have world size 4, but the axis
+  factorization differs.
+
+Red evidence:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: FAIL at 2026-08-21 23:16 UTC. Expected missing-fix failure: the new
+test failed to build because ~NativeLayoutError::SimulatorDimsMismatch~ did not
+exist.
+
+Focused green:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: PASS at 2026-08-21 23:16 UTC.
+
+Final verification:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:lib_tests \
+  //ferric_continuum/tnsr:tnsr_tests
+#+end_src
+
+Result: PASS at 2026-08-21 23:18 UTC. All three targets passed:
+
+- ~//ferric_continuum/tnsr:mesh_sim_tests~
+- ~//ferric_continuum/tnsr:lib_tests~
+- ~//ferric_continuum/tnsr:tnsr_tests~

@@ -1,6 +1,6 @@
 #+TITLE: Plan-first simulation tracer bullet
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: resolved
 #+BLOCKED_BY: 04-complete-redistribution-substrate
 #+PARENT: ../spec.org
 
@@ -91,3 +91,118 @@ pub enum MeshSimStep {
 * Comments
 
 * Answer
+
+Implemented ticket 07 as the Option C plan-first simulation tracer bullet.
+
+- Code: ~ferric_continuum/tnsr/src/dtensor/plan.rs~
+- Report: [[file:../reports/07-plan-first-simulation.org][07 plan-first simulation report]]
+- Task report:
+  ~.superpowers/sdd/2026-08-18-remaining-architecture-options-plan.org/task-07-report.md~
+- Commit hash: none; direct user instruction was not to commit.
+
+Implementation notes:
+
+- Added ~MeshSimPlan~ and ~MeshSimStep~ as an explicit inspectable plan
+  representation for tensors, layouts, redistributions, collectives, costs, and
+  injection sites.
+- Added ~MeshSimPlanReport~ with shared ~MeshTrace~, planned/executed
+  collective counts, comparable collective records, deterministic cost records,
+  reference fields, and failure records.
+- Kept distributed semantics in the plan executor. Local ~tnsr~ math is used
+  only through ~TrainingStepScenario::run_unsharded_reference()~ and
+  ~reference_activation_value()~ as reference oracles.
+- Reused ~CollectiveSimulator~, ~ShardMap~, ~Layout~, ~Placement~,
+  ~InjectionPlan~, ~InjectionEvent~, and shared trace/failure records.
+- Covered one local-slice redistribution, one all-gather, one reduce-scatter,
+  one all-reduce, and one injected reduce-scatter failure represented in both
+  plan and trace.
+
+TDD red evidence:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: FAIL at 2026-08-21 23:25 UTC. The new tests failed to build with:
+
+#+begin_src text
+error[E0432]: unresolved imports `tnsr::dtensor::MeshSimPlan`, `tnsr::dtensor::MeshSimStep`
+#+end_src
+
+This was the expected missing plan-first API failure before implementation.
+
+Focused green evidence:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: PASS at 2026-08-21 23:28 UTC.
+
+Final required verification:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+Result: PASS at 2026-08-21 23:30 UTC.
+
+- ~//ferric_continuum/tnsr:mesh_sim_tests~: PASSED
+- ~//ferric_continuum/tnsr:distributed_tests~: PASSED
+- ~//ferric_continuum/tnsr:lib_tests~: PASSED
+
+** Review fix round 1
+
+Addressed both ticket 07 review findings:
+
+- Planned/executed collective comparison now derives executed records from
+  ~MeshTrace~ itself via ~MeshSimCollectiveRecord::from_trace(&MeshTrace)~.
+  ~MeshTraceEvent::Collective~ now carries ~tensor: Option<String>~; generic
+  substrate collectives use ~None~, and plan-owned collectives annotate the
+  emitted shared trace event with the planned tensor name.
+- Injected plan-first failures now include layout localization. ~FailureRecord~
+  now carries ~layout: Option<String>~; generic injection records use ~None~,
+  and the plan-first executor annotates failures with the source layout active
+  at the failure site, such as ~DpShard:Partial(sum)~.
+
+Compatibility note:
+
+- The shared trace namespace remains ~tnsr.mesh_sim_trace.v0~. This is an
+  in-memory Rust trace-struct extension with optional fields, not a JSON
+  serialization change.
+
+Round-1 red evidence:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: FAIL at 2026-08-21 23:35 UTC. The adjusted tests failed to build
+because ~FailureRecord~ had no ~layout~ field and
+~MeshTraceEvent::Collective~ had no ~tensor~ field.
+
+Round-1 focused green evidence:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: PASS at 2026-08-21 23:39 UTC.
+
+Round-1 final verification:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+Result: PASS at 2026-08-21 23:43 UTC.
+
+- ~//ferric_continuum/tnsr:mesh_sim_tests~: PASSED
+- ~//ferric_continuum/tnsr:distributed_tests~: PASSED
+- ~//ferric_continuum/tnsr:lib_tests~: PASSED

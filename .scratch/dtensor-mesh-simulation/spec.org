@@ -258,11 +258,30 @@ is guided by:
 - [[file:reports/04-common-substrate-reflection.org][04 common substrate reflection]]
 - [[file:plans/2026-08-18-redistribution-substrate-plan.org][Redistribution substrate implementation plan]]
 - [[file:plans/2026-08-18-remaining-architecture-options-plan.org][Remaining architecture options implementation plan]]
+- [[file:plans/2026-08-21-completion-sequence.org][Completion sequence]]
+
+* Completion gate for TLA+
+
+The distributed-training TLA+ track must wait for this experiment to finish its
+comparison and graduation path. The handoff is complete only after:
+
+- ticket 08 selects the durable simulator architecture from option evidence;
+- ticket 09 graduates the selected simulator path and proves a
+  DualPipe-level forward/backward component schedule;
+- ticket 10 writes the TLA+ handoff report with the stable mesh, layout,
+  process-group, collective, trace, and failure-record vocabulary.
+
+Ticket 08 alone is not enough to start formal modeling, because the TLA+ effort
+needs a stable executable schedule vocabulary rather than only an architecture
+recommendation.
 
 The reflection records the key correction from the first implementation wave:
 shape semantics are the main correctness risk. Every architecture tracer bullet
 must assert tensor rank, local shape, local data, trace evidence, and
 failure-localization quality instead of checking only that a collective ran.
+
+Ticket 08 selected the plan-first simulator as the durable direction to
+graduate. See [[file:reports/08-comparison.org][08 comparison report]].
 
 * Acceptance criteria
 
@@ -302,6 +321,8 @@ The goal is not for all three options to become production ready.
 - [[file:issues/06-tensor-native-layout-tracer-bullet.org][06 tensor-native layout tracer bullet]]
 - [[file:issues/07-plan-first-simulation-tracer-bullet.org][07 plan-first simulation tracer bullet]]
 - [[file:issues/08-comparison-report-and-recommendation.org][08 comparison report and recommendation]]
+- [[file:issues/09-graduate-selected-simulator.org][09 graduate selected simulator path]]
+- [[file:issues/10-handoff-to-distributed-training-tla.org][10 handoff DTensor mesh simulation to distributed-training TLA+]]
 
 * Verification matrix
 

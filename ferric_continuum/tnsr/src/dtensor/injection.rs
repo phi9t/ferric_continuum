@@ -73,6 +73,7 @@ impl InjectionPlan {
                     rank: Some(rank),
                     axis: event.axis,
                     tensor: None,
+                    layout: None,
                     collective: event.collective,
                 }),
             }

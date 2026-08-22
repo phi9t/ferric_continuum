@@ -1,0 +1,315 @@
+#+TITLE: Tensor-native layout tracer bullet report
+#+TYPE: report
+#+STATUS: resolved
+#+PARENT: ../spec.org
+
+* Summary
+
+Ticket 06 implemented Option B as explicit distribution metadata attached to
+the native ~Tensor~ value. The metadata is intentionally inert unless a caller
+uses the Option B training-step boundary helper:
+
+- ~TensorLayoutMeta~ records global shape, layout, dense 5D mesh dimensions,
+  and rank.
+- ~Tensor::with_layout_meta~ explicitly attaches metadata to an existing
+  tensor without changing tensor id, value, autograd producer, version, or
+  gradient state.
+- ~Tensor::layout_meta~ clones the metadata out for inspection.
+- ~redistribute_native_training_step_boundary~ is the only supported
+  propagation point. It consumes rank-complete tensors with matching metadata,
+  delegates redistribution to the common substrate, and attaches fresh metadata
+  to the returned tensors.
+- ~TrainingStepScenario::run_native_layout_tracer_bullet~ runs the same
+  activation, reduce-scatter, all-reduce, trace, and injection scenario as the
+  wrapper option.
+
+The result answers the ergonomics question without making arbitrary existing
+ops layout-aware.
+
+* Supported semantics
+
+The native boundary currently supports the same zero-or-one-axis transitions as
+the wrapper tracer bullet:
+
+| Source | Destination | Substrate path | Evidence |
+|--------+-------------+----------------+----------|
+| identical layout | identical layout | clone only, no trace event | native boundary helper behavior |
+| ~Replicate~ | ~Shard(dim)~ | ~CollectiveSimulator::local_slice~ | ~native_layout_training_boundary_consumes_metadata_and_traces~ |
+| ~Shard(dim)~ | ~Replicate~ | ~CollectiveSimulator::all_gather~ plus ~ShardMap::reconstruct_from_rank_shards~ | ~native_layout_harness_runs_minimum_slice_and_matches_reference_shape~ |
+| ~Partial(sum)~ | ~Replicate~ | ~CollectiveSimulator::all_reduce_sum~ | ~native_layout_harness_runs_minimum_slice_and_matches_reference_shape~ |
+| ~Partial(sum)~ | ~Shard(dim)~ | ~CollectiveSimulator::reduce_scatter_sum(axis, dim, phase, shards)~ | ~native_layout_harness_runs_minimum_slice_and_matches_reference_shape~ |
+
+The native helper validates:
+
+- every rank has metadata;
+- tensor count equals ~dims.world_size()~;
+- each tensor's recorded rank matches its vector index;
+- global shape, layout, and mesh dimensions match across all rank-local
+  tensors.
+- the supplied ~CollectiveSimulator~ has the same ~ParallelDims5D~ as the
+  tensors' layout metadata, even when both meshes have the same world size.
+
+* Unsupported semantics
+
+- Arbitrary local ops do not propagate layout metadata.
+- Cross-axis conversion, such as ~Tp:Shard(1) -> DpShard:Partial(sum)~, returns
+  ~NativeLayoutError::UnsupportedPropagation~.
+- Supplying a simulator whose mesh factorization differs from tensor metadata
+  returns ~NativeLayoutError::SimulatorDimsMismatch~ before any collective or
+  trace emission.
+- Multi-axis layouts return ~NativeLayoutError::UnsupportedPropagation~.
+- ~Local~ placement is not a distributed propagation target in this tracer
+  bullet.
+- Derived mesh views such as ~loss = dp_replicate * dp_shard * cp~ remain a
+  common-substrate limitation. The native report records
+  ~loss_reduction_supported = false~ instead of adding a private derived-axis
+  representation.
+- The helper creates new tensors for redistributed values. It preserves the
+  input ~requires_grad~ flag on each rank, but it does not wire a distributed
+  autograd producer. That is deliberate for this tracer bullet.
+
+* Core seams touched
+
+** Tensor seam
+
+- ~ferric_continuum/tnsr/src/tensor.rs~
+  - Added ~TensorLayoutMeta~.
+  - Added ~TensorInner::layout_meta: Option<TensorLayoutMeta>~.
+  - Initialized metadata to ~None~ in ~Tensor::from_value~.
+  - Added ~Tensor::with_layout_meta~ and ~Tensor::layout_meta~.
+
+** DTensor option seam
+
+- ~ferric_continuum/tnsr/src/dtensor/native.rs~
+  - Added ~NativeLayoutError~.
+  - Added ~NativeLayoutTracerBulletReport~.
+  - Added ~redistribute_native_training_step_boundary~.
+  - Added ~TrainingStepScenario::run_native_layout_tracer_bullet~.
+
+** Module/build seam
+
+- ~ferric_continuum/tnsr/src/dtensor/mod.rs~
+  - Re-exported native helper, native error/report types, and
+    ~TensorLayoutMeta~.
+- ~ferric_continuum/tnsr/BUILD.bazel~
+  - Added ~src/dtensor/native.rs~ to ~_TNSR_SRCS~.
+
+** Autograd and op seams
+
+- No existing autograd code was modified.
+- No existing op implementation was modified.
+- Existing ops create fresh tensors through ~finish_op~ and therefore keep
+  metadata absent unless an explicit native boundary attaches it later.
+
+* Local behavior preservation evidence
+
+The tests cover two local-behavior cases:
+
+- ~tensor_without_layout_meta_preserves_existing_local_behavior~ runs local
+  elementwise addition with no metadata and asserts the exact pre-change output
+  ~[11, 22, 33, 44]~ and ~None~ metadata on both inputs and output.
+- ~local_op_drops_layout_meta_without_explicit_native_boundary~ attaches
+  metadata to one input, runs ordinary ~basic::add~, asserts exact local math,
+  and asserts the output metadata is ~None~.
+
+The final required verification also ran the existing local/autograd suites:
+
+- ~//ferric_continuum/tnsr:lib_tests~
+- ~//ferric_continuum/tnsr:tnsr_tests~
+
+* Reference correctness evidence
+
+The native harness uses ~TrainingStepScenario::reference_activation_value~ as
+the deterministic unsharded activation source. It runs:
+
+- ~Replicate -> Shard(2)~ on ~tp~ for ~Shape([2,4,8])~ activations;
+- ~Shard(2) -> Replicate~ on ~tp~ and checks reconstructed shape and data;
+- ~Partial(sum) -> Shard(1)~ on ~dp_shard~ using dimension-aware
+  reduce-scatter;
+- ~Partial(sum) -> Replicate~ on ~dp_replicate~ using all-reduce.
+
+The test ~native_layout_harness_runs_minimum_slice_and_matches_reference_shape~
+asserts:
+
+- unsharded reference loss is finite;
+- reference output shape is ~Shape([2,4,8])~;
+- reconstructed activation shape is ~Shape([2,4,8])~;
+- reconstructed activation data equals the deterministic reference activation;
+- tp shard shape is ~Shape([2,4,4])~;
+- dp_shard reduce-scatter output shape is ~Shape([2,2])~;
+- dp_replicate all-reduce output shape is ~Shape([2,4])~.
+
+* Trace and failure evidence
+
+The native helper records common ~tnsr.mesh_sim_trace.v0~ events through the
+shared ~CollectiveSimulator~. The tests assert all-gather, reduce-scatter, and
+all-reduce events in the integrated harness report.
+
+Deterministic injection is exercised by
+~native_layout_harness_injection_records_failure_context~. The harness applies
+an ~InjectionPlan~ to native partial tensors before the
+~Partial(sum) -> Shard(dim)~ boundary and records:
+
+- phase: ~TrainingPhase::Backward~;
+- rank: ~Some(0)~;
+- axis: ~Some(MeshAxis::DpShard)~;
+- collective: ~Some(CollectiveKind::ReduceScatter)~;
+- tensor: ~Some("native_partial")~;
+- shared trace ~Injection~ and ~Failure~ events.
+
+Unsupported propagation is exercised by
+~native_layout_unsupported_propagation_fails_loudly~, which asserts
+~NativeLayoutError::UnsupportedPropagation~ and no silent trace event.
+
+Simulator/metadata mesh mismatch is exercised by
+~native_layout_rejects_simulator_dims_mismatch_with_same_world_size~, which
+uses metadata dims ~ParallelDims5D::new(1,1,1,1,4)~ and simulator dims
+~ParallelDims5D::new(1,1,2,1,2)~. Both have world size 4, but the native
+boundary returns ~NativeLayoutError::SimulatorDimsMismatch~ before any
+collective or trace event.
+
+* Interface complexity
+
+The public native surface is small:
+
+#+begin_src rust
+pub struct TensorLayoutMeta {
+    pub global_shape: Shape,
+    pub layout: Layout,
+    pub dims: ParallelDims5D,
+    pub rank: usize,
+}
+
+impl Tensor {
+    pub fn with_layout_meta(self, meta: TensorLayoutMeta) -> Self;
+    pub fn layout_meta(&self) -> Option<TensorLayoutMeta>;
+}
+
+pub fn redistribute_native_training_step_boundary(
+    tensors: &[Tensor],
+    dst: Layout,
+    sim: &mut CollectiveSimulator,
+    phase: TrainingPhase,
+    tensor_name: &str,
+) -> Result<Vec<Tensor>, NativeLayoutError>;
+#+end_src
+
+Compared with the wrapper option, this is more ergonomic at call sites that
+already traffic in ~Tensor~, but it increases the core tensor blast radius by
+adding layout metadata to ~TensorInner~. The strict explicit-boundary rule kept
+the autograd and op blast radius at zero for this tracer bullet.
+
+* Files touched
+
+- ~ferric_continuum/tnsr/src/tensor.rs~
+- ~ferric_continuum/tnsr/src/dtensor/native.rs~
+- ~ferric_continuum/tnsr/src/dtensor/mod.rs~
+- ~ferric_continuum/tnsr/BUILD.bazel~
+- ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+- ~.scratch/dtensor-mesh-simulation/reports/06-tensor-native-layout.org~
+- ~.scratch/dtensor-mesh-simulation/issues/06-tensor-native-layout-tracer-bullet.org~
+- ~.superpowers/sdd/2026-08-18-remaining-architecture-options-plan.org/task-06-report.md~
+
+* Verification
+
+Initial focused red bar:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: FAIL at 2026-08-21 23:04 UTC. The new tests failed to build because
+~redistribute_native_training_step_boundary~, ~NativeLayoutError~,
+~TensorLayoutMeta~, ~Tensor::with_layout_meta~, and ~Tensor::layout_meta~ did
+not exist.
+
+Second focused red bar:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: FAIL at 2026-08-21 23:06 UTC. The added native harness tests failed to
+build because ~TrainingStepScenario::run_native_layout_tracer_bullet~ did not
+exist.
+
+Focused green runs:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: PASS at 2026-08-21 23:07 UTC.
+
+Final required command:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:lib_tests \
+  //ferric_continuum/tnsr:tnsr_tests
+#+end_src
+
+Result: PASS at 2026-08-21 23:09 UTC. All three targets passed:
+
+- ~//ferric_continuum/tnsr:mesh_sim_tests~
+- ~//ferric_continuum/tnsr:lib_tests~
+- ~//ferric_continuum/tnsr:tnsr_tests~
+
+* Review fix round 1
+
+Reviewer finding: ~redistribute_native_training_step_boundary~ validated the
+rank-local tensor metadata but did not validate that the supplied simulator had
+the same mesh factorization as ~TensorLayoutMeta::dims~.
+
+Fix:
+
+- Added ~NativeLayoutError::SimulatorDimsMismatch { metadata, simulator }~.
+- Added a check immediately after metadata validation and before the identical
+  layout fast path or any simulator redistribution call.
+- Added
+  ~native_layout_rejects_simulator_dims_mismatch_with_same_world_size~ to prove
+  that same-world-size but differently factored meshes fail loudly and emit no
+  trace.
+
+Red evidence:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: FAIL at 2026-08-21 23:16 UTC. Expected missing-fix failure: the new
+test failed to build because ~NativeLayoutError::SimulatorDimsMismatch~ did not
+exist.
+
+Focused green:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: PASS at 2026-08-21 23:16 UTC.
+
+Final verification after the fix:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:lib_tests \
+  //ferric_continuum/tnsr:tnsr_tests
+#+end_src
+
+Result: PASS at 2026-08-21 23:18 UTC. All three targets passed:
+
+- ~//ferric_continuum/tnsr:mesh_sim_tests~
+- ~//ferric_continuum/tnsr:lib_tests~
+- ~//ferric_continuum/tnsr:tnsr_tests~
+
+* Recommendation
+
+Tensor-native layout is useful enough to keep as evidence for Option B because
+call sites can remain ~Tensor~-shaped and metadata attachment is explicit.
+However, graduating it would require a larger design decision about autograd
+and op propagation. This tracer bullet should remain constrained until the
+comparison report decides whether the ergonomic gain justifies placing
+distributed layout state on the core tensor type.

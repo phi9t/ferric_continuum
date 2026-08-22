@@ -1,6 +1,6 @@
 #+TITLE: Wrapper DTensor tracer bullet
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: resolved
 #+BLOCKED_BY: 04-complete-redistribution-substrate
 #+PARENT: ../spec.org
 
@@ -89,3 +89,99 @@ impl DTensor {
 * Comments
 
 * Answer
+
+Implemented ticket 05 as the Option A wrapper DTensor tracer bullet.
+
+- Code: ~ferric_continuum/tnsr/src/dtensor/wrapper.rs~
+- Report: [[file:../reports/05-wrapper-dtensor.org][05 wrapper DTensor report]]
+- Task report:
+  ~.superpowers/sdd/2026-08-18-remaining-architecture-options-plan.org/task-05-report.md~
+- Commit hash: none; direct user instruction was not to commit.
+
+Implementation notes:
+
+- Added ~DTensor~ with ~global_shape~, ~layout~, ~dims~, and rank-local
+  ~TensorValue~ shards.
+- Added ~DtError~ with typed variants for layout, shard, collective,
+  unsupported redistribution, and rank-count failures.
+- Reused ~ShardMap~ for local slicing and reconstruction.
+- Reused ~CollectiveSimulator~ for ~local_slice~, ~all_gather~,
+  ~all_reduce_sum~, and dimension-aware ~reduce_scatter_sum(axis, dim, ...)~.
+- Kept existing local ~Tensor~ math unchanged.
+- Kept support deliberately narrow to zero-or-one-axis layouts.
+- Documented derived ~loss~ mesh handling as a common-substrate limitation
+  rather than adding private wrapper semantics.
+
+TDD evidence:
+
+- Red bar:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+  Result: failed to build because ~tnsr::dtensor::DTensor~ and
+  ~tnsr::dtensor::DtError~ were unresolved. This was the expected missing
+  wrapper API failure.
+
+- Focused green run:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+  Result: PASS.
+
+Final required verification:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+Result: PASS at 2026-08-21 22:39 UTC.
+
+- ~//ferric_continuum/tnsr:mesh_sim_tests~: PASSED
+- ~//ferric_continuum/tnsr:lib_tests~: PASSED
+
+** Review fix 2026-08-21
+
+Addressed ticket 05 review blockers:
+
+- Added ~TrainingStepScenario::run_wrapper_dtensor_tracer_bullet~ so the shared
+  harness now has a wrapper-mediated Option A run.
+- Added integrated wrapper scenario test
+  ~wrapper_dtensor_harness_runs_minimum_slice_and_matches_reference_shape~,
+  covering replicated activation to ~Shard(2)~ on ~tp~, ~Shard -> Replicate~,
+  ~Partial(sum) -> Shard(1)~ on ~dp_shard~, ~Partial(sum) -> Replicate~ on
+  ~dp_replicate~, and explicit unsupported status for derived ~loss~ mesh
+  reduction.
+- Added wrapper injection test
+  ~wrapper_dtensor_harness_injection_records_failure_context~, which records
+  phase, rank, axis, collective, tensor, and shared trace failure evidence
+  through the wrapper path.
+- Changed ~DTensor::from_replicated~ to reject ~Placement::Partial(Sum)~ with
+  ~DtError::UnsupportedRedistribution~. Partial tensors are now constructed
+  explicitly from rank-local contribution shards in tests and the wrapper
+  harness.
+
+Final verification for the review fix is recorded in the task report:
+~.superpowers/sdd/2026-08-18-remaining-architecture-options-plan.org/task-05-report.md~.
+
+** Review fix round 2 2026-08-21
+
+Addressed the remaining wrapper/reference equality blocker:
+
+- Added ~TrainingStepScenario::reference_activation_value()~ as the deterministic
+  unsharded tensor value for the supported wrapper activation slice.
+- Updated ~run_wrapper_dtensor_tracer_bullet~ to use that exact reference value
+  as the wrapper source activation.
+- Added ~activation_matches_reference~ to the wrapper report. It is true only
+  when the reconstructed wrapper activation has the same shape and exact data
+  as the shared reference activation.
+- Updated ~wrapper_dtensor_harness_runs_minimum_slice_and_matches_reference_shape~
+  to assert the data equality evidence field.
+
+Final verification for round 2 is recorded in the task report:
+~.superpowers/sdd/2026-08-18-remaining-architecture-options-plan.org/task-05-report.md~.

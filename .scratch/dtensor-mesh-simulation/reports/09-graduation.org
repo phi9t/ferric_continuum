@@ -1,0 +1,193 @@
+#+TITLE: Plan-first simulator graduation
+#+TYPE: report
+#+STATUS: resolved
+#+PARENT: ../spec.org
+
+* Summary
+
+Ticket 09 graduates the ticket 08 recommendation: Option C, the plan-first
+simulator, is now the canonical mesh simulation path for the dense
+foundation-model-like scenario.
+
+The stable public entrypoint is:
+
+#+begin_src rust
+run_tiny_dense_mesh_simulation(dims, injection_plan)
+#+end_src
+
+This helper is intentionally a thin wrapper over the selected ticket 08
+candidate:
+
+#+begin_src rust
+MeshSimPlan::tiny_dense_training(dims)?.execute(injection_plan)
+#+end_src
+
+The lower-level ~MeshSimPlan~ API remains available for tests and future
+schedule inspection, but the report and tests name
+~run_tiny_dense_mesh_simulation~ as the stable caller-facing entrypoint.
+
+* Graduated behavior
+
+- The canonical entrypoint runs the tiny dense training-step plan and returns a
+  deterministic ~MeshSimPlanReport~.
+- ~MeshSimPlanReport::deterministic_run_report()~ renders stable text from the
+  same structured plan, trace, cost, vocabulary, and schedule data.
+- The executor continues to reuse the common dense mesh, layout, shard-map,
+  collective simulator, injection, and ~tnsr.mesh_sim_trace.v0~ trace
+  vocabulary.
+- Planned collectives remain directly comparable to collective records derived
+  from the executed trace.
+- Wrapper DTensor and tensor-native layout remain as tracer-bullet evidence and
+  test-support/control paths. They were not promoted to the canonical simulator
+  interface.
+
+* Stable vocabulary exported for TLA+
+
+The report exposes ~MeshSimStableVocabulary~ with:
+
+- mesh axes: ~pp,dp_replicate,dp_shard,cp,tp~
+- rank-coordinate ordering: row-major with ~tp~ fastest
+- process group construction: fix every non-selected axis and order members by
+  ascending global rank
+- placement names: ~Replicate~, ~Shard(dim)~, ~Partial(sum)~, ~Local~
+- layout transition names:
+  - ~Partial(sum)->Replicate~
+  - ~Partial(sum)->Shard(dim)~
+  - ~Shard(dim)->Replicate~
+  - ~Replicate->Shard(dim)~
+  - ~same-layout-noop~
+    This is an internal supported transition. The graduated plan executor
+    returns before recording a trace event when source and destination layouts
+    are identical, so current traces do not emit same-layout no-op events.
+- collective signatures:
+  - ~all_reduce_sum(axis, phase, shards)~
+  - ~all_gather(axis, phase, shards)~
+  - ~reduce_scatter_sum(axis, shard_dim, phase, shards)~
+  - ~broadcast(axis, phase, root_axis_index, shards)~
+- trace event fields:
+  - ~LayoutTransition{phase,tensor,src,dst}~
+  - ~Collective{phase,kind,axis,tensor,bytes,ranks}~
+  - ~Injection{phase,label,rank}~
+  - ~Failure(FailureRecord)~
+- failure record fields:
+  - ~phase~
+  - ~message~
+  - ~rank~
+  - ~axis~
+  - ~tensor~
+  - ~layout~
+  - ~collective~
+
+* DualPipe schedule vocabulary
+
+The new schedule model is ~DualPipeSchedule~ with ordered
+~DualPipeComponent~ entries grouped by ~DualPipeChunk~.
+
+Forward chunk 0 exposes:
+
+- ~attention~
+- ~all_to_all_dispatch~
+- ~mlp~
+- ~all_to_all_combine~
+- ~pp_communication~
+
+Backward chunk 0 exposes:
+
+- ~attention_input_gradient~
+- ~attention_weight_gradient~
+- ~all_to_all_dispatch_gradient~
+- ~mlp_input_gradient~
+- ~mlp_weight_gradient~
+- ~all_to_all_combine_gradient~
+- ~pp_communication~
+
+Each component carries explicit same-chunk dependencies on the previous
+component. The schedule also records legal overlap pairs. The current dense
+baseline allows one paired forward/backward overlap:
+
+#+begin_src text
+dualpipe.forward[0].mlp || dualpipe.backward[0].attention_input_gradient
+#+end_src
+
+Validation rejects same-direction overlap as a schedule error. The failure is
+reported as ~PlanError::Schedule(FailureRecord)~ with phase, message, tensor,
+layout, and empty collective context.
+
+* Deterministic run report
+
+The deterministic report includes:
+
+- canonical entrypoint name
+- trace schema
+- stable mesh/rank ordering vocabulary
+- ordered DualPipe forward and backward component lines
+- legal overlap lines
+- planned collective records
+- deterministic cost records
+- planned/executed collective counts
+- failure count
+
+The test suite runs the report twice for the same inputs and asserts byte-for-
+byte equality.
+
+* Unsupported and deferred semantics
+
+- TLA+ model implementation remains ticket 10.
+- MoE/EP execution semantics are still out of scope. Ticket 09 only adds
+  all-to-all dispatch/combine component labels needed at the DualPipe schedule
+  boundary.
+- CUDA/NCCL execution is not implemented.
+- Asynchronous collective progress is not implemented.
+- Overlap is represented and validated at schedule level, not executed through
+  an async runtime.
+- Fault recovery, retry, and rescheduling are not implemented.
+- Derived mesh views such as ~loss~ and ~fsdp~ remain named vocabulary, not
+  first-class simulator axes.
+- Multi-axis layout propagation, uneven sharding, sparse meshes, and non-sum
+  partial reductions remain unsupported.
+- The simulator is not integrated with real ~tnsr~ autograd scheduling.
+
+* Files touched
+
+- ~ferric_continuum/tnsr/src/dtensor/plan.rs~
+- ~ferric_continuum/tnsr/src/dtensor/mod.rs~
+- ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+- ~.scratch/dtensor-mesh-simulation/reports/09-graduation.org~
+- ~.scratch/dtensor-mesh-simulation/issues/09-graduate-selected-simulator.org~
+- ~.superpowers/sdd/2026-08-18-remaining-architecture-options-plan.org/task-09-report.md~
+
+* Verification
+
+Red bar:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: FAIL at 2026-08-22 00:00 UTC. The new tests failed to build because
+~run_tiny_dense_mesh_simulation~, ~DualPipeChunk~,
+~DualPipeComponentKind~, ~DualPipeSchedule~, and ~PlanError::Schedule~ were
+unresolved.
+
+Focused green:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: PASS at 2026-08-22 00:02 UTC.
+
+Final required command:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+Result: PASS at 2026-08-22 00:05 UTC.
+
+- ~//ferric_continuum/tnsr:mesh_sim_tests~: PASSED
+- ~//ferric_continuum/tnsr:distributed_tests~: PASSED
+- ~//ferric_continuum/tnsr:lib_tests~: PASSED

@@ -1,0 +1,34 @@
+#+TITLE: Distributed training TLA+ research note
+
+* DTensor mesh simulation prerequisite
+
+The distributed-training TLA+ track must begin from the DTensor mesh simulation
+handoff, not from the ticket 08 architecture recommendation alone.
+
+Canonical handoff:
+
+- [[file:../../.scratch/dtensor-mesh-simulation/reports/10-tla-handoff.org][DTensor mesh simulation TLA+ handoff]]
+
+Selected simulator path:
+
+#+begin_src rust
+run_tiny_dense_mesh_simulation(dims, injection_plan)
+#+end_src
+
+This entrypoint is the stable caller-facing wrapper over:
+
+#+begin_src rust
+MeshSimPlan::tiny_dense_training(dims)?.execute(injection_plan)
+#+end_src
+
+The inherited vocabulary includes the dense
+~pp x dp_replicate x dp_shard x cp x tp~ mesh, row-major rank-coordinate
+ordering with ~tp~ fastest, ordered process-group membership, placement and
+layout terms, supported redistribution transitions, collective signatures,
+~tnsr.mesh_sim_trace.v0~ events, failure record fields, and DualPipe-level
+forward/backward components.
+
+Ticket 08 selected the architecture direction. Ticket 09 graduated the selected
+simulator path and proved the DualPipe-level schedule vocabulary. Ticket 10 is
+the formal-modeling gate because it records the stable vocabulary and known
+limits that TLA+ must not overclaim.

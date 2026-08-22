@@ -1,0 +1,153 @@
+#+TITLE: Handoff DTensor mesh simulation to distributed-training TLA+
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY: 09-graduate-selected-simulator
+#+PARENT: ../spec.org
+
+* Context
+
+The distributed-training TLA+ effort is sequenced after DTensor mesh
+simulation. This ticket produces the durable handoff that lets the formal model
+reuse Ferric's selected mesh/layout/schedule vocabulary instead of defining a
+parallel abstraction.
+
+Planning input:
+
+- [[file:../plans/2026-08-21-completion-sequence.org][Completion sequence]]
+- [[file:09-graduate-selected-simulator.org][09 graduate selected simulator path]]
+- [[file:../../distributed-training-tla/issues/00-wait-for-dtensor-mesh-simulation.org][TLA+ gate ticket]]
+- [[file:../../../docs/research/distributed-training-tla.org][Durable TLA+ research note]]
+
+* Requirements
+
+- Confirm ticket 09 is resolved and cites a passing verification command.
+- Write the handoff report to
+  ~.scratch/dtensor-mesh-simulation/reports/10-tla-handoff.org~.
+- The handoff report must include:
+  - selected architecture and canonical simulator entrypoint
+  - mesh axes and rank-coordinate ordering
+  - process group construction and ordered membership
+  - placement and layout vocabulary
+  - supported redistribution transitions
+  - collective kinds and signature fields
+  - trace event names and required fields
+  - failure record fields
+  - DualPipe-level forward/backward component vocabulary
+  - known limits that TLA+ must not overclaim
+- Update
+  ~.scratch/distributed-training-tla/issues/00-wait-for-dtensor-mesh-simulation.org~
+  with an Answer that cites the handoff report and names the vocabulary to
+  inherit.
+- Update ~docs/research/distributed-training-tla.org~ with a short pointer to
+  the handoff report and the selected simulator path.
+- Do not implement TLA+ models in this ticket.
+
+* Out of scope
+
+- Changing the selected architecture.
+- Adding new simulator features.
+- Implementing TLC, Apalache, Bazel integration, or trace validation tooling.
+- Starting any ticket under ~.scratch/distributed-training-tla/~ other than
+  resolving the explicit wait gate.
+
+* Verification
+
+- The handoff report exists and is linked from both the DTensor tracker and the
+  TLA+ gate ticket.
+- The TLA+ gate ticket is marked ~resolved~ only after ticket 09 is resolved.
+- The durable research note no longer implies ticket 08 alone is enough to
+  begin formal modeling.
+- Run:
+
+#+begin_src sh
+rg -n "10-tla-handoff|selected architecture|DualPipe|tnsr.mesh_sim_trace" \
+  .scratch/dtensor-mesh-simulation \
+  .scratch/distributed-training-tla \
+  docs/research/distributed-training-tla.org
+
+git diff --check
+#+end_src
+
+* Comments
+
+* Answer
+
+Implemented ticket 10 as the documentation and tracker handoff from DTensor
+mesh simulation to the distributed-training TLA+ track.
+
+Ticket 09 is resolved and cites passing verification:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+Result recorded in ticket 09: PASS at 2026-08-22 00:05 UTC.
+
+Handoff report:
+
+- [[file:../reports/10-tla-handoff.org][10 TLA+ handoff report]]
+
+The handoff report names the selected architecture and canonical entrypoint:
+
+#+begin_src rust
+run_tiny_dense_mesh_simulation(dims, injection_plan)
+#+end_src
+
+This remains a stable wrapper over:
+
+#+begin_src rust
+MeshSimPlan::tiny_dense_training(dims)?.execute(injection_plan)
+#+end_src
+
+The report records the vocabulary the TLA+ track must inherit:
+
+- mesh axes and row-major rank-coordinate ordering with ~tp~ fastest
+- process group construction by fixed non-selected axes and ascending global
+  rank membership
+- placement and layout vocabulary
+- supported redistribution transitions
+- collective kinds and signature fields
+- ~tnsr.mesh_sim_trace.v0~ event names and required fields
+- failure record fields
+- DualPipe-level forward/backward component vocabulary
+- limits that the TLA+ work must not overclaim
+
+Updated the distributed-training TLA+ wait gate:
+
+- [[file:../../distributed-training-tla/issues/00-wait-for-dtensor-mesh-simulation.org][00 wait for DTensor mesh simulation]]
+
+The gate is marked resolved only after ticket 09 is resolved and this handoff
+report exists.
+
+Updated the durable research note:
+
+- [[file:../../../docs/research/distributed-training-tla.org][distributed-training TLA+ research note]]
+
+The note points at the handoff report and selected simulator path, and it no
+longer implies that ticket 08 alone is enough to begin formal modeling.
+
+No TLA+ models, TLC/Apalache/Bazel integration, trace validation tooling, Rust
+code, commits, pushes, landing, pull request, or subagents were used.
+
+Verification:
+
+#+begin_src sh
+rg -n "10-tla-handoff|selected architecture|DualPipe|tnsr.mesh_sim_trace" \
+  .scratch/dtensor-mesh-simulation \
+  .scratch/distributed-training-tla \
+  docs/research/distributed-training-tla.org
+#+end_src
+
+Result: PASS at 2026-08-22. The command found the handoff report links,
+selected architecture language, DualPipe vocabulary, and
+~tnsr.mesh_sim_trace.v0~ pointers across the DTensor tracker, the TLA+ gate,
+and the durable research note.
+
+#+begin_src sh
+git diff --check
+#+end_src
+
+Result: PASS at 2026-08-22. The command produced no output.

@@ -1,0 +1,308 @@
+#+TITLE: DTensor mesh simulation completion sequence
+#+TYPE: plan
+#+STATUS: ready-for-agent
+#+SPEC: ../spec.org
+
+* Purpose
+
+This plan defines the remaining work needed to complete the DTensor mesh
+simulation architecture experiment before the distributed-training TLA+ track
+starts implementation.
+
+Completion means more than choosing one of the three architecture options. The
+selected direction must also have a durable simulator path that can express the
+forward/backward structure needed by the TLA+ effort: mesh axes, layout
+movement, collective ordering, pipeline boundaries, component-level overlap,
+trace records, and failure evidence.
+
+* Route
+
+This is a gated wayfinder-to-implementation handoff. The current checkout
+already has an approved spec, common substrate, tickets 01-08, and two
+implementation plans. The remaining work should run ticket-by-ticket in
+isolated worktrees. Do not start the TLA+ implementation until the DTensor
+handoff ticket resolves.
+
+* Completion definition
+
+The DTensor mesh simulation effort is complete when all of the following are
+true:
+
+- Tickets 01-03 are marked resolved with their existing evidence.
+- Ticket 04 fixes dimension-aware reduce-scatter and records passing focused
+  Bazel evidence.
+- Tickets 05-07 each run the same dense training-step scenario through a
+  different architecture option and write option-local reports.
+- Ticket 08 compares those reports and recommends one durable direction.
+- Ticket 09 graduates the selected direction into the canonical simulator path
+  and adds a DualPipe-level schedule tracer.
+- Ticket 10 writes the handoff consumed by
+  ~.scratch/distributed-training-tla/issues/00-wait-for-dtensor-mesh-simulation.org~.
+
+* Non-negotiable constraints
+
+- Keep dense axes as ~pp x dp_replicate x dp_shard x cp x tp~.
+- Preserve separate ~dp_shard~ and ~cp~ axes; derived ~fsdp~ and ~loss~ views
+  may be represented as derived views, not replacement axes.
+- Use CPU f32, synchronous, single-process simulation only.
+- Keep MoE/EP, sparse meshes, CUDA/NCCL, asynchronous collectives, recovery,
+  and uneven/ragged shards out of the completion path unless a follow-up ticket
+  explicitly reopens scope.
+- Reuse the common trace namespace ~tnsr.mesh_sim_trace.v0~.
+- Use the pinned Bazel binary:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0
+#+end_src
+
+- Preserve unrelated dirty ~tnsr~ incorporation work.
+- Commit, push, branch landing, and final architecture selection require
+  explicit human authorization.
+
+* Work sequence
+
+** Phase 0: Normalize tracker state
+
+Files:
+
+- ~.scratch/dtensor-mesh-simulation/issues/01-baseline-harness-and-reference.org~
+- ~.scratch/dtensor-mesh-simulation/issues/02-common-mesh-layout-semantics.org~
+- ~.scratch/dtensor-mesh-simulation/issues/03-collective-simulator-trace-injection.org~
+
+Actions:
+
+- Mark tickets 01-03 as ~resolved~ if their existing Answer sections still
+  match the current checkout.
+- Do not rewrite their history; add a short status note only if needed.
+- Run the current focused smoke target before changing status:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Exit criteria:
+
+- Ticket status reflects reality.
+- Smoke target passes from the current checkout or the mismatch is captured as
+  a blocker before continuing.
+
+** Phase 1: Close ticket 04
+
+Files:
+
+- ~ferric_continuum/tnsr/src/dtensor/collective.rs~
+- ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+- ~.scratch/dtensor-mesh-simulation/issues/04-complete-redistribution-substrate.org~
+- ~.scratch/dtensor-mesh-simulation/plans/2026-08-18-redistribution-substrate-plan.org~
+
+Actions:
+
+- Execute the existing redistribution substrate plan.
+- Change ~reduce_scatter_sum~ to accept ~shard_dim~ and preserve tensor rank.
+- Add multidimensional reduce-scatter tests for at least two axis-local groups.
+- Add typed-error tests for out-of-range shard dimensions and uneven requested
+  dimensions.
+
+Verification:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:context_parallel_gqa_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+Exit criteria:
+
+- Ticket 04 is resolved with exact command evidence.
+- Tickets 05-07 are unblocked.
+
+** Phase 2: Run the three architecture tracer bullets
+
+Run tickets 05, 06, and 07 after ticket 04. They may run in separate isolated
+worktrees because their intended write sets are mostly disjoint, but integration
+must happen through the common substrate and shared trace vocabulary.
+
+*** Ticket 05: Wrapper DTensor
+
+Primary evidence:
+
+- ~ferric_continuum/tnsr/src/dtensor/wrapper.rs~
+- ~.scratch/dtensor-mesh-simulation/reports/05-wrapper-dtensor.org~
+
+The wrapper option is the low-risk control. It should prove explicit wrapping,
+redistribution, reconstruction, trace emission, and structured failure reports
+without changing existing local tensor behavior.
+
+*** Ticket 06: Tensor-native layout
+
+Primary evidence:
+
+- ~ferric_continuum/tnsr/src/dtensor/native.rs~
+- ~ferric_continuum/tnsr/src/tensor.rs~ only if metadata cannot stay adjacent
+  to the core type without touching internals
+- ~.scratch/dtensor-mesh-simulation/reports/06-tensor-native-layout.org~
+
+This option is mainly a blast-radius experiment. It must prove local tensor and
+autograd behavior stays unchanged when layout metadata is absent.
+
+*** Ticket 07: Plan-first simulation
+
+Primary evidence:
+
+- ~ferric_continuum/tnsr/src/dtensor/plan.rs~
+- ~.scratch/dtensor-mesh-simulation/reports/07-plan-first-simulation.org~
+
+This option is the observability experiment. It must make planned collectives,
+layout transitions, injections, and executed trace events directly comparable.
+
+Exit criteria:
+
+- All three option reports exist.
+- Each option ran the same scenario and names any unsupported semantics.
+- Each option includes reference-correctness evidence, trace evidence,
+  failure-localization evidence, files touched, and interface-complexity notes.
+
+** Phase 3: Compare and choose a durable direction
+
+Files:
+
+- ~.scratch/dtensor-mesh-simulation/issues/08-comparison-report-and-recommendation.org~
+- ~.scratch/dtensor-mesh-simulation/reports/08-comparison.org~
+- ~.scratch/dtensor-mesh-simulation/spec.org~
+
+Actions:
+
+- Read option reports 05-07.
+- Compare the options using the ticket 08 rubric.
+- Recommend one architecture to graduate.
+- Separate the selected durable architecture from shared infrastructure that
+  should remain regardless of the selected option.
+- Create follow-up tickets for the selected direction and deferred extensions.
+
+Exit criteria:
+
+- Ticket 08 is resolved with a report path and concrete recommendation.
+- The spec points to the comparison report without rewriting the original
+  approved design history.
+- Ticket 09 exists and is blocked by ticket 08.
+- Ticket 10 exists and is blocked by ticket 09.
+
+** Phase 4: Graduate the selected simulator path
+
+Files:
+
+- ~.scratch/dtensor-mesh-simulation/issues/09-graduate-selected-simulator.org~
+- Selected implementation files from ticket 08.
+- ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~ or a split test file if the
+  current test file becomes hard to navigate.
+- ~.scratch/dtensor-mesh-simulation/reports/09-graduation.org~
+
+Required simulator behavior:
+
+- Expose one canonical public entrypoint for the selected simulator path.
+- Keep non-selected options available only as reports or test-support code
+  unless ticket 08 recommends retaining them.
+- Produce a deterministic run report for the dense training-step scenario.
+- Export the vocabulary the TLA+ track must inherit:
+  - mesh axes and rank-coordinate ordering
+  - process group construction and ordered membership
+  - placement names
+  - layout transition names
+  - collective kinds and signatures
+  - trace event names and required fields
+  - failure record fields
+
+Required DualPipe-level schedule granularity:
+
+- A forward chunk must expose these components:
+  - attention
+  - all-to-all dispatch
+  - MLP
+  - all-to-all combine
+  - PP communication
+- A backward chunk must expose these components:
+  - attention input-gradient
+  - attention weight-gradient
+  - all-to-all dispatch gradient path
+  - MLP input-gradient
+  - MLP weight-gradient
+  - all-to-all combine gradient path
+  - PP communication
+- The schedule representation must allow overlap between a paired forward and
+  backward chunk while still making dependencies explicit.
+- The simulator must reject at least one illegal overlap or ordering case with
+  structured failure context.
+
+Verification:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+Exit criteria:
+
+- Ticket 09 is resolved.
+- The selected simulator path has one stable entrypoint and a report.
+- The DualPipe-level component schedule is represented in code and tests.
+
+** Phase 5: Handoff to distributed-training TLA+
+
+Files:
+
+- ~.scratch/dtensor-mesh-simulation/issues/10-handoff-to-distributed-training-tla.org~
+- ~.scratch/dtensor-mesh-simulation/reports/10-tla-handoff.org~
+- ~.scratch/distributed-training-tla/issues/00-wait-for-dtensor-mesh-simulation.org~
+- ~docs/research/distributed-training-tla.org~
+
+Actions:
+
+- Write a handoff report naming the selected architecture, stable simulator
+  entrypoint, trace schema, and all vocabulary that TLA+ must reuse.
+- Link the handoff from the TLA+ gate ticket.
+- Resolve the TLA+ gate only after the handoff report exists and ticket 09 is
+  resolved.
+- Update the durable TLA+ research note only to point at the handoff and remove
+  any stale assumption that ticket 08 alone is enough.
+
+Exit criteria:
+
+- The TLA+ track can begin from a stable DTensor mesh/layout/schedule
+  vocabulary.
+- The first TLA+ ticket has no remaining dependency on unstabilized simulator
+  decisions.
+
+* Parallelization guidance
+
+- Ticket 04 is serial and blocks everything else.
+- Tickets 05-07 can run in parallel after ticket 04 only if each worker uses an
+  isolated worktree and does not edit the same implementation files.
+- Ticket 08 is serial because it consumes all three option reports.
+- Ticket 09 is serial because it implements the selected direction.
+- Ticket 10 is serial because it is the cross-effort handoff.
+
+* Final verification bundle
+
+Before calling the DTensor mesh simulation effort complete, run:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:context_parallel_gqa_tests \
+  //ferric_continuum/tnsr:lib_tests \
+  //ferric_continuum/tnsr:tnsr_tests
+
+rg -n "reports/05-wrapper-dtensor|reports/06-tensor-native-layout|reports/07-plan-first-simulation|reports/08-comparison|reports/09-graduation|reports/10-tla-handoff" \
+  .scratch/dtensor-mesh-simulation .scratch/distributed-training-tla docs/research/distributed-training-tla.org
+
+rg -n "TB[D]|TO[D]O|FIXM[E]|PLACEHOLDE[R]|XX[X]" \
+  .scratch/dtensor-mesh-simulation .scratch/distributed-training-tla docs/research/distributed-training-tla.org
+
+git diff --check
+#+end_src

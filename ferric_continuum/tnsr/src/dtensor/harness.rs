@@ -1,6 +1,6 @@
 use crate::autograd::Engine;
 use crate::ops::{linear, loss};
-use crate::tensor::{Shape, Tensor};
+use crate::tensor::{Shape, Tensor, TensorValue};
 use crate::transformer::{TransformerBlock, TransformerConfig};
 
 use super::trace::{MeshTrace, MeshTraceEvent};
@@ -78,6 +78,15 @@ impl TrainingStepScenario {
             output_shape: hidden.shape(),
             parameter_grad_shapes,
         }
+    }
+
+    pub fn reference_activation_value(&self) -> TensorValue {
+        TensorValue::from_vec(
+            Shape(vec![self.cfg.batch, self.cfg.seq, self.cfg.d_model]),
+            (0..self.cfg.batch * self.cfg.seq * self.cfg.d_model)
+                .map(|i| i as f32)
+                .collect(),
+        )
     }
 
     pub fn run_common_substrate_smoke(

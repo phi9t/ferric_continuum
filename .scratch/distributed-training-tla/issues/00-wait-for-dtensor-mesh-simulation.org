@@ -1,0 +1,82 @@
+#+TITLE: Wait for DTensor mesh simulation handoff
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY:
+#+PARENT: ../spec.org
+
+* Context
+
+The distributed-training TLA+ effort must not define an independent mesh,
+layout, collective, trace, or failure vocabulary while the DTensor mesh
+simulation architecture experiment is still stabilizing those terms.
+
+This gate waits for the DTensor mesh simulation completion sequence to resolve
+ticket 09 and ticket 10.
+
+* Requirements
+
+- Confirm DTensor mesh simulation ticket 09 is resolved.
+- Confirm the DTensor mesh simulation TLA+ handoff report exists.
+- Resolve this gate only after the handoff report names the stable vocabulary
+  that formal modeling must inherit.
+
+* Out of scope
+
+- Implementing TLA+ models.
+- Implementing TLC, Apalache, Bazel integration, or trace validation tooling.
+- Changing the DTensor mesh simulation architecture.
+
+* Verification
+
+- The gate cites the handoff report.
+- The gate names the inherited vocabulary.
+- The gate is resolved only after ticket 09 and ticket 10 are resolved.
+
+* Comments
+
+* Answer
+
+The wait gate is resolved. DTensor mesh simulation ticket 09 is resolved with
+passing verification, and ticket 10 has produced the durable handoff report:
+
+- [[file:../../dtensor-mesh-simulation/reports/10-tla-handoff.org][DTensor mesh simulation TLA+ handoff]]
+
+The distributed-training TLA+ track must inherit this vocabulary rather than
+starting from ticket 08 alone:
+
+- selected architecture: *Option C: Plan-first simulation*
+- canonical simulator entrypoint:
+
+#+begin_src rust
+run_tiny_dense_mesh_simulation(dims, injection_plan)
+#+end_src
+
+- lower-level selected path:
+
+#+begin_src rust
+MeshSimPlan::tiny_dense_training(dims)?.execute(injection_plan)
+#+end_src
+
+- mesh axes: ~pp, dp_replicate, dp_shard, cp, tp~
+- rank-coordinate ordering: row-major with ~tp~ fastest
+- process group construction: fix every non-selected axis and order members by
+  ascending global rank
+- placement/layout vocabulary: ~Replicate~, ~Shard(dim)~, ~Partial(sum)~,
+  ~Local~
+- supported redistribution transitions:
+  ~Partial(sum)->Replicate~, ~Partial(sum)->Shard(dim)~,
+  ~Shard(dim)->Replicate~, ~Replicate->Shard(dim)~, and
+  ~same-layout-noop~. Same-layout no-op is an internal supported transition;
+  the current graduated plan executor returns without recording a trace event
+  when source and destination layouts are identical.
+- collective kinds: ~all_reduce_sum~, ~all_gather~,
+  ~reduce_scatter_sum~, and ~broadcast~
+- trace namespace and events: ~tnsr.mesh_sim_trace.v0~ with
+  ~LayoutTransition~, ~Collective~, ~Injection~, and ~Failure~ records
+- failure record fields: ~phase~, ~message~, ~rank~, ~axis~, ~tensor~,
+  ~layout~, and ~collective~
+- DualPipe forward/backward component vocabulary and legal overlap shape
+- explicit unsupported semantics that TLA+ must not overclaim
+
+This resolves only the prerequisite gate. It does not implement TLA+ models,
+TLC/Apalache/Bazel integration, or trace validation tooling.

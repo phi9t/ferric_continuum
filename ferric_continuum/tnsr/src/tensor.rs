@@ -12,6 +12,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::dtensor::{Layout, ParallelDims5D};
+
 static TENSOR_ID_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 pub fn fresh_tensor_id() -> TensorId {
@@ -91,11 +93,20 @@ pub struct TensorInner {
     pub value: TensorValue,
     pub version: u64,
     pub autograd: AutogradMeta,
+    pub layout_meta: Option<TensorLayoutMeta>,
 }
 
 #[derive(Clone)]
 pub struct Tensor {
     pub inner: Rc<RefCell<TensorInner>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TensorLayoutMeta {
+    pub global_shape: Shape,
+    pub layout: Layout,
+    pub dims: ParallelDims5D,
+    pub rank: usize,
 }
 
 impl Tensor {
@@ -112,6 +123,7 @@ impl Tensor {
                     grad: None,
                     producer: None,
                 },
+                layout_meta: None,
             })),
         }
     }
@@ -155,6 +167,15 @@ impl Tensor {
     pub fn grad_stats(&self) -> Option<TensorStats> {
         let inner = self.inner.borrow();
         inner.autograd.grad.as_ref().map(tensor_value_stats)
+    }
+
+    pub fn with_layout_meta(self, meta: TensorLayoutMeta) -> Self {
+        self.inner.borrow_mut().layout_meta = Some(meta);
+        self
+    }
+
+    pub fn layout_meta(&self) -> Option<TensorLayoutMeta> {
+        self.inner.borrow().layout_meta.clone()
     }
 
     pub fn shape(&self) -> Shape {

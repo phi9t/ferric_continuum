@@ -1,6 +1,6 @@
 #+TITLE: Complete redistribution substrate
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: resolved
 #+BLOCKED_BY: 03-collective-simulator-trace-injection
 #+PARENT: ../spec.org
 
@@ -75,3 +75,33 @@ pub fn reduce_scatter_sum(
 * Comments
 
 * Answer
+
+Implemented dimension-aware ~Partial(sum) -> Shard(dim)~ reduce-scatter.
+
+- API: ~CollectiveSimulator::reduce_scatter_sum(axis, shard_dim, phase, shards)~.
+- Semantics: axis-local elementwise sum, then contiguous row-major slicing of
+  ~shard_dim~ using each rank's coordinate on the collective axis.
+- Validation: typed errors for out-of-range ~shard_dim~ and uneven requested
+  tensor dimension.
+- Trace: records ~MeshTraceEvent::Collective~ with
+  ~CollectiveKind::ReduceScatter~, axis, bytes, and participating ranks.
+- Scope: no wrapper/native/plan tracer bullets, CUDA/NCCL, async collectives,
+  MoE/EP, or uneven shard support added.
+
+Code commit:
+- None. The user explicitly requested no commit.
+
+Report:
+- [[file:../../../.superpowers/sdd/2026-08-18-remaining-architecture-options-plan.org/task-04-report.md][task-04-report.md]]
+
+TDD red evidence:
+- ~/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests~
+- Result: failed to build with ~error[E0061]: this method takes 3 arguments but 4 arguments were supplied~ at the updated reduce-scatter test call sites.
+
+Focused green evidence:
+- ~/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests~
+- Result: 1/1 target passed.
+
+Verification matrix:
+- ~/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:lib_tests~
+- Result: 4/4 targets passed.

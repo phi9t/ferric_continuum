@@ -1,6 +1,6 @@
 #+TITLE: Comparison report and recommendation
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: resolved
 #+BLOCKED_BY: 05-wrapper-dtensor-tracer-bullet, 06-tensor-native-layout-tracer-bullet, 07-plan-first-simulation-tracer-bullet
 #+PARENT: ../spec.org
 
@@ -58,6 +58,12 @@ low-risk control value, tensor-native blast radius, and plan-first observability
   - common substrate pieces to keep regardless of winner
   - test/observability infrastructure to keep even if not user-facing
   - deferred risks that block claims of full TorchTitan parity
+- Create or update the follow-on graduation ticket:
+  [[file:09-graduate-selected-simulator.org][09 graduate selected simulator path]].
+- Do not mark the DTensor mesh simulation effort complete after this ticket
+  alone. Ticket 08 selects the direction; ticket 09 must graduate it into a
+  canonical simulator path, and ticket 10 must hand that vocabulary to the TLA+
+  track.
 - Do not select an architecture before reading the three option-local reports.
 
 * Out of scope
@@ -77,7 +83,66 @@ low-risk control value, tensor-native blast radius, and plan-first observability
 - The report includes at least one follow-up ticket for the durable direction
   and one for the first deferred non-dense extension if the evidence supports
   continuing.
+- The report explicitly states whether ticket 09 should keep, delete, or move
+  each non-selected option's code.
+- The report names the exact simulator entrypoint candidate that ticket 09
+  should stabilize.
 
 * Comments
 
 * Answer
+
+Implemented ticket 08 as the comparison report and recommendation.
+
+- Report: [[file:../reports/08-comparison.org][08 comparison report]]
+- Recommendation: graduate Option C, the plan-first simulator.
+- Exact simulator entrypoint candidate for ticket 09:
+
+#+begin_src rust
+MeshSimPlan::tiny_dense_training(dims)?.execute(injection_plan)
+#+end_src
+
+The report compares wrapper DTensor, tensor-native layout, and plan-first
+simulation against the requested rubric: semantic expressiveness, correctness
+against the unsharded reference, collective/cost/topology trace quality, chaos
+failure localization, interface complexity, existing code touched, test
+complexity, and suitability for future full forward/backward foundation-model
+training mesh simulation.
+
+It separates:
+
+- the architecture to graduate;
+- common substrate pieces to keep regardless of the winner;
+- test/observability infrastructure to keep even if not user-facing;
+- discarded/deferred pieces;
+- deferred risks that block full TorchTitan parity;
+- follow-up work for derived mesh views, MoE/EP, async collectives, real
+  backends, and richer recovery.
+
+Tracker updates:
+
+- Updated [[file:../spec.org][spec]] with a short pointer to
+  [[file:../reports/08-comparison.org][08 comparison report]] and the selected
+  durable direction.
+- Confirmed ticket 09 exists, remains blocked by ticket 08, links the report,
+  and names the exact plan-first entrypoint candidate to graduate.
+- Confirmed ticket 10 exists and remains blocked by ticket 09.
+- Did not change Rust code.
+- Did not commit, push, land, or create a pull request.
+
+Verification:
+
+#+begin_src sh
+rg -n "08-comparison|reports/08-comparison|canonical simulator|selected architecture|graduate" .scratch/dtensor-mesh-simulation
+#+end_src
+
+Result: PASS at 2026-08-21. The command found the new comparison report,
+the spec pointer to ~reports/08-comparison.org~, ticket 09's canonical
+simulator/graduation language, and ticket 10's selected-architecture handoff
+language.
+
+#+begin_src sh
+git diff --check
+#+end_src
+
+Result: PASS at 2026-08-21. The command produced no output.

@@ -52,6 +52,7 @@ pub enum MeshTraceEvent {
         phase: TrainingPhase,
         kind: CollectiveKind,
         axis: MeshAxis,
+        tensor: Option<String>,
         bytes: u64,
         ranks: Vec<usize>,
     },
@@ -70,6 +71,7 @@ pub struct FailureRecord {
     pub rank: Option<usize>,
     pub axis: Option<MeshAxis>,
     pub tensor: Option<String>,
+    pub layout: Option<String>,
     pub collective: Option<CollectiveKind>,
 }
 

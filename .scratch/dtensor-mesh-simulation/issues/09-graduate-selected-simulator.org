@@ -1,0 +1,228 @@
+#+TITLE: Graduate selected simulator path
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY: 08-comparison-report-and-recommendation
+#+PARENT: ../spec.org
+
+* Context
+
+Ticket 08 selects the durable architecture direction for DTensor-style mesh
+simulation. This ticket turns that recommendation into the canonical simulator
+path that later TLA+ work can depend on.
+
+The graduated path must be executable, deterministic, and explicit about the
+schedule vocabulary. The distributed-training TLA+ track is blocked until this
+ticket and the handoff ticket both resolve.
+
+Planning input:
+
+- [[file:../plans/2026-08-21-completion-sequence.org][Completion sequence]]
+- [[file:08-comparison-report-and-recommendation.org][08 comparison report and recommendation]]
+- [[file:../reports/08-comparison.org][08 comparison report]]
+
+Ticket 08 recommends graduating the plan-first simulator. The exact entrypoint
+candidate to stabilize is:
+
+#+begin_src rust
+MeshSimPlan::tiny_dense_training(dims)?.execute(injection_plan)
+#+end_src
+
+* Requirements
+
+- Read the ticket 08 comparison report before making code changes.
+- Expose one canonical public entrypoint for the selected simulator path.
+- Keep non-selected options as reports or test-support code only unless ticket
+  08 explicitly recommends retaining them.
+- Produce a deterministic run report for the dense training-step scenario.
+- Reuse the common mesh, layout, shard-map, collective simulator, injection,
+  and ~tnsr.mesh_sim_trace.v0~ trace vocabulary.
+- Export the vocabulary the TLA+ track must inherit:
+  - mesh axes and rank-coordinate ordering
+  - process group construction and ordered membership
+  - placement names
+  - layout transition names
+  - collective kinds and signatures
+  - trace event names and required fields
+  - failure record fields
+- Add a DualPipe-level schedule representation for the foundation-model-like
+  scenario.
+- A forward chunk must expose these components:
+  - attention
+  - all-to-all dispatch
+  - MLP
+  - all-to-all combine
+  - PP communication
+- A backward chunk must expose these components:
+  - attention input-gradient
+  - attention weight-gradient
+  - all-to-all dispatch gradient path
+  - MLP input-gradient
+  - MLP weight-gradient
+  - all-to-all combine gradient path
+  - PP communication
+- The schedule representation must allow legal overlap between a paired forward
+  and backward chunk while keeping dependencies explicit.
+- Reject at least one illegal overlap or ordering case with structured failure
+  context.
+- Write a graduation report to
+  ~.scratch/dtensor-mesh-simulation/reports/09-graduation.org~.
+
+* Out of scope
+
+- TLA+ model implementation.
+- MoE/EP execution semantics beyond the all-to-all component labels needed to
+  model the DualPipe-style schedule boundary.
+- CUDA/NCCL execution.
+- Asynchronous collective implementation.
+- Fault recovery or rescheduling after an injected failure.
+- Reopening the architecture decision from ticket 08 without new evidence.
+
+* Verification
+
+- Tests cover the canonical entrypoint.
+- Tests cover the DualPipe-level forward component order.
+- Tests cover the DualPipe-level backward input-gradient and weight-gradient
+  split for attention and MLP.
+- Tests cover one legal overlapped forward/backward component pair.
+- Tests cover one illegal overlap or ordering case that produces structured
+  failure context.
+- Tests assert the run report is deterministic.
+- Run:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+* Comments
+
+* Answer
+
+Implemented ticket 09 as the graduation of the selected plan-first simulator
+path.
+
+- Report: [[file:../reports/09-graduation.org][09 graduation report]]
+- Stable public entrypoint:
+
+#+begin_src rust
+run_tiny_dense_mesh_simulation(dims, injection_plan)
+#+end_src
+
+This entrypoint is a thin wrapper over the ticket 08 candidate:
+
+#+begin_src rust
+MeshSimPlan::tiny_dense_training(dims)?.execute(injection_plan)
+#+end_src
+
+Added a deterministic report surface on ~MeshSimPlanReport~:
+
+#+begin_src rust
+report.deterministic_run_report()
+#+end_src
+
+Added the TLA+ handoff vocabulary as ~MeshSimStableVocabulary~:
+
+- mesh axes and rank-coordinate ordering
+- process group construction and ordered membership
+- placement names
+- layout transition names
+- collective kinds and signatures
+- trace event names and fields
+- failure record fields
+
+Added the DualPipe-level schedule vocabulary:
+
+- ~DualPipeSchedule~
+- ~DualPipeChunk~
+- ~DualPipeComponent~
+- ~DualPipeComponentKind~
+- ~DualPipeOverlap~
+
+Forward chunk components:
+
+- ~attention~
+- ~all_to_all_dispatch~
+- ~mlp~
+- ~all_to_all_combine~
+- ~pp_communication~
+
+Backward chunk components:
+
+- ~attention_input_gradient~
+- ~attention_weight_gradient~
+- ~all_to_all_dispatch_gradient~
+- ~mlp_input_gradient~
+- ~mlp_weight_gradient~
+- ~all_to_all_combine_gradient~
+- ~pp_communication~
+
+The schedule carries explicit dependencies and one legal paired
+forward/backward overlap:
+
+#+begin_src text
+dualpipe.forward[0].mlp || dualpipe.backward[0].attention_input_gradient
+#+end_src
+
+Illegal same-direction overlap is rejected as:
+
+#+begin_src rust
+PlanError::Schedule(FailureRecord { ... })
+#+end_src
+
+The non-selected wrapper DTensor and tensor-native layout paths remain available
+as tracer-bullet evidence and test-support/control paths only. They were not
+promoted to the canonical simulator interface.
+
+Unsupported and deferred semantics:
+
+- Ticket 10 still owns the TLA+ handoff implementation.
+- MoE/EP execution semantics are still deferred; ticket 09 only adds
+  all-to-all component labels at the schedule boundary.
+- CUDA/NCCL execution is not implemented.
+- Asynchronous collective progress is not implemented.
+- Overlap is represented and validated at schedule level, not executed through
+  an async runtime.
+- Fault recovery, retry, and rescheduling are not implemented.
+- Derived mesh views such as ~loss~ and ~fsdp~ remain named vocabulary, not
+  first-class simulator axes.
+- Multi-axis layout propagation, uneven sharding, sparse meshes, and non-sum
+  partial reductions remain unsupported.
+- The simulator is not integrated with real ~tnsr~ autograd scheduling.
+
+Verification:
+
+Red bar:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: FAIL at 2026-08-22 00:00 UTC. The new tests failed to build because
+~run_tiny_dense_mesh_simulation~, ~DualPipeChunk~,
+~DualPipeComponentKind~, ~DualPipeSchedule~, and ~PlanError::Schedule~ were
+unresolved.
+
+Focused green:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: PASS at 2026-08-22 00:02 UTC.
+
+Final required command:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+Result: PASS at 2026-08-22 00:05 UTC.
+
+- ~//ferric_continuum/tnsr:mesh_sim_tests~: PASSED
+- ~//ferric_continuum/tnsr:distributed_tests~: PASSED
+- ~//ferric_continuum/tnsr:lib_tests~: PASSED

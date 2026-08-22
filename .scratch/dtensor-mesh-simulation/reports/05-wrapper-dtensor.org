@@ -1,0 +1,203 @@
+#+TITLE: Wrapper DTensor tracer bullet report
+#+TYPE: report
+#+STATUS: resolved
+#+PARENT: ../spec.org
+
+* Summary
+
+Ticket 05 implemented Option A as a narrow ~DTensor~ wrapper around rank-local
+~TensorValue~ shards. The wrapper keeps existing local ~Tensor~ math unchanged
+and routes layout changes through the common DTensor substrate:
+
+- ~Layout~, ~Placement~, and ~ReduceOp~ describe distributed semantics.
+- ~ParallelDims5D~ and ~MeshAxis~ define the dense mesh.
+- ~ShardMap~ owns single-axis slicing and reconstruction semantics.
+- ~CollectiveSimulator~ owns collective execution and trace emission.
+- ~TrainingPhase~ annotates redistribution and collective events.
+- ~TrainingStepScenario::run_wrapper_dtensor_tracer_bullet~ runs the shared
+  harness through wrapper-mediated redistributions and returns comparable
+  Option A evidence.
+
+The implementation is intentionally limited to zero-or-one-axis layouts. It
+rejects multi-axis or unsupported transitions with ~DtError~ rather than
+guessing.
+
+* Supported redistributions
+
+| Source | Destination | Substrate path | Evidence |
+|--------+-------------+----------------+----------|
+| identical layout | identical layout | clone only, no trace event | ~wrapper_dtensor_identical_layout_clones_without_trace_event~ |
+| ~Replicate~ | ~Shard(dim)~ | ~CollectiveSimulator::local_slice~ | ~wrapper_dtensor_replicate_shard_reconstructs_and_traces~ |
+| ~Shard(dim)~ | ~Replicate~ | ~CollectiveSimulator::all_gather~ plus ~ShardMap::reconstruct_from_rank_shards~ | ~wrapper_dtensor_shard_and_partial_replicate_paths_preserve_full_tensor~ |
+| ~Partial(sum)~ | ~Replicate~ | ~CollectiveSimulator::all_reduce_sum~ | ~wrapper_dtensor_shard_and_partial_replicate_paths_preserve_full_tensor~ |
+| ~Partial(sum)~ | ~Shard(dim)~ | ~CollectiveSimulator::reduce_scatter_sum(axis, dim, phase, shards)~ | ~wrapper_dtensor_partial_to_shard_uses_dimension_aware_reduce_scatter~ |
+
+* Wrapper harness evidence
+
+The shared ~TrainingStepScenario~ now has an Option A entrypoint:
+~run_wrapper_dtensor_tracer_bullet(dims, injection_plan)~.
+
+The integrated wrapper run uses ~dims = ParallelDims5D::new(1, 2, 2, 1, 2)~
+and sequences the required minimum slice through ~DTensor~:
+
+- replicated synthetic activation ~Shape([2,4,8]) -> Shard(2)~ on ~tp~;
+- ~Shard(2) -> Replicate~ on ~tp~ using all-gather plus deterministic
+  reconstruction;
+- ~Partial(sum) -> Shard(1)~ on ~dp_shard~ using the fixed dimension-aware
+  reduce-scatter;
+- ~Partial(sum) -> Replicate~ on ~dp_replicate~ using all-reduce;
+- loss-style reduction over the derived ~loss~ mesh is recorded as unsupported
+  because the common substrate does not yet expose derived multi-axis views.
+
+The test
+~wrapper_dtensor_harness_runs_minimum_slice_and_matches_reference_shape~
+asserts:
+
+- unsharded reference loss is finite;
+- reference output shape is ~Shape([2,4,8])~;
+- wrapper activation reconstruction returns ~Shape([2,4,8])~;
+- wrapper activation reconstruction data equals the deterministic shared
+  harness reference activation exactly;
+- tp shard shape is ~Shape([2,4,4])~;
+- dp_shard reduce-scatter output shape is ~Shape([2,2])~;
+- dp_replicate all-reduce output shape is ~Shape([2,4])~;
+- trace contains all-gather, reduce-scatter, and all-reduce events.
+
+* Unsupported semantics
+
+- Multi-axis wrapper redistribution is not implemented in Option A.
+- Cross-axis placement conversion, such as ~Tp:Shard(1) -> DpShard:Partial(sum)~,
+  returns ~DtError::UnsupportedRedistribution~.
+- ~Local~ is not treated as a distributed layout for this tracer bullet.
+- ~full_tensor()~ rejects ~Partial(sum)~ because reducing partial
+  contributions requires an explicit redistribution.
+- Derived mesh views such as ~loss = dp_replicate * dp_shard * cp~ are still a
+  common-substrate limitation. The wrapper harness records
+  ~loss_reduction_supported = false~ rather than inventing a private
+  derived-axis representation.
+- ~DTensor::from_replicated~ rejects ~Partial(sum)~ layouts because duplicating
+  a full value as per-rank partial contributions would over-count during
+  ~Partial(sum) -> Replicate~. Tests create partial DTensors explicitly from
+  rank-local contribution shards.
+
+* Reference correctness evidence
+
+The wrapper tests assert exact ~TensorValue~ data for supported
+redistributions:
+
+- A replicated ~Shape([2,4])~ activation sharded on ~tp~ dim 1 produces two
+  rank-local ~Shape([2,2])~ shards with row-preserving contiguous slices.
+- ~full_tensor()~ reconstructs the sharded activation exactly through
+  ~ShardMap~.
+- ~Partial(sum) -> Shard(1)~ on ~dp_shard = 2~ preserves tensor rank and emits
+  ~Shape([2,2])~ shards containing the dimension-aware reduce-scatter sums.
+- ~Shard(1) -> Replicate~ reconstructs the full tensor for every rank.
+- ~Partial(sum) -> Replicate~ produces the all-reduced full local tensor on
+  every rank.
+- The integrated wrapper harness carries the unsharded training reference loss
+  and output shape alongside the wrapper sequence.
+- ~TrainingStepScenario::reference_activation_value~ is the deterministic
+  unsharded tensor value for the supported activation slice. The wrapper harness
+  uses that same value as the DTensor source, performs
+  ~Replicate -> Shard -> Replicate~, and reports
+  ~activation_matches_reference = true~ only when reconstructed shape and data
+  both match exactly.
+
+* Trace evidence
+
+The tests assert common trace events from the shared simulator:
+
+- ~Replicate -> Shard(dim)~ records a layout-transition event through
+  ~local_slice~ plus the wrapper-level transition.
+- ~Partial(sum) -> Shard(dim)~ records a ~CollectiveKind::ReduceScatter~ event
+  on ~MeshAxis::DpShard~.
+- ~Shard(dim) -> Replicate~ records ~CollectiveKind::AllGather~.
+- ~Partial(sum) -> Replicate~ records ~CollectiveKind::AllReduce~.
+- Identical layout redistribution records no new event.
+
+* Failure-localization evidence
+
+Unsupported redistribution returns a typed ~DtError::UnsupportedRedistribution~
+with source and destination layout labels. Shape, shard, layout, and collective
+failures are preserved through wrapper-level error variants:
+
+- ~DtError::Layout(LayoutError)~
+- ~DtError::Shard(ShardError)~
+- ~DtError::Collective(CollectiveError)~
+- ~DtError::RankCountMismatch~
+
+Deterministic injection remains implemented in the common substrate and is now
+exercised through the wrapper option by
+~wrapper_dtensor_harness_injection_records_failure_context~. The wrapper
+harness applies an ~InjectionPlan~ to wrapper-owned partial shards before the
+~Partial(sum) -> Shard(dim)~ redistribution and records:
+
+- phase: ~TrainingPhase::Backward~;
+- rank: ~Some(0)~;
+- axis: ~Some(MeshAxis::DpShard)~;
+- collective: ~Some(CollectiveKind::ReduceScatter)~;
+- tensor: ~Some("wrapper_partial")~;
+- shared trace ~Injection~ and ~Failure~ events.
+
+* Interface complexity
+
+The public wrapper surface is three methods and one error enum:
+
+#+begin_src rust
+pub struct DTensor {
+    pub global_shape: Shape,
+    pub layout: Layout,
+    pub dims: ParallelDims5D,
+    pub shards: Vec<TensorValue>,
+}
+
+impl DTensor {
+    pub fn from_replicated(value: TensorValue, layout: Layout, dims: ParallelDims5D) -> Result<Self, DtError>;
+    pub fn redistribute(&self, dst: Layout, sim: &mut CollectiveSimulator, phase: TrainingPhase) -> Result<Self, DtError>;
+    pub fn full_tensor(&self) -> Result<TensorValue, DtError>;
+}
+#+end_src
+
+This is the lowest-blast-radius option: it adds no metadata to ~TensorInner~,
+does not modify autograd, and keeps all existing tensor math local.
+
+* Files touched
+
+- ~ferric_continuum/tnsr/src/dtensor/wrapper.rs~
+- ~ferric_continuum/tnsr/src/dtensor/mod.rs~
+- ~ferric_continuum/tnsr/BUILD.bazel~
+- ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~
+- ~.scratch/dtensor-mesh-simulation/reports/05-wrapper-dtensor.org~
+- ~.scratch/dtensor-mesh-simulation/issues/05-wrapper-dtensor-tracer-bullet.org~
+- ~.superpowers/sdd/2026-08-18-remaining-architecture-options-plan.org/task-05-report.md~
+
+* Verification
+
+Focused green run before report:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+#+end_src
+
+Result: PASS.
+
+Final required command:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+Final run result: PASS at 2026-08-21 22:39 UTC. Both targets passed:
+
+- ~//ferric_continuum/tnsr:mesh_sim_tests~
+- ~//ferric_continuum/tnsr:lib_tests~
+
+* Recommendation
+
+Wrapper DTensor remains the control option for the architecture comparison. It
+is simple to reason about, localizes distributed semantics, and produces useful
+trace and failure evidence without increasing the blast radius of existing
+local tensor/autograd code. It should not be selected as the final architecture
+until tickets 06 and 07 provide comparable evidence.

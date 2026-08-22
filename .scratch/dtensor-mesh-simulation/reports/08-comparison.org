@@ -1,0 +1,234 @@
+#+TITLE: DTensor mesh simulation comparison and recommendation
+#+TYPE: report
+#+STATUS: resolved
+#+PARENT: ../spec.org
+
+* Summary
+
+Ticket 08 compares the three architecture tracer bullets against the common
+DTensor mesh simulation rubric. All three options reused the common dense
+~pp x dp_replicate x dp_shard x cp x tp~ mesh, placement, shard-map,
+collective, injection, and ~tnsr.mesh_sim_trace.v0~ trace substrate. All three
+proved the same minimum dense training-step slice:
+
+- a deterministic unsharded local ~tnsr~ reference loss and activation value;
+- ~Replicate -> Shard(2)~ on ~tp~ for ~Shape([2,4,8])~ activations;
+- ~Shard(2) -> Replicate~ on ~tp~ with exact activation reconstruction;
+- ~Partial(sum) -> Shard(1)~ on ~dp_shard~ with dimension-aware
+  reduce-scatter;
+- ~Partial(sum) -> Replicate~ on ~dp_replicate~ with all-reduce;
+- deterministic injection before the backward reduce-scatter failure site.
+
+The durable architecture to graduate is *Option C: Plan-first simulation*.
+It gives the clearest simulator interface for the next milestone because the
+schedule, planned collectives, cost records, executed trace events, and failure
+records are explicit before and after execution. That is the strongest fit for
+future full forward/backward foundation-model training mesh simulation and the
+subsequent TLA+ handoff.
+
+This does not complete the DTensor effort. Ticket 09 must still graduate the
+selected simulator path into a canonical entrypoint and add a DualPipe-level
+forward/backward component schedule. Ticket 10 must then hand the stable
+vocabulary to the distributed-training TLA+ track.
+
+* Inputs reviewed
+
+- [[file:04-common-substrate-reflection.org][04 common substrate reflection]]
+- [[file:05-wrapper-dtensor.org][05 wrapper DTensor tracer bullet report]]
+- [[file:06-tensor-native-layout.org][06 tensor-native layout tracer bullet report]]
+- [[file:07-plan-first-simulation.org][07 plan-first simulation tracer bullet report]]
+- [[file:../issues/08-comparison-report-and-recommendation.org][08 comparison ticket]]
+- [[file:../issues/09-graduate-selected-simulator.org][09 graduation ticket]]
+- [[file:../issues/10-handoff-to-distributed-training-tla.org][10 TLA+ handoff ticket]]
+- [[file:../plans/2026-08-21-completion-sequence.org][Completion sequence]]
+
+* Decision table
+
+| Architecture | Interface size | Files touched | Unsupported semantics | Trace quality | Chaos localization quality | Reference correctness evidence | Risk to existing ~tnsr~ local tensor/autograd behavior | Recommendation |
+|--------------+----------------+---------------+-----------------------+---------------+----------------------------+--------------------------------+---------------------------------------------------------+----------------|
+| Wrapper DTensor | Small wrapper surface: ~DTensor::from_replicated~, ~redistribute~, ~full_tensor~, plus ~DtError~. Callers must explicitly cross between local ~TensorValue~ and distributed ~DTensor~. | Adds ~dtensor/wrapper.rs~, exports it, updates build/tests/reports. Does not touch ~TensorInner~ or autograd. | Zero-or-one-axis layouts only; no cross-axis conversion; no ~Local~ distributed target; no direct ~Partial(sum)~ full tensor; no first-class derived ~loss~ or ~fsdp~ views. | Good shared trace coverage for layout transitions, all-gather, reduce-scatter, and all-reduce. No plan-time cost or schedule view. | Good for substrate failures: phase, rank, axis, collective, tensor, and typed wrapper errors. Less context about intended schedule. | Exact activation reconstruction against ~TrainingStepScenario::reference_activation_value~, finite reference loss, expected local shard shapes, exact reduce-scatter/all-reduce results. | Low. Existing local tensor and autograd behavior remain outside the wrapper. | Keep as low-risk control and test-support adapter. Do not graduate as the canonical simulator because the next milestone needs explicit schedule/cost vocabulary. |
+| Tensor-native layout | Moderate surface: ~TensorLayoutMeta~, ~Tensor::with_layout_meta~, ~Tensor::layout_meta~, and one explicit native boundary helper. Ergonomic for ~Tensor~ call sites but adds semantic state to core tensors. | Touches ~tensor.rs~, adds ~dtensor/native.rs~, exports it, updates build/tests/reports. Autograd and ordinary ops are intentionally not made layout-aware. | No arbitrary op propagation; no distributed autograd producer; no cross-axis conversion; no multi-axis layouts; no ~Local~ distributed target; no first-class derived ~loss~ or ~fsdp~ views. | Good shared trace coverage through the common simulator. No plan-time cost/schedule model. Adds mesh-mismatch validation before trace emission. | Good for explicit boundary failures: phase, rank, axis, collective, tensor, plus simulator/metadata mismatch and unsupported propagation. Layout is present in metadata but not a schedule-level contract. | Same exact activation reconstruction, reference-loss, shard-shape, reduce-scatter, and all-reduce evidence as wrapper. Additional local-behavior tests prove ordinary ops drop/avoid metadata unless the boundary is used. | Medium. The tracer bullet preserved behavior, but durable graduation would make distribution metadata part of the core tensor interface and force later autograd/op propagation decisions. | Defer. Keep as ergonomics evidence and possible future native-facing adapter after the simulator vocabulary stabilizes. Do not graduate now. |
+| Plan-first simulation | Larger but clearer simulator interface: ~MeshSimPlan~, ~MeshSimStep~, ~MeshSimPlan::tiny_dense_training~, ~MeshSimPlan::execute~, planned/executed collective records, costs, and report fields. | Adds ~dtensor/plan.rs~, exports it, updates build/tests/reports. Does not modify ~TensorInner~ or existing autograd. | Multi-axis layout propagation rejected; uneven sharding unsupported; only ~Partial(sum)~ modeled; derived ~loss~ and ~fsdp~ views not first-class; cost model is deterministic but not calibrated; synchronous single-process only; no recovery/rescheduling; not integrated with autograd scheduling. | Best. Planned collectives, cost records, executed trace-derived collective records, layout transitions, injections, and failures are directly comparable. | Best. Injection is present in the plan and shared trace, and plan-owned failures include phase, rank, axis, collective, tensor, and active layout context. | Same exact activation reconstruction and reference-loss evidence as the other options, plus exact equality between planned and trace-derived executed collective records. | Low. Distributed semantics stay outside local tensor/autograd behavior and local ~tnsr~ math remains a reference oracle. | Graduate. Stabilize this as the canonical simulator path in ticket 09. |
+
+* Rubric findings
+
+** Semantic expressiveness
+
+Wrapper and tensor-native both express explicit redistribution around
+rank-local shards, which is enough for the current minimum dense slice. They
+are weaker for the next milestone because the schedule is implicit in caller
+control flow. Plan-first expresses tensors, layouts, redistributions,
+collectives, costs, and injection sites as data, so it can grow into a full
+forward/backward simulator without first coupling that schedule to local tensor
+execution.
+
+All options still share important semantic limits: no multi-axis layout
+propagation, no uneven shards, no first-class derived ~loss~ or ~fsdp~ mesh
+views, no EP/MoE, no async collectives, no real backend, and no recovery.
+
+** Correctness against the unsharded reference
+
+All three options passed the same correctness slice. Each report records finite
+unsharded reference loss, reference output shape ~Shape([2,4,8])~, exact
+activation reconstruction against
+~TrainingStepScenario::reference_activation_value()~, ~tp~ shard shape
+~Shape([2,4,4])~, ~dp_shard~ reduce-scatter shape ~Shape([2,2])~, and
+~dp_replicate~ all-reduce shape ~Shape([2,4])~.
+
+The correctness distinction is not numerical for this milestone. The
+distinction is where correctness evidence lives. In plan-first, planned
+collectives and executed trace-derived collectives are comparable as report
+data, which is more durable for schedule-level training simulation than
+checking a sequence embedded in wrapper/native helper control flow.
+
+** Collective, cost, and topology trace quality
+
+Wrapper and tensor-native emit the shared trace events needed to validate
+redistribution behavior, but neither has a native plan-time representation of
+cost or schedule intent. Plan-first records planned collectives and costs, then
+derives executed collective records from ~MeshTrace~ and compares the two. That
+is the strongest observability contract for future topology inspection and
+formal handoff.
+
+** Chaos failure localization
+
+All three options exercise deterministic injection before backward
+reduce-scatter and record shared injection/failure events. Plan-first is
+strongest because the failure is attached to the planned step and the active
+layout at that site. This matters for future schedule validation: a failure
+record should explain both what went wrong and which planned training component
+or layout movement owned the failed operation.
+
+** Interface complexity and blast radius
+
+Wrapper has the smallest interface and lowest implementation blast radius. It
+is the right control and a useful adapter for explicit distributed tensor
+experiments.
+
+Tensor-native has a compact public surface, but the interface burden is larger
+than the method count suggests because attaching layout metadata to ~Tensor~
+turns distribution state into a core tensor invariant. The tracer bullet kept
+ordinary ops and autograd unchanged, but a production-grade native path would
+need a broader op-propagation and distributed-autograd design.
+
+Plan-first exposes the largest surface, but most of that surface is the actual
+thing the next milestone needs: a deterministic simulator contract. Its
+interface is deeper for training-system work because callers can inspect and
+test a complete plan/report without understanding tensor internals.
+
+** Test complexity
+
+Wrapper tests are straightforward redistribution and reconstruction tests.
+Tensor-native tests add necessary behavior-preservation cases for local tensors
+and metadata mismatch. Plan-first tests are the most schedule-aware but also the
+most future-relevant: they compare planned collective records with records
+derived from the executed trace.
+
+* Recommendation
+
+** Architecture to graduate
+
+Graduate *Option C: Plan-first simulation*.
+
+Ticket 09 should stabilize the existing entrypoint candidate:
+
+#+begin_src rust
+MeshSimPlan::tiny_dense_training(dims)?.execute(injection_plan)
+#+end_src
+
+If ticket 09 adds a smaller public wrapper around that call, it should be only
+a naming/ergonomics layer over ~MeshSimPlan~ and ~MeshSimPlanReport~, not a new
+parallel simulator architecture.
+
+The reason is practical: the next gate is not a user-facing DTensor API. It is
+a stable executable vocabulary for dense foundation-model training simulation
+and TLA+ handoff. Plan-first already makes the planned schedule, collective
+intent, cost accounting, executed trace, and failure records first-class.
+
+** Common substrate pieces to keep regardless of winner
+
+- ~ParallelDims5D~, ~MeshAxis~, rank-coordinate ordering, and axis group
+  construction.
+- ~Layout~, ~Placement~, and ~ReduceOp~ with loud validation.
+- ~ShardMap~ and dimension-aware shard/reconstruct behavior.
+- ~CollectiveSimulator~ for synchronous single-process collective semantics.
+- ~InjectionPlan~ and deterministic injection events.
+- ~MeshTrace~ and ~tnsr.mesh_sim_trace.v0~ event vocabulary.
+- ~TrainingStepScenario::tiny_dense()~, ~run_unsharded_reference()~, and
+  ~reference_activation_value()~ as the shared correctness oracle.
+
+** Test and observability infrastructure to keep
+
+- The shared mesh simulation tests that assert tensor rank, local shape, local
+  data, trace events, and failure context.
+- The wrapper and tensor-native tracer-bullet tests as regression coverage for
+  adapter behavior and local tensor preservation, even if they are not the
+  canonical simulator path.
+- Planned-versus-executed collective comparison in the plan-first report.
+- Deterministic cost records, even though they are not yet calibrated topology
+  or bandwidth measurements.
+
+** Discarded or deferred pieces
+
+- Do not graduate wrapper ~DTensor~ as the canonical simulator path. Keep it as
+  a low-risk adapter/control because its explicit distributed tensor seam is
+  useful, but it does not expose the schedule and cost vocabulary needed by the
+  next milestone.
+- Do not graduate tensor-native metadata into the core user-facing tensor
+  semantics now. Keep the tracer bullet and tests as evidence. Reopen it only
+  after the plan-first vocabulary proves what metadata and propagation rules
+  real callers need.
+- Do not preserve private per-option interpretations of derived mesh views.
+  Add shared first-class derived-view semantics later instead of letting each
+  option encode ~loss~ or ~fsdp~ differently.
+
+** Deferred risks blocking full TorchTitan parity
+
+- Derived mesh views: ~loss = dp_replicate * dp_shard * cp~ and
+  ~fsdp = dp_shard * cp~ are named but not first-class objects.
+- Multi-axis placement propagation is not implemented.
+- Uneven or ragged sharding is unsupported.
+- Only dense layouts and ~Partial(sum)~ reductions are modeled.
+- MoE/EP and sparse dispatch are out of scope.
+- Collectives are synchronous and single-process.
+- Cost records are deterministic inspection data, not calibrated backend or
+  topology performance estimates.
+- No NCCL/CUDA or other real backend adapter exists.
+- No async collective progress, overlap semantics, retry, rescheduling, or
+  recovery model exists.
+- The simulator is not wired into real ~tnsr~ autograd execution.
+
+* Follow-up work
+
+- Ticket 09 should graduate the plan-first simulator path, name one canonical
+  public entrypoint, and add the DualPipe-level forward/backward component
+  schedule required by the completion sequence.
+- Ticket 10 should hand the stabilized mesh, layout, schedule, collective,
+  trace, and failure vocabulary to the distributed-training TLA+ track.
+- Add a follow-up for first-class derived mesh views, especially ~loss~ and
+  ~fsdp~, before claiming dense TorchTitan parity.
+- Add follow-up tickets for MoE/EP and sparse all-to-all dispatch once the
+  dense simulator vocabulary is stable.
+- Add async collective and overlap semantics after ticket 09 has a synchronous
+  schedule baseline.
+- Add real backend adapters only after the single-process simulator has stable
+  trace and failure records.
+- Add richer recovery semantics only after failure detection and schedule
+  ownership are stable.
+
+* Verification
+
+#+begin_src sh
+rg -n "08-comparison|reports/08-comparison|canonical simulator|selected architecture|graduate" .scratch/dtensor-mesh-simulation
+#+end_src
+
+Result: PASS at 2026-08-21. The command found the new comparison report,
+the spec pointer to ~reports/08-comparison.org~, ticket 09's canonical
+simulator/graduation language, and ticket 10's selected-architecture handoff
+language.
+
+#+begin_src sh
+git diff --check
+#+end_src
+
+Result: PASS at 2026-08-21. The command produced no output.

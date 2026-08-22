@@ -84,6 +84,7 @@ impl CollectiveSimulator {
             phase,
             kind: CollectiveKind::AllReduce,
             axis,
+            tensor: None,
             bytes: collective_bytes(self.dims.axis_size(axis), shape.bytes_f32() as u64, 2),
             ranks: groups.into_iter().flatten().collect(),
         });
@@ -122,6 +123,7 @@ impl CollectiveSimulator {
             phase,
             kind: CollectiveKind::AllGather,
             axis,
+            tensor: None,
             bytes: collective_bytes(self.dims.axis_size(axis), shape.bytes_f32() as u64, 1),
             ranks: groups.into_iter().flatten().collect(),
         });
@@ -131,19 +133,27 @@ impl CollectiveSimulator {
     pub fn reduce_scatter_sum(
         &mut self,
         axis: MeshAxis,
+        shard_dim: usize,
         phase: TrainingPhase,
         shards: &[TensorValue],
     ) -> Result<Vec<TensorValue>, CollectiveError> {
         validate_rank_values(self.dims, shards)?;
         let shape = validate_same_shape(shards)?;
         let axis_size = self.dims.axis_size(axis);
-        if shape.numel() % axis_size != 0 {
-            return Err(CollectiveError::UnevenScatter {
-                elements: shape.numel(),
+        if shard_dim >= shape.0.len() {
+            return Err(CollectiveError::SliceDimOutOfRange {
+                dim: shard_dim,
+                rank: 0,
+            });
+        }
+        let full = shape.0[shard_dim];
+        if full % axis_size != 0 {
+            return Err(CollectiveError::UnevenLocalSlice {
+                dim: shard_dim,
+                size: full,
                 parts: axis_size,
             });
         }
-        let chunk = shape.numel() / axis_size;
         let groups = rank_groups_for_axis(self.dims, axis);
         let mut out = shards.to_vec();
         for group in &groups {
@@ -153,16 +163,25 @@ impl CollectiveSimulator {
                     *dst += *src;
                 }
             }
-            for (part, &rank) in group.iter().enumerate() {
-                let start = part * chunk;
-                let end = start + chunk;
-                out[rank] = TensorValue::from_vec(Shape(vec![chunk]), sum[start..end].to_vec());
+            let summed = TensorValue::from_vec(shape.clone(), sum);
+            for &rank in group {
+                let coord = self
+                    .dims
+                    .coord(rank)
+                    .expect("rank group was built from valid ranks");
+                out[rank] = contiguous_slice_along_dim(
+                    &summed,
+                    shard_dim,
+                    coord_axis(coord, axis),
+                    axis_size,
+                );
             }
         }
         self.trace.record(MeshTraceEvent::Collective {
             phase,
             kind: CollectiveKind::ReduceScatter,
             axis,
+            tensor: None,
             bytes: collective_bytes(axis_size, shape.bytes_f32() as u64, 1),
             ranks: groups.into_iter().flatten().collect(),
         });
@@ -197,6 +216,7 @@ impl CollectiveSimulator {
             phase,
             kind: CollectiveKind::Broadcast,
             axis,
+            tensor: None,
             bytes: collective_bytes(axis_size, shape.bytes_f32() as u64, 1),
             ranks: groups.into_iter().flatten().collect(),
         });

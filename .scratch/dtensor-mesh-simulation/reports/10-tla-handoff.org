@@ -1,0 +1,261 @@
+#+TITLE: DTensor mesh simulation TLA+ handoff
+#+TYPE: report
+#+STATUS: resolved
+#+PARENT: ../spec.org
+
+* Summary
+
+Ticket 10 hands the completed DTensor mesh simulation vocabulary to the
+distributed-training TLA+ track. Ticket 09 is resolved and records passing
+verification for the graduated simulator path:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+  //ferric_continuum/tnsr:mesh_sim_tests \
+  //ferric_continuum/tnsr:distributed_tests \
+  //ferric_continuum/tnsr:lib_tests
+#+end_src
+
+Result recorded by ticket 09: PASS at 2026-08-22 00:05 UTC.
+
+The selected architecture is *Option C: Plan-first simulation*. The canonical
+simulator entrypoint for the dense foundation-model-like schedule is:
+
+#+begin_src rust
+run_tiny_dense_mesh_simulation(dims, injection_plan)
+#+end_src
+
+This is a stable caller-facing wrapper over:
+
+#+begin_src rust
+MeshSimPlan::tiny_dense_training(dims)?.execute(injection_plan)
+#+end_src
+
+The lower-level ~MeshSimPlan~ API remains useful for tests and schedule
+inspection, but TLA+ work should treat the wrapper entrypoint and its
+~MeshSimPlanReport~ vocabulary as the executable source of truth.
+
+* Vocabulary to inherit
+
+** Mesh axes and rank-coordinate ordering
+
+The dense mesh axes are fixed as:
+
+#+begin_src text
+pp x dp_replicate x dp_shard x cp x tp
+#+end_src
+
+The rank-coordinate ordering is row-major with ~tp~ fastest. Global rank
+assignment must follow the same coordinate order when translating between ranks
+and coordinates.
+
+Derived views may be named for analysis, but they are not replacement axes:
+
+- ~batch = dp_replicate * dp_shard~
+- ~loss = dp_replicate * dp_shard * cp~
+- ~fsdp = dp_shard * cp~
+
+The TLA+ model should keep ~dp_shard~ and ~cp~ separate primary axes.
+
+** Process groups and ordered membership
+
+Process groups are constructed by selecting one mesh axis, fixing every other
+axis coordinate, and varying the selected axis. Group membership is ordered by
+ascending global rank.
+
+This ordering is part of the simulator contract for trace collectives because
+~MeshTraceEvent::Collective~ carries the ordered rank set. TLA+ actions that
+model collectives should preserve this ordered membership when order is
+observable in a trace event. The lighter planned/executed
+~MeshSimCollectiveRecord~ entries identify the collective by kind, axis,
+tensor, and phase; they do not carry rank membership.
+
+** Placement and layout vocabulary
+
+The placement vocabulary is:
+
+- ~Replicate~: full value is present across the mesh axis.
+- ~Shard(dim)~: tensor dimension ~dim~ is partitioned across the mesh axis.
+- ~Partial(sum)~: each rank has an unreduced sum contribution.
+- ~Local~: no distributed tensor semantics.
+
+Layouts are ordered placements over mesh axes. Unsupported or ambiguous layouts
+fail loudly; the simulator does not infer missing placement intent.
+
+** Supported redistribution transitions
+
+The supported transition names are:
+
+- ~Partial(sum)->Replicate~
+- ~Partial(sum)->Shard(dim)~
+- ~Shard(dim)->Replicate~
+- ~Replicate->Shard(dim)~
+- ~same-layout-noop~
+
+The expected lowering is:
+
+- ~Partial(sum)->Replicate~ lowers to ~all_reduce_sum~.
+- ~Partial(sum)->Shard(dim)~ lowers to ~reduce_scatter_sum~.
+- ~Shard(dim)->Replicate~ lowers to ~all_gather~.
+- ~Replicate->Shard(dim)~ lowers to local slicing.
+- identical layouts are a supported internal same-layout no-op transition, but
+  the graduated plan executor returns the current value without emitting a
+  ~LayoutTransition~ or ~Collective~ trace event today.
+
+Unsupported placement transitions, uneven shards, multi-axis shard propagation,
+and non-sum partial reductions are outside the current simulator contract.
+
+** Collective kinds and signature fields
+
+The collective vocabulary is:
+
+- ~all_reduce_sum(axis, phase, shards)~
+- ~all_gather(axis, phase, shards)~
+- ~reduce_scatter_sum(axis, shard_dim, phase, shards)~
+- ~broadcast(axis, phase, root_axis_index, shards)~
+
+The handoff uses two distinct collective record surfaces:
+
+~MeshSimCollectiveRecord~ entries must carry only:
+
+- ~kind~
+- ~axis~
+- ~tensor~
+- ~phase~
+
+~MeshTraceEvent::Collective~ events must carry:
+
+- ~phase~
+- ~kind~
+- ~axis~
+- ~tensor~
+- ~bytes~
+- ordered ~ranks~
+
+The callable collective signatures include inputs such as ~shard_dim~ for
+~reduce_scatter_sum~ and ~root_axis_index~ for ~broadcast~, but those
+operation-specific values are not persisted in ~MeshSimCollectiveRecord~ or
+~MeshTraceEvent::Collective~ today. TLA+ work must treat operation-specific
+record fields as future extensions, not as current handoff claims.
+
+The simulator is synchronous and single-process. TLA+ may model ordering and
+overlap constraints around these collective records, but must not claim real
+NCCL/CUDA behavior from them.
+
+** Trace event names and required fields
+
+The trace namespace is:
+
+#+begin_src text
+tnsr.mesh_sim_trace.v0
+#+end_src
+
+The required event vocabulary is:
+
+- ~LayoutTransition{phase,tensor,src,dst}~
+- ~Collective{phase,kind,axis,tensor,bytes,ranks}~
+- ~Injection{phase,label,rank}~
+- ~Failure(FailureRecord)~
+
+Trace consumers should treat these fields as required for the handoff
+contract. Human-readable reports are derived from structured trace data; they
+are not a separate source of truth.
+
+** Failure record fields
+
+Structured failures carry:
+
+- ~phase~
+- ~message~
+- ~rank~
+- ~axis~
+- ~tensor~
+- ~layout~
+- ~collective~
+
+When context is absent, the field remains present with an explicit empty or
+none-like value rather than disappearing from the schema.
+
+* DualPipe component vocabulary
+
+The graduated simulator exposes a ~DualPipeSchedule~ with ordered
+~DualPipeComponent~ entries grouped by ~DualPipeChunk~.
+
+Forward chunk component names:
+
+- ~attention~
+- ~all_to_all_dispatch~
+- ~mlp~
+- ~all_to_all_combine~
+- ~pp_communication~
+
+Backward chunk component names:
+
+- ~attention_input_gradient~
+- ~attention_weight_gradient~
+- ~all_to_all_dispatch_gradient~
+- ~mlp_input_gradient~
+- ~mlp_weight_gradient~
+- ~all_to_all_combine_gradient~
+- ~pp_communication~
+
+Each component carries explicit same-chunk dependencies on the previous
+component. The dense baseline records one legal paired forward/backward overlap:
+
+#+begin_src text
+dualpipe.forward[0].mlp || dualpipe.backward[0].attention_input_gradient
+#+end_src
+
+The simulator rejects same-direction overlap as a structured schedule failure.
+The TLA+ model should inherit this component vocabulary and dependency shape
+before adding formal safety or liveness claims.
+
+* Known limits TLA+ must not overclaim
+
+- No TLA+ model is implemented by this ticket.
+- MoE/EP execution semantics are out of scope. The all-to-all labels are
+  schedule-boundary vocabulary only, not sparse expert dispatch semantics.
+- CUDA, NCCL, and real multi-process execution are not modeled.
+- Asynchronous collective progress is not modeled.
+- Overlap is represented and validated at schedule level; it is not executed
+  through an async runtime.
+- Fault recovery, retry, rescheduling, and degraded progress are not modeled.
+- Derived mesh views such as ~loss~ and ~fsdp~ are named vocabulary, not
+  first-class simulator axes.
+- Multi-axis layout propagation is unsupported.
+- Uneven or ragged sharding is unsupported.
+- Sparse meshes and non-sum partial reductions are unsupported.
+- Cost records are deterministic inspection data, not calibrated backend or
+  topology measurements.
+- The simulator is not integrated with real ~tnsr~ autograd scheduling.
+
+* Handoff decision
+
+The distributed-training TLA+ gate may now resolve because ticket 09 is
+resolved with passing verification and this handoff report exists. The first
+formal-modeling ticket should begin from the vocabulary in this report and the
+canonical simulator path, not from ticket 08 alone.
+
+* Verification
+
+Required text check:
+
+#+begin_src sh
+rg -n "10-tla-handoff|selected architecture|DualPipe|tnsr.mesh_sim_trace" \
+  .scratch/dtensor-mesh-simulation \
+  .scratch/distributed-training-tla \
+  docs/research/distributed-training-tla.org
+#+end_src
+
+Result: PASS at 2026-08-22. The command found handoff report links, selected
+architecture language, DualPipe vocabulary, and ~tnsr.mesh_sim_trace.v0~
+pointers across the DTensor tracker, the TLA+ gate, and the durable research
+note.
+
+Required diff check:
+
+#+begin_src sh
+git diff --check
+#+end_src
+
+Result: PASS at 2026-08-22. The command produced no output.
