@@ -1,0 +1,73 @@
+#+TITLE: Define the first MeshPlan.tla model
+#+TYPE: research
+#+STATUS: open
+#+BLOCKED_BY: 01-scope-formal-model-stack
+#+PARENT: ../map.org
+
+* Question
+
+What is the minimal ~MeshPlan.tla~ model that makes cross-axis collective
+ordering bugs visible without absorbing the entire training stack?
+
+* Context
+
+The first concrete counterexample should be the DP x TP collective-ordering
+cycle:
+
+#+begin_src text
+r00: TP0, then DP0
+r01: DP1, then TP0
+r11: TP1, then DP1
+r10: DP0, then TP1
+#+end_src
+
+This is the smallest useful model because every group is locally valid while
+the composed launch order is globally unsafe.
+
+* Requirements
+
+- Model N-D rank coordinates with at least ~dp~ and ~tp~ axes active.
+- Model explicit ~GroupId -> ordered members~ instead of deriving everything
+  from Cartesian axes.
+- Model collective descriptors containing group, step, epoch, slot, operation
+  kind, tensor or buffer identity, shape/count, dtype, and layout signature.
+- Model per-rank launch order.
+- Represent posted, completed, blocked, and aborted collective states.
+- Verify topology invariants:
+  - unique active coordinate
+  - group member agreement
+  - no ghost members
+  - ordered local-rank agreement
+- Verify collective invariants:
+  - signature agreement per group/epoch/step/slot
+  - every completion has all required members posted
+  - no reuse of collective id across incompatible operations
+- Include a bad model instance that produces the cross-axis deadlock or blocked
+  wait-for cycle.
+- Include a fixed model instance that passes the same safety checks.
+
+* Design questions
+
+- Should the first model use direct TLA+ only, or PlusCal for per-rank launch
+  loops with TLA+ operators for topology?
+- Should deadlock be represented as TLC deadlock, an explicit wait-for-cycle
+  invariant, or both?
+- Should collective completion be atomic in the first model, or should it have a
+  posted/in-flight/completed lifecycle from the start?
+
+* Out of scope
+
+- Tensor layout/provenance algebra beyond collective signatures.
+- Packet-level ring all-reduce.
+- Failure recovery.
+- Checkpointing.
+- Runtime trace validation.
+
+* Evidence needed
+
+- A proposed TLA+ module boundary and constant set.
+- The smallest model constants for the bad DP x TP schedule.
+- The smallest model constants for the fixed DP x TP schedule.
+- Expected TLC result for each instance.
+
+* Answer

@@ -1,34 +1,637 @@
-#+TITLE: Distributed training TLA+ research note
+#+TITLE: TLA+ for robust N-D distributed training
+#+TYPE: research
+#+STATUS: seed
 
-* DTensor mesh simulation prerequisite
+* Purpose
 
-The distributed-training TLA+ track must begin from the DTensor mesh simulation
-handoff, not from the ticket 08 architecture recommendation alone.
+Ferric Continuum should be a research vehicle for reasoning about distributed
+training designs before they become runtime code. The first durable target is a
+formal-methods track for N-D distributed training: topology, layout movement,
+collective ordering, buffer ownership, version management, failure recovery,
+and persistent commit.
 
-Canonical handoff:
+This document is the seed thesis for that track. It is not an implementation
+spec. Buildable requirements and blocker-linked tickets live under
+~.scratch/distributed-training-tla/~.
 
-- [[file:../../.scratch/dtensor-mesh-simulation/reports/10-tla-handoff.org][DTensor mesh simulation TLA+ handoff]]
+This track is sequenced after the DTensor mesh simulation architecture
+experiment. The first TLA+ models should inherit the selected Ferric mesh and
+layout vocabulary rather than defining a competing one. The DTensor dependency
+is not satisfied by the comparison report alone: the selected simulator path
+must first be graduated and handed off through
+~.scratch/dtensor-mesh-simulation/reports/10-tla-handoff.org~ so the TLA+
+track inherits stable names, event shapes, and schedule components.
 
-Selected simulator path:
+The canonical simulator entrypoint inherited by this track is:
 
 #+begin_src rust
 run_tiny_dense_mesh_simulation(dims, injection_plan)
 #+end_src
 
-This entrypoint is the stable caller-facing wrapper over:
+It is the stable wrapper over:
 
 #+begin_src rust
 MeshSimPlan::tiny_dense_training(dims)?.execute(injection_plan)
 #+end_src
 
-The inherited vocabulary includes the dense
-~pp x dp_replicate x dp_shard x cp x tp~ mesh, row-major rank-coordinate
-ordering with ~tp~ fastest, ordered process-group membership, placement and
-layout terms, supported redistribution transitions, collective signatures,
-~tnsr.mesh_sim_trace.v0~ events, failure record fields, and DualPipe-level
-forward/backward components.
+The current trace boundary is intentionally precise:
 
-Ticket 08 selected the architecture direction. Ticket 09 graduated the selected
-simulator path and proved the DualPipe-level schedule vocabulary. Ticket 10 is
-the formal-modeling gate because it records the stable vocabulary and known
-limits that TLA+ must not overclaim.
+- ~MeshSimCollectiveRecord~ persists ~kind~, ~axis~, ~tensor~, and ~phase~.
+- ~MeshTraceEvent::Collective~ persists ~phase~, ~kind~, ~axis~, ~tensor~,
+  ~bytes~, and ordered ~ranks~.
+- ~shard_dim~ and ~root_axis_index~ are callable inputs or future record
+  extensions; they are not persisted collective-record fields today.
+- ~same-layout-noop~ is a supported internal transition, but the current
+  graduated plan executor returns without emitting a trace event for it.
+
+* Core thesis
+
+Production-scale training is not just "workers compute gradients and then
+all-reduce." It is a composition of overlapping protocols:
+
+#+begin_src text
+training
+  = dataflow scheduling
+  + tensor-layout transitions
+  + collective ordering
+  + buffer lifetimes
+  + version management
+  + failure recovery
+  + persistent commit
+#+end_src
+
+For an N-D parallel job, the useful abstraction is:
+
+#+begin_quote
+A training step is a distributed transaction executed over a versioned device
+mesh, involving multiple overlapping process groups and sharded logical
+tensors.
+#+end_quote
+
+TLA+ is well suited to the coordination half of this problem because it models
+state machines above the code level, permits nondeterministic interleavings and
+failures, and can express invariants and temporal progress properties. PlusCal
+may be easier for process-local algorithms, while direct TLA+ is usually better
+for global topology, tensor-layout algebra, and compositional specifications.
+
+* Verification boundary
+
+The project must state exactly what has been checked.
+
+- TLC exhaustively checks a finite model instance, not arbitrary cluster sizes
+  and not production code.
+- TLA+ can verify that a bounded-staleness protocol is enforced; it does not
+  prove neural-network convergence under that bound.
+- TLA+ can verify that each logical gradient contribution is included exactly
+  once; it does not prove floating-point numerical stability.
+- No TLC deadlock is weaker than useful training progress.
+- TLA+ explores nondeterministic executions, not probability distributions.
+
+Ferric should pair formal checks with runtime tests, trace validation, GPU
+instrumentation, and numerical experiments.
+
+* Versioned N-D mesh
+
+The logical rank space is a product of parallelism axes:
+
+#+begin_src text
+R = D_dp x D_tp x D_pp x D_ep x D_cp
+rank = {dp, tp, pp, ep, cp}
+#+end_src
+
+The model should support a compact mesh algebra:
+
+#+begin_src tla
+Axes == {"dp", "tp", "pp", "ep", "cp"}
+
+Ranks ==
+  [dp : 0 .. (DP - 1),
+   tp : 0 .. (TP - 1),
+   pp : 0 .. (PP - 1),
+   ep : 0 .. (EP - 1),
+   cp : 0 .. (CP - 1)]
+
+MeshGroup(varyingAxes, r) ==
+  {q \in Ranks :
+     \A a \in Axes \ varyingAxes :
+       q[a] = r[a]}
+#+end_src
+
+The Cartesian coordinate system is not enough for production. The model must
+also represent the actual planned group table:
+
+#+begin_src text
+Members : GroupId -> Set[Rank]
+#+end_src
+
+This leaves room for composite groups, expert-data-parallel groups, adjacent
+pipeline-stage groups, multiple communicators with identical membership,
+hierarchical groups, and temporary recovery groups.
+
+Essential topology invariants:
+
+- ~UniqueCoordinate~: every active physical rank has exactly one active mesh
+  coordinate.
+- ~GroupAgreement~: every member has the same ordered view of a group's
+  members.
+- ~NoGhostMember~: every group member belongs to the active membership epoch.
+- ~TopologyMatchesPlan~: generated groups equal the configured parallel plan.
+- ~NoAmbiguousDeviceOwnership~: no two active processes unknowingly control the
+  same GPU or CUDA context.
+
+Group ordering matters, not just membership. Two ranks may agree on the set
+~{A,B,C}~ and still disagree about local rank order, corrupting all-to-all
+splits, root selection, chunk ownership, or reduction schedules.
+
+* Tensor abstraction
+
+Do not model tensors as scalar labels such as ~W0~ and ~W1~. The model should
+carry provenance, multiplicity, layout, and version.
+
+** Gradient provenance
+
+Represent each rank's gradient contribution for logical step ~s~ as a unit in a
+bag over contribution IDs:
+
+#+begin_src text
+ContributionId = {rank, step, membership_epoch, attempt}
+#+end_src
+
+Reduction combines bags by pointwise addition. This catches missing
+contributors, duplicate retries, wrong-step contributions, old-epoch
+contributions, and accidental reduction across the wrong process group. A set
+is too weak because it erases duplicates.
+
+#+begin_src tla
+ZeroBag == [x \in ContributionIds |-> 0]
+
+Unit(x) ==
+  [y \in ContributionIds |-> IF x = y THEN 1 ELSE 0]
+
+BagPlus(a, b) ==
+  [x \in ContributionIds |-> a[x] + b[x]]
+#+end_src
+
+For floating-point reproducibility, a commutative bag is intentionally too
+abstract. Deterministic floating-point order should be modeled as an ordered
+reduction tree, while numerical error bounds stay outside TLA+.
+
+** Layout as data
+
+A logical tensor state should contain:
+
+#+begin_src text
+TensorState = {
+  tensor_id,
+  logical_version,
+  membership_epoch,
+  index_region,
+  placement,
+  payload_provenance
+}
+#+end_src
+
+Useful placements mirror DTensor-style concepts:
+
+- ~Replicate(mesh_axes)~
+- ~Shard(tensor_dim, mesh_axis)~
+- ~Partial(reduction_op, mesh_axis)~
+- ~Absent~
+- ~Materialized~
+
+Core layout properties:
+
+- ~ShardCoverage~: all shards cover the logical tensor.
+- ~ShardDisjointness~: non-replicated shards do not overlap.
+- ~ReplicaVersionAgreement~: replicas hold the same version and abstract
+  payload.
+- ~ReshardPreservation~: layout transitions preserve tensor identity, index
+  coverage, provenance, and version.
+- ~PartialDoesNotEscape~: partial values cannot be consumed as complete
+  tensors.
+
+* Parallelism obligations
+
+** DDP and replicated data parallel
+
+Model gradient buckets, accumulation windows, all-reduces, and optimizer
+decisions. Prove exactly one contribution per participating replica, the same
+step and denominator, no optimizer step before synchronization, and one global
+skip/commit decision.
+
+** FSDP, ZeRO, and HSDP
+
+Model parameter shards, all-gather buffers, reduce-scatter outputs, optimizer
+shards, and overlap groups. Prove shard coverage and uniqueness, materialize
+before use, gradient shard completeness before optimizer use, and no buffer
+reuse while an asynchronous consumer holds a lease.
+
+** Tensor and sequence parallelism
+
+Model operator input/output layouts, partial results, TP collectives, sequence
+shards, RNG/dropout partitioning, and layout transitions. Prove each operator
+receives a legal layout and each required collective happens once with agreed
+signature and ordering.
+
+** Pipeline parallelism
+
+Model stages, virtual stages, microbatches, activation messages, weight
+versions, chunk components, and retirement. The minimum schedule granularity
+should be rich enough to model DualPipe-style overlap inside a pair of forward
+and backward chunks without becoming a numeric kernel simulator.
+
+Useful states:
+
+#+begin_src text
+NotAdmitted
+ForwardReady
+ForwardRunning
+ForwardDone
+ActivationSent
+BackwardReady
+BackwardRunning
+GradientSent
+Retired
+Aborted
+#+end_src
+
+At the component level, a forward chunk should expose at least:
+
+- attention compute
+- all-to-all dispatch
+- MLP compute
+- all-to-all combine
+- PP communication
+
+A backward chunk should expose the same communication shape, but split the
+compute components that affect pipeline bubble behavior:
+
+- attention input-gradient compute
+- attention weight-gradient compute
+- all-to-all dispatch gradient path
+- MLP input-gradient compute
+- MLP weight-gradient compute
+- all-to-all combine gradient path
+- PP communication
+
+This is the smallest useful abstraction for studying schedules in the
+DeepSeek-V3/DualPipe family: it preserves the distinct overlap constraints
+between compute, expert all-to-all traffic, and pipeline sends/receives while
+leaving CUDA kernels and tensor arithmetic abstract.
+
+Key properties:
+
+- ~ForwardBeforeBackward~
+- ~SingleForward~
+- ~SingleBackward~
+- ~ActivationLease~
+- ~CapacityBound~
+- ~Retirement~
+- ~NoCrossAttemptMessage~
+- ~ForwardBackwardWeightVersionAgreement~ or a policy-specific asynchronous
+  version relation.
+
+** Context parallelism
+
+Represent KV shard tokens with sequence, layer, microbatch, source CP rank,
+version, and epoch. Prove each query consumes every logically visible KV shard
+exactly once, no shard is duplicated, versions agree, ring rounds are bounded,
+and backward ownership is preserved.
+
+** Expert parallelism
+
+Represent each routed token copy with a stable identity:
+
+#+begin_src text
+copy_id = {
+  step,
+  microbatch,
+  layer,
+  token,
+  choice_index,
+  attempt
+}
+#+end_src
+
+Prove dispatch conservation, expert uniqueness, combine conservation,
+permutation invertibility, and metadata agreement over all-to-all split
+vectors, expert ownership, and routing maps.
+
+* Canonical cross-axis deadlock
+
+A minimal DP x TP mesh already exposes dangerous composition failures:
+
+#+begin_src text
+          tp=0   tp=1
+dp=0      r00    r01
+dp=1      r10    r11
+
+TP0 = {r00, r01}
+TP1 = {r10, r11}
+DP0 = {r00, r10}
+DP1 = {r01, r11}
+
+r00: TP0, then DP0
+r01: DP1, then TP0
+r11: TP1, then DP1
+r10: DP0, then TP1
+#+end_src
+
+Every group is locally well formed, but the composition creates a wait-for
+cycle. This should be the first formal model because it is small, concrete, and
+high-value.
+
+A collective signature should include:
+
+- operation kind
+- tensor or buffer ID
+- element count
+- dtype
+- reduction operator
+- root, when applicable
+- input and output layout
+- membership generation
+- step, slot, and epoch
+
+* Buffer lifetimes and overlap
+
+FSDP and pipeline overlap are buffer-lifecycle protocols:
+
+#+begin_src text
+Sharded
+  -> GatherPosted
+  -> Materialized
+  -> InUseByForward / InUseByBackward / InUseByTP
+  -> ReshardPending
+  -> Sharded
+#+end_src
+
+The core invariant is:
+
+#+begin_src text
+state(buffer) in {Freed, Reused} => leases(buffer) = {}
+#+end_src
+
+Consumers include forward kernels, backward kernels, TP collectives,
+recomputation, asynchronous checkpoint copies, and CUDA graph replay
+instances.
+
+* Training transaction and recovery
+
+A robust synchronous step should be modeled as:
+
+#+begin_src text
+Idle
+  -> Computing
+  -> Synchronizing
+  -> Prepared
+  -> Committing
+  -> Committed
+
+Prepared
+  -> Aborting
+  -> Aborted
+#+end_src
+
+Transaction identity:
+
+#+begin_src text
+TxnId = {
+  job_generation,
+  membership_epoch,
+  logical_step,
+  accumulation_window,
+  attempt
+}
+#+end_src
+
+Commit must be explicit. For replicated DDP, commit may mean every surviving
+replica advanced the optimizer. For FSDP/HSDP, a step is recoverably committed
+only if every required shard exists on a healthy rank, has a healthy replica, is
+captured by a complete checkpoint or journal, or can be transferred from a
+healthy replica group.
+
+Every communication and state object should carry a membership epoch. After
+installing epoch ~e+1~, no message, collective completion, checkpoint callback,
+or optimizer action from epoch ~e~ may mutate live state.
+
+Failure detection must separate:
+
+#+begin_src text
+alive[r]      -- environment truth
+suspected[r]  -- detector observation
+member[r]     -- installed membership
+#+end_src
+
+Safety must tolerate false suspicion. Liveness requires an explicit
+eventual-stability assumption.
+
+* Checkpointing as commit
+
+Checkpointing is not one action named ~Save~. Model:
+
+#+begin_src text
+Checkpoint = {
+  checkpoint_id,
+  logical_step,
+  membership_epoch,
+  expected_shards,
+  durable_shards,
+  metadata_versions,
+  data_cursor,
+  rng_state,
+  optimizer_state,
+  loss_scaler_state,
+  status
+}
+#+end_src
+
+State machine:
+
+#+begin_src text
+Allocated
+  -> CopyingSnapshot
+  -> WritingShards
+  -> Validating
+  -> ManifestReady
+  -> Published
+
+Allocated / CopyingSnapshot / WritingShards / Validating
+  -> Aborted
+#+end_src
+
+Core invariants:
+
+- ~PublishOnlyCompleteCheckpoint~
+- ~CheckpointVersionConsistency~
+- ~ManifestLast~
+- ~RestoreOnlyPublishedCheckpoint~
+- ~ReshardPreservesLogicalState~
+
+For exact logical replay, the commit unit often includes optimizer state, model
+state, scheduler state, global step, data-loader cursor, sample IDs, RNG state,
+and loss-scaler state.
+
+* Recommended model architecture
+
+Start layered, then consider generated specifications from a common protocol IR
+after the core contracts stabilize.
+
+** Layer 0: abstract training transaction
+
+Treat collectives as atomic operations. Model begin-step, abstract gradient,
+synchronization, commit/abort vote, optimizer commit, and data cursor commit.
+
+Prove exactly one final decision, no optimizer mutation after abort, monotonic
+committed versions, and data cursor plus optimizer version advancing together.
+
+** Layer 1: schedule and tensor layout
+
+Expand each abstract step into a microbatch DAG, PP sends/receives, TP/CP/EP
+collectives, FSDP materialization and resharding, layout transitions, and
+buffer ownership. Pipeline chunks should be decomposed at least to the
+DualPipe-inspired component boundary: attention, all-to-all dispatch, MLP,
+all-to-all combine, PP communication, and split backward input/weight compute
+for attention and MLP.
+
+Prove that completing this schedule refines one Layer-0 transaction.
+
+** Layer 2: collective protocol
+
+Replace an atomic collective only when the communication algorithm itself is
+under design. Model ring/tree rounds, chunks, queues, retries, duplicate
+suppression, packet loss, and out-of-order delivery.
+
+** Layer 3: membership and failure recovery
+
+Add crash-stop and fail-recover processes, heartbeat observations, suspicion,
+epoch installation, communicator abort/recreation, state transfer, and zombie
+fencing. Recovery should stutter relative to the abstract training spec until it
+produces a commit or abort.
+
+** Layer 4: checkpoint and restart
+
+Add distributed snapshot, shard durability, manifest publication, restore, and
+resharding across changed world size.
+
+* Initial finite-model suite
+
+Do not enumerate production-sized systems. Search minimal interaction scopes:
+
+- Cross-axis ordering: ~DP=2, TP=2, PP=EP=CP=1~, two collective slots.
+- Pipeline plus data parallel: ~DP=2, PP=2~, two microbatches, one or two
+  activation buffers, one injected failure, and component-level forward and
+  backward chunks with attention, expert all-to-all, MLP, and PP communication
+  phases.
+- TP plus FSDP overlap: ~DP=2, TP=2~, two layers, one parameter all-gather
+  group, one gradient reduce-scatter group.
+- MoE: ~TP=2, EP=2~, two or three tokens, ~top-k=2~, one capacity-drop case,
+  one duplicate-delivery case.
+- Context parallel: ~CP=2~ or ~CP=3~, two KV chunks, one delayed round, one
+  duplicate message.
+- Selected three-way composition: ~DP=2, TP=2, PP=2~, two microbatches, one
+  failure.
+
+Use symmetry reduction for safety models only. Maintain smaller non-symmetric
+liveness configs.
+
+* Implementation correspondence
+
+Formal specs become useful when they connect to runtime artifacts.
+
+Define a common event schema:
+
+#+begin_src text
+TrainEvent = {
+  timestamp,
+  job_generation,
+  membership_epoch,
+  rank_coordinate,
+  physical_rank,
+  group_id,
+  group_generation,
+  step,
+  attempt,
+  microbatch,
+  layer,
+  collective_slot,
+  collective_signature,
+  tensor_id,
+  layout_before,
+  layout_after,
+  stream_id,
+  buffer_id,
+  event_kind,
+  status
+}
+#+end_src
+
+Representative event kinds:
+
+- ~COLLECTIVE_POST~
+- ~COLLECTIVE_COMPLETE~
+- ~COLLECTIVE_ERROR~
+- ~BUFFER_LEASE_ACQUIRE~
+- ~BUFFER_LEASE_RELEASE~
+- ~MICROBATCH_FORWARD_DONE~
+- ~OPTIMIZER_COMMIT~
+- ~STEP_ABORT~
+- ~EPOCH_INSTALLED~
+- ~CHECKPOINT_SHARD_DURABLE~
+- ~CHECKPOINT_PUBLISHED~
+
+The long-term path is:
+
+#+begin_src text
+runtime or fault-injection trace
+  -> abstract event projection
+  -> TLC constrained to that event sequence
+  -> valid refinement or first inconsistent event
+#+end_src
+
+Counterexamples should become deterministic tests with controlled rank
+scheduling, collective delay, callback completion, timeout delivery, process
+death, checkpoint-write completion, and restart.
+
+* What Ferric should build first
+
+The first buildable tracer bullet should be ~MeshPlan.tla~ plus a small runner
+contract:
+
+- Generate or hand-write a DP x TP collective schedule instance.
+- Verify topology consistency, group ordering, collective signature agreement,
+  and cross-group deadlock detection.
+- Include one bad schedule that TLC rejects and one fixed schedule that passes.
+- Keep tensor payloads as provenance tokens, not numeric arrays.
+- Record model-checking evidence in Ferric run records.
+
+This keeps state space tractable while targeting the first class of failures
+most likely to hang a real distributed training job.
+
+Before this first tracer bullet starts, close the DTensor mesh simulation
+comparison, graduate the selected simulator path, and carry forward its selected
+architecture, shared mesh/layout terms, telemetry conventions, and
+DualPipe-level schedule vocabulary.
+
+* References
+
+- [[https://lamport.azurewebsites.net/tla/high-level-view.html][Leslie Lamport, high-level view of TLA+]]
+- [[https://docs.pytorch.org/tutorials/beginner/dist_overview.html][PyTorch distributed overview]]
+- [[https://docs.pytorch.org/docs/stable/distributed.tensor.html][PyTorch DTensor]]
+- [[https://docs.pytorch.org/tutorials/intermediate/FSDP_tutorial.html][PyTorch FSDP]]
+- [[https://docs.pytorch.org/docs/stable/distributed.pipelining.html][PyTorch pipeline parallelism]]
+- [[https://docs.pytorch.org/tutorials/unstable/context_parallel.html][PyTorch context parallelism]]
+- [[https://docs.nvidia.com/megatron-core/developer-guide/nightly/apidocs/core/core.transformer.moe.token_dispatcher.html][Megatron-Core MoE token dispatcher]]
+- [[https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/communicators.html][NCCL communicator lifecycle and ordering]]
+- [[https://docs.nvidia.com/megatron-core/developer-guide/0.17.0/user-guide/features/moe.html][Megatron-Core MoE feature guide]]
+- [[https://www.microsoft.com/en-us/research/blog/pipedream-a-more-effective-way-to-train-deep-neural-networks-using-pipeline-parallelism/][PipeDream weight-version discussion]]
+- [[https://github.com/In-Net/EPIC][EPIC artifact]]
+- [[https://github.com/In-Net/EPIC/raw/refs/heads/main/verify/src/trans_allreduce/trans_allreduce.tla][EPIC all-reduce TLA+ model]]
+- [[https://pmc.ncbi.nlm.nih.gov/articles/PMC4230489/][Stale synchronous parallel systems]]
+- [[https://pytorch.org/blog/fault-tolerant-llama-training-with-2000-synthetic-failures-every-15-seconds-and-no-checkpoints-on-crusoe-l40s/][TorchFT fault-tolerant training]]
+- [[https://docs.pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html][PyTorch distributed checkpointing]]
+- [[https://docs.tlapl.us/using%3Atlc%3Aconfig_file][TLC configuration guidance]]
+- [[https://apalache-mc.org/docs/apalache/index.html][Apalache documentation]]
+- [[https://arxiv.org/abs/2404.16075][TLA+ trace validation research]]
+- [[https://arxiv.org/html/2008.08708v2][Collective synthesis background]]
+- [[https://pytorch.org/blog/introducing-pytorch-monarch/][PyTorch Monarch overview]]

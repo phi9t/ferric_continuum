@@ -1,0 +1,108 @@
+#+TITLE: Distributed training TLA+ wayfinder
+#+TYPE: map
+#+STATUS: needs-info
+
+* Goal
+
+Make Ferric Continuum a research vehicle for reasoning about robust N-D
+distributed training protocols with TLA+, executable model checking, and later
+runtime trace validation.
+
+The durable seed thesis is:
+
+- [[file:../../docs/research/distributed-training-tla.org][docs/research/distributed-training-tla.org]]
+
+This wayfinder map turns that thesis into bounded decisions before any
+implementation starts.
+
+* Classification
+
+This is a gated architecture effort.
+
+Evidence:
+
+- It defines a new subsystem for formal models and model-checking evidence.
+- It touches distributed/concurrency invariants, not a local API tweak.
+- It spans concepts from Ferric, TorchTitan, Monarch, NCCL, Cutlass, and
+  Modular, even if Ferric owns the first implementation.
+- It has long-term implementation-correspondence questions around generated
+  plans and trace validation.
+
+* Constraints
+
+- This effort is sequenced after the existing DTensor mesh simulation work.
+  Do not start TLA+ implementation until
+  [[file:../dtensor-mesh-simulation/issues/08-comparison-report-and-recommendation.org][dtensor-mesh-simulation issue 08]]
+  recommends a durable architecture,
+  [[file:../dtensor-mesh-simulation/issues/09-graduate-selected-simulator.org][dtensor-mesh-simulation issue 09]]
+  graduates the selected simulator path, and
+  [[file:../dtensor-mesh-simulation/issues/10-handoff-to-distributed-training-tla.org][dtensor-mesh-simulation issue 10]]
+  writes the TLA+ handoff report.
+- Ferric owns the formal models, checks, generated examples, and local evidence.
+- Sibling repositories are study inputs, not vendored dependencies.
+- The first implementation slice should be small enough for TLC to find and
+  explain a real counterexample.
+- Start with atomic collectives and N-D schedule correctness. Do not model
+  packet-level ring protocols until the communication algorithm itself is under
+  design.
+- Keep production-scale claims honest: finite model checking is finite model
+  checking.
+- Use org-mode tracker artifacts under this directory.
+- Preserve the existing DTensor simulation effort; link to it rather than
+  replacing it.
+
+* Decisions so far
+
+- The durable overview lives in
+  [[file:../../docs/research/distributed-training-tla.org][docs/research/distributed-training-tla.org]]
+  because the topic should outlive the tracker.
+- The TLA+ effort runs after the DTensor mesh simulation comparison because the
+  first formal models should inherit the chosen mesh/layout vocabulary instead
+  of racing a still-open architecture experiment.
+- The comparison is necessary but not sufficient: the DTensor effort must also
+  graduate the selected simulator path and produce
+  [[file:../dtensor-mesh-simulation/reports/10-tla-handoff.org][the TLA+ handoff report]]
+  before this track begins implementation.
+- The first formal model should be a minimal DP x TP cross-axis collective
+  ordering model, not a monolithic distributed-training specification.
+- The first model should treat collectives as atomic operations and focus on
+  group membership, local rank ordering, collective signatures, slots, epochs,
+  and deadlock/progress classification.
+- Later layers should add step transactions, tensor layout/provenance, buffer
+  leases, pipeline schedules, membership recovery, checkpoint publication, and
+  trace validation.
+
+* Related local context
+
+- Existing DTensor simulation tracker:
+  [[file:../dtensor-mesh-simulation/spec.org][.scratch/dtensor-mesh-simulation/spec.org]]
+- Ferric runner for rootfs execution and evidence:
+  [[file:../ferric-runner/spec.org][.scratch/ferric-runner/spec.org]]
+- Current distributed teaching modules:
+  [[file:../../ferric_continuum/tnsr/src/scaling/distributed/mod.rs][ferric_continuum/tnsr/src/scaling/distributed/mod.rs]]
+
+* Frontier
+
+- [[file:issues/00-wait-for-dtensor-mesh-simulation.org][00-wait-for-dtensor-mesh-simulation]]
+- [[file:issues/01-scope-formal-model-stack.org][01-scope-formal-model-stack]]
+- [[file:issues/02-mesh-plan-model.org][02-mesh-plan-model]]
+- [[file:issues/03-checker-tooling.org][03-checker-tooling]]
+- [[file:issues/04-layout-provenance-boundary.org][04-layout-provenance-boundary]]
+- [[file:issues/05-step-transaction-model.org][05-step-transaction-model]]
+- [[file:issues/06-pipeline-buffer-lifecycle.org][06-pipeline-buffer-lifecycle]]
+- [[file:issues/07-recovery-checkpoint-trace-validation.org][07-recovery-checkpoint-trace-validation]]
+
+* Fog
+
+- Whether Ferric should use raw TLC first, a small Python wrapper around TLC,
+  Bazel test integration, or the newly added Ferric runner as the evidence
+  carrier for the first slice.
+- Where the long-lived TLA+ source tree should live:
+  ~formal/distributed_training/~, ~ferric_continuum/formal/~, or
+  ~tools/formal/~.
+- Whether model constants should begin as hand-written examples or be generated
+  from the existing DTensor simulation structures.
+- How much of the existing ~dtensor-mesh-simulation~ substrate should be reused
+  before it stabilizes.
+- Whether trace validation should target Ferric synthetic traces first or a
+  TorchTitan/Monarch-derived event schema first.

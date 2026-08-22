@@ -1,0 +1,52 @@
+#+TITLE: Decide tensor layout and provenance boundary
+#+TYPE: research
+#+STATUS: open
+#+BLOCKED_BY: 02-mesh-plan-model
+#+PARENT: ../map.org
+
+* Question
+
+Where should Ferric draw the first formal boundary for tensor layout,
+provenance, and contribution multiplicity?
+
+* Context
+
+The durable thesis argues that plain tensor labels are too weak. Formal models
+should carry tensor identity, shard identity, layout, logical version,
+membership epoch, and payload provenance. The existing DTensor mesh simulation
+effort already explores runtime-shaped placement and redistribution semantics;
+this ticket decides what the TLA+ side should reuse or mirror.
+
+* Requirements
+
+- Define the minimal ~TensorState~ fields needed for formal checking.
+- Decide whether provenance starts as a bag of contribution IDs, an ordered
+  reduction expression, or both.
+- Decide which placements are in the first formal layout vocabulary:
+  ~Replicate~, ~Shard~, ~Partial~, ~Absent~, and ~Materialized~.
+- Define first invariants:
+  - shard coverage
+  - shard disjointness
+  - replica version agreement
+  - reshard preservation
+  - partial values do not escape as complete tensors
+- Identify the correspondence to existing Ferric DTensor simulation concepts.
+- Decide whether layout checks belong in the first ~MeshPlan.tla~ model or a
+  separate ~LayoutProvenance.tla~ layer.
+
+* Out of scope
+
+- Full operator semantics for every ~tnsr~ operation.
+- Floating-point numerical error bounds.
+- Runtime DTensor implementation changes.
+- Generated trace validation.
+
+* Evidence needed
+
+- A proposed TLA+ type shape for tensor state.
+- A mapping to the DTensor simulation vocabulary where one exists.
+- One minimal example that fails if a partial value escapes as complete.
+- Decision on whether ordered reduction trees are needed before protocol-level
+  collective work.
+
+* Answer

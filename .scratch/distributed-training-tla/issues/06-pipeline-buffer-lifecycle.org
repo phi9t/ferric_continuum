@@ -1,0 +1,94 @@
+#+TITLE: Decide pipeline schedule and buffer lifecycle model
+#+TYPE: research
+#+STATUS: open
+#+BLOCKED_BY: 04-layout-provenance-boundary, 05-step-transaction-model
+#+PARENT: ../map.org
+
+* Question
+
+How should Ferric model pipeline scheduling, weight versions, and buffer leases
+without collapsing into a full runtime simulator?
+
+* Context
+
+Pipeline parallelism and FSDP overlap create correctness obligations around
+causality, temporary materialization, asynchronous consumers, and versioned
+microbatches. The formal layer should make these obligations visible while
+staying small enough for finite model checking. The schedule abstraction must
+also preserve the key DeepSeek-V3/DualPipe insight that useful overlap happens
+inside a pair of forward and backward chunks, not only between whole chunks.
+
+* Requirements
+
+- Define microbatch states:
+  - ~NotAdmitted~
+  - ~ForwardReady~
+  - ~ForwardRunning~
+  - ~ForwardDone~
+  - ~ActivationSent~
+  - ~BackwardReady~
+  - ~BackwardRunning~
+  - ~GradientSent~
+  - ~Retired~
+  - ~Aborted~
+- Define buffer states:
+  - ~Sharded~
+  - ~GatherPosted~
+  - ~Materialized~
+  - ~InUse~
+  - ~ReshardPending~
+  - ~Freed~
+  - ~Reused~
+- Define leases for forward kernels, backward kernels, TP collectives,
+  recomputation, checkpoint snapshot copies, and CUDA graph replay instances.
+- Define weight-version fields for forward and backward of each stage and
+  microbatch.
+- Define chunk-component states at DualPipe-level granularity:
+  - forward attention compute
+  - forward all-to-all dispatch
+  - forward MLP compute
+  - forward all-to-all combine
+  - forward PP communication
+  - backward attention input-gradient compute
+  - backward attention weight-gradient compute
+  - backward all-to-all dispatch gradient path
+  - backward MLP input-gradient compute
+  - backward MLP weight-gradient compute
+  - backward all-to-all combine gradient path
+  - backward PP communication
+- Verify:
+  - forward before backward
+  - send/receive matching
+  - component dependencies within each forward/backward chunk
+  - legal overlap between compute, all-to-all, and PP communication components
+  - no component consumes a buffer, activation, route map, or gradient before
+    its producer has completed or explicitly granted a lease
+  - no cross-attempt activation use
+  - activation capacity bound
+  - no use before materialization
+  - no reuse or free while leases are outstanding
+  - backward uses the forward-associated weight version unless a policy says
+    otherwise
+- Decide the smallest finite model shape, likely ~DP=2, PP=2~ with two
+  microbatches and one or two activation buffers.
+
+* Out of scope
+
+- Modeling CUDA kernels or stream scheduling in numeric detail.
+- Full PipeDream or 1F1B performance modeling.
+- Production pipeline runtime changes.
+- Checkpoint publication.
+
+* Evidence needed
+
+- Proposed model decomposition between schedule state and buffer state.
+- At least one intended counterexample, such as activation reuse before
+  backward or backward using a mismatched weight version.
+- At least one DualPipe-style counterexample, such as all-to-all combine racing
+  ahead of MLP output, PP receive satisfying the wrong chunk attempt, or weight
+  gradient computation releasing a buffer still needed by input-gradient
+  computation.
+- Recommendation on whether this is Layer 1 or a separate Layer 1b after
+  layout/provenance.
+
+* Answer

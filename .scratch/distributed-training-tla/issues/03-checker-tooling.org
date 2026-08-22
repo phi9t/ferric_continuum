@@ -1,0 +1,71 @@
+#+TITLE: Decide checker tooling and evidence path
+#+TYPE: research
+#+STATUS: open
+#+BLOCKED_BY: 01-scope-formal-model-stack
+#+PARENT: ../map.org
+
+* Question
+
+How should Ferric run, record, and eventually automate TLA+ model checks?
+
+* Context
+
+The first model needs reproducible evidence, but the first slice should not turn
+into a packaging project. Ferric now has a rootfs runner that can record command,
+preflight, bwrap-plan, stdout, stderr, and result artifacts. That runner can
+become the evidence carrier if TLC is available in the chosen environment.
+
+* Options to evaluate
+
+** Option A: Manual TLC command
+
+Document exact commands beside each model and require humans or agents to paste
+the output into tracker answers.
+
+** Option B: Thin Python checker wrapper
+
+Add a small Ferric wrapper that invokes TLC for a model/config pair and writes a
+structured summary. The wrapper can later run through ~tools/ferric_run.py~.
+
+** Option C: Bazel test integration
+
+Expose model checks as Bazel targets.
+
+* Recommended direction
+
+Use Option B for the first implementation if TLC can be discovered without a
+large dependency story. Keep Bazel integration as a later hardening ticket.
+
+* Requirements
+
+- Discover whether ~tlc2.TLC~, ~tla2tools.jar~, Apalache, or another checker is
+  already available on the host or in the rootfs.
+- Decide the source layout for formal models and checker configs.
+- Decide the command shape for checking one model/config pair.
+- Decide the run evidence format:
+  - model path
+  - config path
+  - checker name and version
+  - command argv
+  - exit code
+  - safety/liveness result summary
+  - counterexample path when present
+- Decide whether the first checker wrapper is allowed to require Java.
+- Decide whether checker commands run directly on host for v1 or through the
+  Ferric rootfs runner.
+
+* Out of scope
+
+- Installing checker dependencies.
+- Adding CI requirements.
+- Supporting every TLA+ backend.
+- Parsing arbitrary TLC output perfectly.
+
+* Evidence needed
+
+- Tool inventory command outputs.
+- Proposed source and evidence layout.
+- One runnable command line for checking the first model.
+- Known failure modes and how they should appear in run evidence.
+
+* Answer

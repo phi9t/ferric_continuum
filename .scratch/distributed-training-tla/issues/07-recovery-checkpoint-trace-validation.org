@@ -1,0 +1,82 @@
+#+TITLE: Decide recovery, checkpoint, and trace-validation architecture
+#+TYPE: research
+#+STATUS: open
+#+BLOCKED_BY: 05-step-transaction-model, 06-pipeline-buffer-lifecycle
+#+PARENT: ../map.org
+
+* Question
+
+How should Ferric connect formal training-transaction models to recovery,
+checkpoint publication, and implementation trace validation?
+
+* Context
+
+The durable thesis argues that robust training needs explicit membership
+epochs, communicator lifecycles, recovery fencing, durable checkpoint
+publication, and eventually trace validation against runtime events. These are
+high-value but should not be loaded into the first model before the topology and
+transaction contracts are crisp.
+
+* Requirements
+
+- Define recovery state:
+  - alive truth
+  - suspected failure-detector view
+  - installed membership
+  - membership epoch
+  - communicator generation
+  - state-transfer source
+- Define communicator lifecycle states:
+  - uninitialized
+  - initializing
+  - active
+  - error observed
+  - revoking
+  - aborting
+  - quiesced
+  - destroyed
+  - reconfiguring
+- Define checkpoint state:
+  - checkpoint id
+  - logical step
+  - membership epoch
+  - expected shards
+  - durable shards
+  - metadata versions
+  - data cursor
+  - RNG state
+  - optimizer state
+  - loss-scaler state
+  - status
+- Define recovery invariants:
+  - no split brain
+  - old epoch fenced
+  - no launch after revoke
+  - destroy only after quiescence or abort
+  - one active generation per logical group
+  - recovering member receives committed state
+- Define checkpoint invariants:
+  - publish only complete checkpoint
+  - manifest last
+  - restore only published checkpoint
+  - checkpoint version consistency
+  - reshard preserves logical state
+- Define the first runtime event schema sufficient for trace validation.
+- Decide whether trace validation begins with Ferric synthetic traces or
+  TorchTitan/Monarch-derived traces.
+
+* Out of scope
+
+- Implementing production recovery.
+- Changing NCCL, TorchTitan, Monarch, or checkpointing code.
+- Proving optimizer convergence after recovery.
+- Modeling packet-level loss unless a custom collective is under design.
+
+* Evidence needed
+
+- Proposed event schema fields and event kinds.
+- Decision on the first trace producer.
+- A minimal counterexample-to-test workflow.
+- Explicit dependency graph from formal model layer to runtime trace validator.
+
+* Answer

@@ -1,0 +1,89 @@
+#+TITLE: Scope the formal model stack
+#+TYPE: research
+#+STATUS: open
+#+BLOCKED_BY: 00-wait-for-dtensor-mesh-simulation
+#+PARENT: ../map.org
+
+* Question
+
+What should Ferric's first formal-methods stack include for robust N-D
+distributed training?
+
+* Context
+
+The durable thesis argues for layered TLA+ models, starting with atomic
+collectives and schedule correctness before expanding into tensor layout,
+transaction commit, recovery, checkpointing, or protocol-level collective
+algorithms.
+
+This ticket decides the first buildable scope and explicitly defers the parts
+that would make the initial state space or implementation surface too large.
+It should run only after the DTensor mesh simulation effort has selected its
+durable architecture and vocabulary.
+
+* Options to evaluate
+
+** Option A: TLA+ files plus documented TLC commands
+
+Ferric adds hand-written ~.tla~ and ~.cfg~ files plus README instructions. The
+first model is run manually with TLC outside Bazel.
+
+Strength:
+
+- Fastest route to a real counterexample.
+- Minimal tooling commitment.
+
+Weakness:
+
+- Evidence can drift because commands are not yet encoded in the repo's normal
+  test surface.
+
+** Option B: TLA+ files plus a small checked runner
+
+Ferric adds hand-written ~.tla~ and ~.cfg~ files plus a small wrapper that runs
+TLC and writes evidence into the Ferric runner's run-record format.
+
+Strength:
+
+- Connects formal checking to the new evidence substrate.
+- Keeps the first slice still small.
+
+Weakness:
+
+- Requires deciding how TLC is installed or discovered.
+
+** Option C: Generated TLA+ constants from a protocol IR
+
+Ferric starts by defining an IR for mesh groups, collective signatures, and
+launch order, then generates TLA+ constants and test inputs.
+
+Strength:
+
+- Best long-term implementation/specification correspondence.
+
+Weakness:
+
+- Too much design surface before the first counterexample is runnable.
+
+* Recommended direction
+
+Start with Option B if TLC is already reasonably discoverable on the host or in
+the rootfs. Otherwise start with Option A and make runner integration the next
+ticket. Defer Option C until ~MeshPlan.tla~ has proven useful.
+
+* Evidence needed
+
+- Inventory of available TLA+ tooling on this host and inside plausible Ferric
+  rootfs environments.
+- Decision on whether first evidence is manual TLC output or Ferric runner run
+  records.
+- Explicit first-slice acceptance criteria.
+
+* Out of scope
+
+- Implementing ~MeshPlan.tla~.
+- Defining the full training event schema.
+- Proving arbitrary-size theorems.
+- Adding CI requirements.
+
+* Answer

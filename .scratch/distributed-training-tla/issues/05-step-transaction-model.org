@@ -1,0 +1,61 @@
+#+TITLE: Define the abstract step transaction model
+#+TYPE: research
+#+STATUS: open
+#+BLOCKED_BY: 02-mesh-plan-model
+#+PARENT: ../map.org
+
+* Question
+
+What is Ferric's first abstract model of a training step as a distributed
+transaction?
+
+* Context
+
+The durable thesis frames a training step as a transaction over a versioned
+device mesh. This ticket decides the Layer 0 contract that later schedule,
+layout, recovery, and checkpoint models must refine.
+
+* Requirements
+
+- Define ~TxnId~ fields:
+  - job generation
+  - membership epoch
+  - logical step
+  - accumulation window
+  - attempt
+- Define abstract phases:
+  - idle
+  - computing
+  - synchronizing
+  - prepared
+  - committing
+  - committed
+  - aborting
+  - aborted
+- Define the decision object for commit versus abort.
+- Model AMP/loss-scale overflow observations as nondeterministic local inputs.
+- Require one global commit/abort decision.
+- Require no optimizer mutation after abort.
+- Require committed model versions to increase monotonically.
+- Decide whether the data cursor advances in the same transaction as optimizer
+  state.
+- Decide what stuttering recovery actions are allowed before the transaction
+  resolves.
+
+* Out of scope
+
+- Concrete PP microbatch scheduling.
+- Concrete FSDP buffer leases.
+- Checkpoint shard writing.
+- Numeric optimizer convergence.
+
+* Evidence needed
+
+- Proposed state variables and transition names.
+- Invariants and liveness properties for the first finite model.
+- One mutation that would let one rank update while another skips, with the
+  expected counterexample.
+- Decision on whether this model should be checked before or after the first
+  layout/provenance model.
+
+* Answer
