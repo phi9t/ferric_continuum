@@ -1,6 +1,6 @@
 #+TITLE: Scope the formal model stack
 #+TYPE: research
-#+STATUS: open
+#+STATUS: resolved
 #+BLOCKED_BY: 00-wait-for-dtensor-mesh-simulation
 #+PARENT: ../map.org
 
@@ -87,3 +87,45 @@ ticket. Defer Option C until ~MeshPlan.tla~ has proven useful.
 - Adding CI requirements.
 
 * Answer
+
+Resolved the first formal-methods stack as Option B: hand-written TLA+ modules
+plus a thin Python checker wrapper. The first implementation records standalone
+~tla-check.json~ evidence; adapting that JSON into the broader Ferric runner
+run-record envelope is deferred with Bazel/runner hardening rather than forced
+into the first counterexample slice.
+
+The first implementation slice deliberately stays at the atomic-collective
+schedule layer:
+
+- source layout: ~formal/distributed_training/~
+- generic model: ~formal/distributed_training/MeshPlan.tla~
+- concrete finite instances:
+  - ~formal/distributed_training/MeshPlanGood.tla~
+  - ~formal/distributed_training/MeshPlanBad.tla~
+- checker wrapper: ~tools/tla_check.py~
+- wrapper tests: ~tests/tla_check/test_tla_check.py~
+- local evidence layout: caller-selected ~--out-dir~ containing
+  ~tla-check.json~, ~stdout.log~, ~stderr.log~, and TLC ~states/~
+
+The first slice requires Java only when executing TLC. Dry-run evidence works
+without a checker installed. Non-dry execution may use an explicit
+~--tla-tools-jar~ or ~TLA_TOOLS_JAR~; if neither is available, the wrapper
+records structured unavailable-tooling evidence and exits ~2~.
+
+Tooling inventory:
+
+- Java exists on this host and TLC ran successfully through an explicit
+  temporary jar at ~/tmp/ferric-tla2tools.jar~.
+- No repo-pinned TLA dependency or CI/Bazel integration was added in this
+  slice.
+- Bazel integration, checker dependency vendoring, Apalache, and generated TLA
+  constants remain follow-up work.
+
+First-slice acceptance criteria:
+
+- A good finite DP x TP schedule satisfies the topology and collective
+  invariants plus ~CollectiveResponse~.
+- A bad finite DP x TP schedule produces the canonical cross-axis blocked-cycle
+  counterexample.
+- The wrapper records checker kind, version, argv, exit code, result summary,
+  and stdout/stderr paths.

@@ -68,6 +68,15 @@ Evidence:
 - The first model should treat collectives as atomic operations and focus on
   group membership, local rank ordering, collective signatures, slots, epochs,
   and deadlock/progress classification.
+- The first formal stack uses hand-written TLA+ modules under
+  ~formal/distributed_training/~ plus a thin Python TLC wrapper at
+  ~tools/tla_check.py~. Bazel integration and generated constants remain later
+  hardening work.
+- The first executable fixtures are:
+  - ~formal/distributed_training/MeshPlanGood.tla~
+  - ~formal/distributed_training/MeshPlanBad.tla~
+  The good fixture must satisfy ~Inv~ and ~CollectiveResponse~; the bad fixture
+  must fail with an ~Inv~ violation that exposes the cross-axis blocked cycle.
 - Later layers should add step transactions, tensor layout/provenance, buffer
   leases, pipeline schedules, membership recovery, checkpoint publication, and
   trace validation.
@@ -94,15 +103,8 @@ Evidence:
 
 * Fog
 
-- Whether Ferric should use raw TLC first, a small Python wrapper around TLC,
-  Bazel test integration, or the newly added Ferric runner as the evidence
-  carrier for the first slice.
-- Where the long-lived TLA+ source tree should live:
-  ~formal/distributed_training/~, ~ferric_continuum/formal/~, or
-  ~tools/formal/~.
-- Whether model constants should begin as hand-written examples or be generated
-  from the existing DTensor simulation structures.
-- How much of the existing ~dtensor-mesh-simulation~ substrate should be reused
-  before it stabilizes.
+- Whether the first generated constants should come directly from
+  ~tnsr::dtensor::MeshSimPlan~ reports or from a smaller intermediate protocol
+  IR.
 - Whether trace validation should target Ferric synthetic traces first or a
   TorchTitan/Monarch-derived event schema first.

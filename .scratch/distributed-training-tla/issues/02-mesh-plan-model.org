@@ -1,6 +1,6 @@
 #+TITLE: Define the first MeshPlan.tla model
 #+TYPE: research
-#+STATUS: open
+#+STATUS: resolved
 #+BLOCKED_BY: 01-scope-formal-model-stack
 #+PARENT: ../map.org
 
@@ -71,3 +71,83 @@ the composed launch order is globally unsafe.
 - Expected TLC result for each instance.
 
 * Answer
+
+Implemented the first executable MeshPlan model.
+
+Model boundary:
+
+- ~formal/distributed_training/MeshPlan.tla~ is the generic direct-TLA+
+  schedule model.
+- It models rank IDs, explicit DP/TP coordinates, canonical ordered
+  process-group membership, per-rank ordered group views, per-rank launch
+  programs, atomic collective post/complete actions, and completed or aborted
+  collective state.
+- Collective descriptors include group, step, epoch, slot, operation kind,
+  tensor identity, shape, dtype, reduction operator, root, input/output layout,
+  and membership generation.
+- The first state space intentionally treats collectives as atomic operations;
+  packet-level ring protocols, recovery, checkpointing, and tensor
+  provenance/layout algebra remain out of scope.
+
+Topology invariants:
+
+- ~UniqueActiveCoordinate~
+- ~NoGhostMember~
+- ~OrderedLocalRankAgreement~
+- ~GroupAgreement~
+- ~PostedByMember~
+
+Collective invariants and progress:
+
+- ~CompletedHasAllMembers~
+- ~NoConflictingPostedSlot~
+- ~NoBlockedCycle~
+- ~CollectiveResponse~
+
+TLC uses weak fairness on ~Post(r)~ and ~Complete(c)~ so liveness does not fail
+only because TLC stutters forever while enabled scheduling actions exist.
+
+Finite instances:
+
+- ~formal/distributed_training/MeshPlanGood.tla~ defines a DP x TP schedule
+  where TP collectives are launched before DP collectives on every rank.
+- ~formal/distributed_training/MeshPlanBad.tla~ defines the canonical cross-axis
+  cycle:
+
+#+begin_src text
+r00: TP0, then DP0
+r01: DP1, then TP0
+r10: DP0, then TP1
+r11: TP1, then DP1
+#+end_src
+
+Verification evidence from 2026-08-22:
+
+#+begin_src sh
+python3 tools/tla_check.py \
+  --tla-tools-jar /tmp/ferric-tla2tools.jar \
+  --model formal/distributed_training/MeshPlanGood.tla \
+  --config formal/distributed_training/MeshPlanGood.cfg \
+  --out-dir /tmp/ferric-tla-good-run
+#+end_src
+
+Result: exit ~0~, JSON result ~success~, TLC reported:
+
+#+begin_src text
+Model checking completed. No error has been found.
+190 states generated, 73 distinct states found, 0 states left on queue.
+#+end_src
+
+Bad-instance check:
+
+#+begin_src sh
+python3 tools/tla_check.py \
+  --tla-tools-jar /tmp/ferric-tla2tools.jar \
+  --model formal/distributed_training/MeshPlanBad.tla \
+  --config formal/distributed_training/MeshPlanBad.cfg \
+  --out-dir /tmp/ferric-tla-bad-run
+#+end_src
+
+Result: exit ~12~, JSON result ~invariant_violation~. TLC reported
+~Invariant Inv is violated~ after all four ranks posted one incompatible first
+collective and no collective could complete.

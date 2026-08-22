@@ -1,0 +1,74 @@
+#+TITLE: Distributed training formal models
+
+* Scope
+
+This directory contains Ferric Continuum's first executable formal-modeling
+artifacts for robust N-D distributed training.
+
+The first model, ~MeshPlan.tla~, is intentionally small. It treats collectives
+as atomic operations and checks whether a planned launch order over overlapping
+process groups can make every rank busy while no collective can complete.
+
+This slice inherits vocabulary from the DTensor mesh simulation handoff:
+
+- ordered process-group membership;
+- per-rank collective launch order;
+- collective descriptors with operation kind, tensor identity, shape, dtype,
+  reduction, root, input/output layout, membership generation, step, slot, and
+  epoch;
+- atomic collective completion before packet-level protocol details.
+
+* Files
+
+- ~MeshPlan.tla~: abstract collective-ordering model.
+- ~MeshPlanGood.tla~ and ~MeshPlanGood.cfg~: a concrete DP x TP schedule where
+  TP collectives complete before DP collectives.
+- ~MeshPlanBad.tla~ and ~MeshPlanBad.cfg~: the canonical DP x TP cross-axis
+  ordering cycle.
+
+* Runner
+
+Use ~tools/tla_check.py~ to record checker evidence.
+
+Dry-run evidence works without a local TLC installation:
+
+#+begin_src sh
+python3 tools/tla_check.py \
+  --model formal/distributed_training/MeshPlanGood.tla \
+  --config formal/distributed_training/MeshPlanGood.cfg \
+  --out-dir .ferric/tla/mesh-plan-good \
+  --dry-run
+#+end_src
+
+When ~tla2tools.jar~ is available:
+
+#+begin_src sh
+python3 tools/tla_check.py \
+  --tla-tools-jar /path/to/tla2tools.jar \
+  --model formal/distributed_training/MeshPlanGood.tla \
+  --config formal/distributed_training/MeshPlanGood.cfg \
+  --out-dir .ferric/tla/mesh-plan-good
+
+python3 tools/tla_check.py \
+  --tla-tools-jar /path/to/tla2tools.jar \
+  --model formal/distributed_training/MeshPlanBad.tla \
+  --config formal/distributed_training/MeshPlanBad.cfg \
+  --out-dir .ferric/tla/mesh-plan-bad
+#+end_src
+
+Expected behavior:
+
+- ~MeshPlanGood.cfg~ satisfies ~Inv~ and ~CollectiveResponse~ in the finite
+  DP x TP instance.
+- ~MeshPlanBad.cfg~ violates ~Inv~ through ~BlockedCycle~, showing the
+  cross-axis collective ordering bug.
+
+~Inv~ includes the first topology checks: unique DP/TP rank coordinates, ordered
+local-rank membership without duplicates, per-rank agreement on ordered group
+views, no ghost members, posted-by-member validity, completion only after all
+required members posted, signature agreement for each group/epoch/step/slot, and
+no blocked cycle.
+
+If no checker is installed, a non-dry run exits with code ~2~ and writes
+~tla-check.json~ with ~checker = \"missing\"~. A dry run still exits with code
+~0~ and records the command it would have used.

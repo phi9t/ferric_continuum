@@ -1,6 +1,6 @@
 #+TITLE: Decide checker tooling and evidence path
 #+TYPE: research
-#+STATUS: open
+#+STATUS: resolved
 #+BLOCKED_BY: 01-scope-formal-model-stack
 #+PARENT: ../map.org
 
@@ -69,3 +69,66 @@ large dependency story. Keep Bazel integration as a later hardening ticket.
 - Known failure modes and how they should appear in run evidence.
 
 * Answer
+
+Implemented the first checker tooling as Option B: a thin host-side Python
+wrapper around TLC.
+
+Entry point:
+
+#+begin_src sh
+python3 tools/tla_check.py \
+  --model formal/distributed_training/MeshPlanGood.tla \
+  --config formal/distributed_training/MeshPlanGood.cfg \
+  --out-dir .ferric/tla/mesh-plan-good \
+  --dry-run
+#+end_src
+
+Checker discovery:
+
+- explicit ~--tla-tools-jar~
+- environment variable ~TLA_TOOLS_JAR~
+- executable ~tlc~ on ~PATH~
+- otherwise records unavailable-tooling evidence
+
+Evidence format:
+
+- ~timestamp_utc~
+- ~model~
+- ~config~
+- ~checker~
+- ~checker_version~
+- ~argv~
+- ~executed~
+- ~ok~
+- ~exit_code~ for executed runs
+- ~result~ for executed TLC runs, currently one of ~success~,
+  ~invariant_violation~, ~temporal_violation~, or ~checker_error~
+- ~stdout~ and ~stderr~ paths for executed runs
+- ~counterexample~ path for non-success executed TLC results, currently the
+  stdout log containing TLC's counterexample trace
+- ~message~ for missing-checker or path errors
+
+Known behavior:
+
+- Dry-run records evidence and exits ~0~ even when no checker is installed.
+- Non-dry execution without a checker exits ~2~ and records
+  ~checker = "missing"~.
+- Executed TLC runs use ~-metadir <out-dir>/states~ so repeated checks do not
+  collide in TLC's default state directory.
+- TLC output parsing is intentionally coarse; arbitrary detailed counterexample
+  parsing is out of scope for this ticket.
+
+Verification evidence from 2026-08-22:
+
+#+begin_src sh
+python3 -m py_compile tools/tla_check.py
+python3 -m unittest tests.tla_check.test_tla_check
+#+end_src
+
+Result: 7 tests passed.
+
+The same final verification command also ran both executable models through
+~tools/tla_check.py~ with ~/tmp/ferric-tla2tools.jar~:
+
+- good fixture: exit ~0~, JSON result ~success~
+- bad fixture: exit ~12~, JSON result ~invariant_violation~
