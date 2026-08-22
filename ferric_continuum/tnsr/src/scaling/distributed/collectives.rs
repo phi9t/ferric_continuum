@@ -17,9 +17,9 @@
 //! Everything in this file describes a collective in two complementary ways:
 //!
 //! 1. **Cost** — [`collective_cost`] returns the *bytes moved per device* under
-//!    the standard **ring** algorithm. `tnsr` is CPU-only and single-threaded,
-//!    so no bytes actually cross a wire; the number is a symbolic estimate you
-//!    can plug into [`super::super::roofline`].
+//!    the standard **ring** algorithm. No bytes actually cross a wire; the
+//!    number is a symbolic estimate you can plug into
+//!    [`super::super::roofline`].
 //! 2. **Behaviour** — the `sim_*` functions execute the collective *exactly*
 //!    over a `&[Vec<f32>]` where each inner `Vec` is one logical device's
 //!    shard. The loop over `D` shards runs in one process, so the result is

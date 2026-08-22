@@ -1,6 +1,6 @@
 #+TITLE: Add Bazel-backed playground/debug CLI
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: resolved
 #+BLOCKED_BY: 09-stabilize-debug-trace-json, 10-add-cpu-inference-primitives, 11-add-scaling-memory-reports
 #+PARENT: ../spec.org
 
@@ -46,3 +46,85 @@ bazel test //ferric_continuum/tnsr:playground_cli_tests
 #+end_src
 
 * Comments
+
+* Answer
+
+Implemented in the existing Bazel target
+~//ferric_continuum/tnsr:tnsr_demo~ rather than adding a second binary.
+
+- Added a small shared ~tnsr::playground~ module for demo CLI option parsing.
+- Added ~--dot PATH~ and ~--trace-json PATH~ to write generated artifacts to
+  caller-selected output paths; the no-flag default remains ~/tmp/block.dot~.
+- Extended the demo to show the current training memory-report API alongside
+  the existing autograd, checkpointing, scaling, and distributed reports.
+- Added ~//ferric_continuum/tnsr:playground_cli_tests~ for the meaningful CLI
+  logic.
+- Added a fallible DOT rendering path for the demo so caller-selected bad output
+  paths exit nonzero instead of logging a false success.
+
+TDD red evidence:
+
+#+begin_src text
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:playground_cli_tests
+error[E0432]: unresolved import `tnsr::playground`
+  --> ferric_continuum/tnsr/tests/playground_cli_test.rs:3:11
+   |
+3 | use tnsr::playground::{DemoOptions, DemoOutput};
+  |           ^^^^^^^^^^ could not find `playground` in `tnsr`
+#+end_src
+
+Verification:
+
+#+begin_src text
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr
+Build completed successfully.
+
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --nocache_test_results //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:playground_cli_tests
+Executed 2 out of 2 tests: 2 tests pass.
+
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo
+Build completed successfully; demo ran and wrote /tmp/block.dot.
+
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --dot "$tmpdir/block.dot" --trace-json "$tmpdir/trace.json"
+Build completed successfully; explicit DOT and JSON artifacts were written under /tmp.
+
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --help
+Printed usage for --dot and --trace-json.
+
+git diff --check
+No whitespace errors.
+#+end_src
+
+Review:
+
+- Initial task review found one blocker: ~--dot~ writes could fail inside the
+  old swallowing ~write_dot~ path while the demo still exited 0 and logged
+  ~Written~.
+- Fix round 1 added ~DebugRecorder::dot_string~, ~Engine::dot_string~, and a
+  regression test that runs the Bazel runfiles copy of ~tnsr_demo~ against a
+  directory path.
+- Scoped re-review found no blockers and confirmed the bad ~--dot~ path exits
+  nonzero with a ~write DOT~ error and no misleading success log.
+- Verification repeated in the primary checkout:
+
+#+begin_src text
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --nocache_test_results //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:debug_trace_tests //ferric_continuum/tnsr:playground_cli_tests
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr_doc
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --help
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --dot "$tmpdir/block.dot" --trace-json "$tmpdir/trace.json"
+python3 -m json.tool "$tmpdir/trace.json" >/dev/null
+rg -q "digraph Autograd" "$tmpdir/block.dot"
+rg -q '"schema": "tnsr.debug_trace"' "$tmpdir/trace.json"
+bad=$(mktemp -d /tmp/tnsr-demo-bad-dot-main.XXXXXX)
+if /data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --dot "$bad" >"$bad.stdout" 2>"$bad.stderr"; then exit 1; else rg -q "write DOT" "$bad.stderr" && ! rg -q "Written $bad" "$bad.stdout" "$bad.stderr"; fi
+git diff --check
+#+end_src
+
+All commands passed. ~tnsr_doc~ still reports the pre-existing rustdoc warnings
+in ~autograd.rs~ and ~qwen3_load.rs~.
+
+Concerns:
+
+- The worktree still contains pre-existing uncommitted prerequisite ticket 11
+  and ticket 12 changes. They were preserved and not reverted.

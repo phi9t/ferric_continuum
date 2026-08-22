@@ -1,9 +1,11 @@
 # tnsr × JAX Scaling Book — Chapter Map
 
-`tnsr` is a readable, CPU-only, single-chip Rust implementation of the per-device
-transformer math taught in **Chapter 4** of the JAX scaling book
+`tnsr` is a readable Rust implementation of the per-device transformer math
+taught in **Chapter 4** of the JAX scaling book
 ("How To Scale Your Model", <https://jax-ml.github.io/scaling-book/>), plus the
-gradient checkpointing / rematerialisation strategies from Chapter 5.
+gradient checkpointing / rematerialisation strategies from Chapter 5. The
+default build is CPU-only and f32, while selected forward kernels can use the
+monorepo CUDA path when built with Bazel `--config=cuda`.
 
 The book then takes that same per-device math and scales it across thousands of
 accelerator chips — sharding, tensor/pipeline parallelism, hardware rooflines,
@@ -37,7 +39,7 @@ In all tnsr formulas below, N = 1 and H = D, so "N·H" collapses to "D".
 | Ch | Book section (slug) | tnsr module(s) | Status |
 |----|---------------------|----------------|--------|
 | 1  | Roofline Analysis (`roofline`) | `src/scaling/roofline.rs` — symbolic compute-vs-memory estimate | Executable-estimable |
-| 2  | How to Think About TPUs (`tpus`) | — (CPU-only, single-threaded) | Absent |
+| 2  | How to Think About TPUs (`tpus`) | — (no TPU runtime) | Absent |
 | 3  | Sharded Matrices (`sharding`) | `src/scaling/sharding.rs` — 4 sharding cases as local algebra | Executable-estimable |
 | 4  | All the Transformer Math (`transformers`) | `src/transformer.rs`, all of `src/ops/`, `src/autograd.rs`, `src/scaling/` | **Implemented** |
 | 5  | Parallelize a Transformer for Training (`training`) | remat → `src/checkpoint.rs`; DP/FSDP/TP/PP → `src/scaling/distributed/` (executable estimates + single-process sims) | Executable-estimable |
@@ -178,12 +180,12 @@ making the memory savings from remat directly observable.
 
 ## Chapter 5 Deep-Dive: Parallelism
 
-`tnsr` is CPU-only and single-threaded, so it teaches distributed training the
-only faithful way one process can: **executable symbolic cost estimates** (the
+The distributed-training modules teach cross-device training the only faithful
+way this local reference path can: **executable symbolic cost estimates** (the
 `scaling/` pattern) **plus runnable single-process simulations over `Vec<f32>`**
 that make each mechanism provably correct. No real devices, threads, or network
-— the simulation loops over `D` logical shards in one process. All of this lives
-in `src/scaling/distributed/`.
+are launched by these reports — the simulation loops over `D` logical shards in
+one process. All of this lives in `src/scaling/distributed/`.
 
 ### Collectives (ring model) → `distributed::collectives`
 
@@ -271,16 +273,16 @@ Golden values and invariants are verified in `tests/distributed_test.rs`.
 
 ## What tnsr Does NOT Cover
 
-These topics are out of scope for a CPU-only, single-threaded, f32 library.
-See the corresponding book chapters for the full treatment.
+These topics are outside the current teaching/runtime surface. See the
+corresponding book chapters for the full treatment.
 
 | Topic | Book chapter | Why absent from tnsr |
 |-------|-------------|----------------------|
-| Tensor / pipeline / FSDP parallelism | Ch.5 | Modelled in `src/scaling/distributed/` as executable estimates + single-process simulations over `Vec<f32>` — no real devices, threads, or network |
+| Tensor / pipeline / FSDP parallelism | Ch.5 | Modelled in `src/scaling/distributed/` as executable estimates + single-process simulations over `Vec<f32>` — no real distributed launch |
 | Roofline hardware measurements | Ch.1 | tnsr provides symbolic estimates only |
 | TPU / GPU programming model | Ch.2, 12 | Hardware-specific |
 | LLaMA-3 specifics (GQA, RoPE, etc.) | Ch.6, 8 | Only a generic single-head block is implemented |
-| KV cache (autoregressive inference) | Ch.7 | Training-only; `scaling/inference.rs` has byte estimates only |
+| Full autoregressive serving | Ch.7 | `tnsr::inference` has model-agnostic RoPE/KV-cache/batching primitives and `scaling/inference.rs` has byte estimates, but no network serving stack |
 | Serving infra | Ch.8 | Out of scope |
 | Quantization, sparsity | — | Not implemented |
 

@@ -1,0 +1,199 @@
+#+TITLE: Audit standalone tnsr before retirement
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY: 15-run-final-incorporation-verification
+#+PARENT: ../spec.org
+
+* Context
+
+The standalone `/data02/home/philip.yang/workspace/tnsr` checkout is no longer intended to remain an active sibling repository after incorporation finishes. Before it can be archived and deleted, prove that Ferric Continuum either contains every selected artifact or has an explicit reason to omit it.
+
+The standalone checkout was observed clean and ahead of `origin/master` by three commits during planning. Treat any standalone commits or files not represented in Ferric Continuum as retirement blockers until they are classified.
+
+* Requirements
+
+- Confirm `ferric_continuum/tnsr` passed final incorporation verification in ticket 15.
+- Capture standalone `tnsr` repository state: branch, clean/dirty status, remotes, recent commits, and commits ahead of upstream.
+- Audit the standalone repository against `ferric_continuum/tnsr` by artifact class:
+  - Rust library source.
+  - Scaling and reporting modules.
+  - CLI/demo/playground source.
+  - Tests and examples.
+  - Documentation.
+  - Web/viewer assets that were previously out of scope.
+  - Build and tooling metadata.
+- For every standalone-only artifact or commit, record one disposition:
+  - incorporated into Ferric Continuum, with destination path or commit;
+  - intentionally skipped, with reason;
+  - preserved only in the archive, with reason.
+- Treat unclassified standalone-only work as blocking.
+- Record the audit result under `* Answer`.
+
+* Out of scope
+
+- Implementing additional feature ports in this ticket. If the audit finds required missing behavior, create or reopen an implementation ticket and leave this ticket unresolved.
+- Removing `tnsr` from Ultron tracking.
+- Archiving or deleting `/data02/home/philip.yang/workspace/tnsr`.
+- Pushing standalone `tnsr` commits or changing its remotes.
+
+* Verification
+
+#+begin_src sh
+git -C /data02/home/philip.yang/workspace/tnsr fetch --prune origin
+git -C /data02/home/philip.yang/workspace/tnsr status --short
+git -C /data02/home/philip.yang/workspace/tnsr branch --show-current
+git -C /data02/home/philip.yang/workspace/tnsr remote -v
+git -C /data02/home/philip.yang/workspace/tnsr log --oneline --decorate --all -n 20
+git -C /data02/home/philip.yang/workspace/tnsr log --oneline origin/master..HEAD
+git -C /data02/home/philip.yang/workspace/tnsr diff --stat origin/master..HEAD
+#+end_src
+
+If network access is unavailable, record that fact under `* Answer` and treat
+`origin/master` as a stale comparison point until a later agent can refresh it.
+
+Run additional file comparison commands as needed and include their outputs or summaries in `* Answer`.
+
+* Comments
+
+* Answer
+
+Standalone `/data02/home/philip.yang/workspace/tnsr` was audited after ticket
+15 final incorporation verification passed. No unclassified standalone-only
+work remains as a retirement blocker.
+
+Repository state:
+
+#+begin_src text
+git -C /data02/home/philip.yang/workspace/tnsr fetch --prune origin
+fetch completed successfully.
+
+git -C /data02/home/philip.yang/workspace/tnsr status --short
+No output; active checkout is clean.
+
+git -C /data02/home/philip.yang/workspace/tnsr branch --show-current
+master
+
+git -C /data02/home/philip.yang/workspace/tnsr remote -v
+origin	git@github.com:phi9t/tnsr.git (fetch)
+origin	git@github.com:phi9t/tnsr.git (push)
+#+end_src
+
+Recent refs:
+
+#+begin_src text
+7c49c19 (HEAD -> master, ultron/mainline, codex/ultron-mainline-policy, codex/active-work-tracker) Add agentic engineering workflow guidance
+392e524 (focused-transformer-visualization) Clear stale hover trace selection
+489975b Stabilize pinned trace selection
+c1dc4e3 Add pinned focus clearing for trace viewer
+7139926 Dispose trace scene resources
+dc79702 Focus selected internal trace nodes
+16aa169 Compose backward edge opacity
+5d27756 Compose trace label opacity
+6d80ff7 Refine focused node dimming
+5cd8fc5 Preserve focus display opacity
+09286d3 Render focused transformer circuit states
+a2fe036 Refine focused layout semantics
+bfe70de Refactor trace viewer layout for focused spine
+5b7965b Add focused transformer visualization implementation plan
+ca59813 Add focused transformer visualization design
+68addd6 (origin/master) Update GitHub Actions versions
+d149995 Add trace playground and web viewer
+4ab61bf Add tnsr scaling playground CLI
+d7b9d04 Add Rust CI workflow
+6701914 Implement tnsr tensor library
+#+end_src
+
+Active `master` delta from `origin/master`:
+
+#+begin_src text
+ca59813 Add focused transformer visualization design
+5b7965b Add focused transformer visualization implementation plan
+7c49c19 Add agentic engineering workflow guidance
+
+AGENTS.md
+CONSTITUTION.md
+docs/agents/agentic-engineering.md
+docs/agents/domain.md
+docs/agents/issue-tracker.md
+docs/agents/skill-orchestration.md
+docs/agents/triage-labels.md
+docs/superpowers/plans/2026-05-23-focused-transformer-visualization.md
+docs/superpowers/specs/2026-05-23-focused-transformer-visualization-design.md
+#+end_src
+
+Local `focused-transformer-visualization` branch delta from `origin/master`:
+
+#+begin_src text
+ca59813 Add focused transformer visualization design
+5b7965b Add focused transformer visualization implementation plan
+bfe70de Refactor trace viewer layout for focused spine
+a2fe036 Refine focused layout semantics
+09286d3 Render focused transformer circuit states
+5cd8fc5 Preserve focus display opacity
+6d80ff7 Refine focused node dimming
+5d27756 Compose trace label opacity
+16aa169 Compose backward edge opacity
+dc79702 Focus selected internal trace nodes
+7139926 Dispose trace scene resources
+c1dc4e3 Add pinned focus clearing for trace viewer
+489975b Stabilize pinned trace selection
+392e524 Clear stale hover trace selection
+
+docs/superpowers/plans/2026-05-23-focused-transformer-visualization.md
+docs/superpowers/specs/2026-05-23-focused-transformer-visualization-design.md
+web/src/layerLayout.ts
+web/src/scene.ts
+web/src/style.css
+web/tests/layout.test.ts
+web/tests/scene.test.ts
+web/tests/visual.spec.ts
+#+end_src
+
+Artifact-class dispositions:
+
+- Rust library source: incorporated selectively into `ferric_continuum/tnsr`.
+  Monorepo source remains authoritative for core tensor/autograd/checkpoint/op
+  APIs, Qwen3, CUDA, dtensor, and distributed teaching modules. External
+  generic inference concepts landed in `src/inference.rs` and
+  `tests/inference_test.rs` under ticket 10.
+- Scaling and reporting modules: external `src/scaling/memory.rs` concepts
+  landed as `ferric_continuum/tnsr/src/scaling/memory.rs` plus
+  `tests/scaling_memory_test.rs` under ticket 11. External
+  `src/scaling/parallelism.rs` concepts were folded into existing
+  `src/scaling/distributed/*` reports and tests under ticket 12 instead of
+  adding a competing `parallelism.rs`.
+- CLI/demo/playground source: external `src/playground.rs` and
+  `src/bin/tnsr-demo.rs` concepts were adapted into the existing Bazel
+  `//ferric_continuum/tnsr:tnsr_demo` path, `src/playground.rs`,
+  `src/main.rs`, and `tests/playground_cli_test.rs` under tickets 13 and 14.
+- Tests and examples: external CLI/debug/inference/scaling examples were
+  represented as Bazel `rust_test` targets and the maintained `tnsr_demo`
+  behavior. `examples/tiny_block.rs` was intentionally not copied as a second
+  example binary because `tnsr_demo` now exercises the maintained monorepo API
+  and writes DOT/trace artifacts through Bazel.
+- Documentation: external README/debugging material was adapted into
+  `ferric_continuum/tnsr/README.md`, `ferric_continuum/tnsr/docs/debugging.md`,
+  and updated local rustdocs under ticket 14. Stale CPU-only and Cargo-first
+  wording was not copied.
+- Web/viewer assets: `web/`, Vite, Three.js, Playwright, sample trace, and the
+  `focused-transformer-visualization` implementation commits remain
+  intentionally skipped from this incorporation batch by tickets 05, 07, and
+  the spec. They are preserved only in the archive for possible future frontend
+  work.
+- Build and tooling metadata: standalone `.github/`, `Cargo.toml`,
+  `Cargo.lock`, package-lock files, and agent workflow docs were intentionally
+  not imported into Ferric. Ferric's Bazel targets and existing Cargo mirror are
+  the maintained local tooling. Standalone-specific agent workflow files and
+  visualization design docs are preserved only in the archive.
+
+Additional state:
+
+- The standalone repository contains linked worktrees under `.worktrees/`.
+  The primary standalone checkout was clean, but later archive verification
+  found ignored linked worktree directories with side-work. Ticket 18 preserves
+  those directories in a separate linked-worktree tarball before any deletion.
+  This means retirement can proceed to the archive-ready gate, but deletion
+  remains blocked on explicit final authority after archive verification.
+- No extra implementation ticket is required before retirement. The remaining
+  standalone-only material is either intentionally skipped by the accepted spec
+  or preserved only in the archive.

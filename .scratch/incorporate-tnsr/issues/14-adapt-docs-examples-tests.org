@@ -1,6 +1,6 @@
 #+TITLE: Adapt docs examples and tests
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: resolved
 #+BLOCKED_BY: 09-stabilize-debug-trace-json, 10-add-cpu-inference-primitives, 11-add-scaling-memory-reports, 12-reconcile-parallelism-reports, 13-add-bazel-playground-cli
 #+PARENT: ../spec.org
 
@@ -44,3 +44,145 @@ bazel test //ferric_continuum/tnsr:tnsr_tests \
 #+end_src
 
 * Comments
+
+* Answer
+
+Adapted useful standalone `tnsr` documentation, example behavior, and test
+expectations into current Ferric Continuum artifacts without importing stale
+Cargo-first workflows, web viewer material, generated artifacts, or a second
+demo binary.
+
+Files changed for this ticket:
+
+- `ferric_continuum/tnsr/README.md`
+- `ferric_continuum/tnsr/docs/debugging.md`
+- `ferric_continuum/tnsr/SCALING_BOOK_MAP.md`
+- `ferric_continuum/tnsr/src/lib.rs`
+- `ferric_continuum/tnsr/src/debug.rs`
+- `ferric_continuum/tnsr/src/scaling/roofline.rs`
+- `ferric_continuum/tnsr/src/scaling/sharding.rs`
+- `ferric_continuum/tnsr/src/scaling/distributed/mod.rs`
+- `ferric_continuum/tnsr/src/scaling/distributed/collectives.rs`
+- `ferric_continuum/tnsr/tests/playground_cli_test.rs`
+- `ferric_continuum/tnsr/BUILD.bazel`
+
+Implementation notes:
+
+- Added a module-local `README.md` that documents the Bazel-first build/test
+  path, `tnsr_demo`, stable `tnsr.debug_trace` JSON, inference primitives,
+  scaling/memory/distributed reports, Qwen3 binaries, and CUDA as an opt-in GPU
+  path.
+- Added `docs/debugging.md` with Bazel-first build/run/test commands, breakpoint
+  wayfinding, artifact smoke checks, and Cargo only as supplementary editor
+  tooling.
+- Represented the useful external tiny-block example through the maintained
+  `//ferric_continuum/tnsr:tnsr_demo` binary and a behavior test that writes
+  caller-selected DOT/JSON artifacts through Bazel runfiles.
+- Corrected stale globally CPU-only wording in the local scaling map and
+  rustdoc comments. The docs now distinguish the default CPU build, symbolic
+  local distributed simulations, and the opt-in CUDA forward path.
+- Added `@crates//:serde_json` only to `playground_cli_tests`, where the new
+  behavior assertion parses the generated trace JSON artifact.
+
+Adversarial review:
+
+- Requested a clean-context `openrouter-3o` review of the ticket-14 slice.
+- The reviewer found no critical blockers.
+- Important finding 1: the README's first CPU-only sentence was easy to skim as
+  a global CPU-only claim. Fixed by folding the default-CPU and opt-in-CUDA
+  scope into one sentence.
+- Important finding 2: the docs omitted existing `mesh_sim_tests` and
+  `context_parallel_gqa_tests` from the current behavior-suite lists. Fixed in
+  both `README.md` and `docs/debugging.md`.
+- Minor finding: note CUDA forward agreement requires a CUDA GPU. Added that
+  caveat to both docs.
+
+Coordinator verification after review fixes:
+
+#+begin_src text
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr
+Build completed successfully.
+
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:playground_cli_tests
+//ferric_continuum/tnsr:lib_tests PASSED
+//ferric_continuum/tnsr:playground_cli_tests PASSED
+
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:tnsr_tests //ferric_continuum/tnsr:debug_trace_tests //ferric_continuum/tnsr:inference_tests //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:qwen3_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:playground_cli_tests //ferric_continuum/tnsr:lib_tests
+Test cases: finished with 11 passing, 0 skipped and 0 failing out of 11 test cases.
+Executed 2 out of 11 tests: 11 tests pass.
+
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr_doc
+Build completed successfully.
+
+tmpdir=$(mktemp -d /tmp/tnsr-ticket14-smoke.XXXXXX)
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --dot "$tmpdir/block.dot" --trace-json "$tmpdir/trace.json"
+head -n 1 "$tmpdir/block.dot"
+python3 -m json.tool "$tmpdir/trace.json" >/dev/null
+rg -q '"schema": "tnsr.debug_trace"' "$tmpdir/trace.json"
+DOT began with digraph Autograd; JSON parsed and had schema tnsr.debug_trace.
+
+git diff --check
+No output; exit 0.
+#+end_src
+
+Copy-back evidence:
+
+#+begin_src text
+diff -q primary ticket-14-worktree for:
+README.md, docs/debugging.md, SCALING_BOOK_MAP.md, src/lib.rs, src/debug.rs,
+src/scaling/roofline.rs, src/scaling/sharding.rs,
+src/scaling/distributed/mod.rs, src/scaling/distributed/collectives.rs,
+BUILD.bazel, tests/playground_cli_test.rs
+
+No differences.
+#+end_src
+
+No `Cargo.lock` drift or generated artifacts were copied from the ticket
+worktree.
+
+Primary checkout verification after copy-back:
+
+#+begin_src text
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr
+Build completed successfully.
+
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:tnsr_tests //ferric_continuum/tnsr:debug_trace_tests //ferric_continuum/tnsr:inference_tests //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:qwen3_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:playground_cli_tests //ferric_continuum/tnsr:lib_tests
+Test cases: finished with 11 passing, 0 skipped and 0 failing out of 11 test cases.
+Executed 9 out of 11 tests: 11 tests pass.
+
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr_doc
+Build completed successfully with the known pre-existing rustdoc warnings in
+autograd.rs and qwen3_load.rs.
+
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --dot "$tmpdir/block.dot" --trace-json "$tmpdir/trace.json"
+DOT began with digraph Autograd; JSON parsed and had schema tnsr.debug_trace.
+
+git diff --check
+No output; exit 0.
+#+end_src
+
+Full Ferric review follow-up:
+
+- Clean-context full review (`Hume`, 01a02131-1dfa-7b43-a180-ede529b900f6)
+  found the docs/examples slice ready with fixes. The docs-relevant minor
+  finding was stale rustdoc in `src/scaling/inference.rs` that still described
+  `tnsr` as training-only.
+- Fixed the inference scaling rustdoc to describe analytical estimates in this
+  submodule and point runtime KV-cache helpers at `crate::inference`.
+- Scoped re-review (`Pasteur`, 01a0213a-3901-7063-ae2b-435d999836d6) returned
+  no critical, important, or minor findings and marked the slice ready to merge.
+
+Post-review verification:
+
+#+begin_src text
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:tnsr_tests //ferric_continuum/tnsr:debug_trace_tests //ferric_continuum/tnsr:inference_tests //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:qwen3_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:playground_cli_tests //ferric_continuum/tnsr:lib_tests
+Test cases: finished with 11 passing, 0 skipped and 0 failing out of 11 test cases.
+Executed 2 out of 11 tests: 11 tests pass.
+
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr_doc
+Build completed successfully with the known pre-existing rustdoc warnings in
+autograd.rs and qwen3_load.rs.
+
+git diff --check
+No output; exit 0.
+#+end_src

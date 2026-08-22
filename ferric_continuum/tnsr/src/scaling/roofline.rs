@@ -17,8 +17,9 @@
 //! it is memory-bandwidth-bound.  Most transformer ops are memory-bound at
 //! small batch sizes.
 //!
-//! **Note**: tnsr is a CPU-only reference implementation — these numbers are
-//! symbolic estimates intended to illustrate the concept, not measured results.
+//! **Note**: these numbers are symbolic estimates intended to illustrate the
+//! concept, not measured results from the default CPU build or opt-in CUDA
+//! forward path.
 
 /// Theoretical peak hardware numbers for a reference accelerator.
 #[derive(Debug, Clone)]

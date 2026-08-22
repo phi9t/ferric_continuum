@@ -4,9 +4,9 @@
 //! https://jax-ml.github.io/scaling-book/sharding/
 //!
 //! The book describes four cases for distributing Y = X·W across D devices.
-//! tnsr is CPU-only and single-threaded — no actual communication happens here.
-//! This module is a **local algebra** that estimates per-device FLOPs and
-//! all-reduce communication volume for each sharding strategy.
+//! No actual communication happens here. This module is a **local algebra** that
+//! estimates per-device FLOPs and all-reduce communication volume for each
+//! sharding strategy.
 //!
 //! Notation (matching the book):
 //!   X: M×K input

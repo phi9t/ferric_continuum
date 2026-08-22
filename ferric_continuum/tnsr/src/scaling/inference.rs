@@ -3,9 +3,9 @@
 //! Book reference: Ch.7 "Transformer Inference",
 //! https://jax-ml.github.io/scaling-book/inference/
 //!
-//! **Note**: tnsr is a training-only implementation.  The functions in this
-//! module are analytical estimates — no KV cache is actually allocated or
-//! managed.
+//! **Note**: this scaling submodule provides analytical inference estimates.
+//! It does not allocate or manage the runtime KV cache used by
+//! [`crate::inference`].
 
 /// Estimate the KV cache size for autoregressive inference.
 ///

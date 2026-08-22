@@ -4,9 +4,9 @@
 
 * Goal
 
-Incorporate useful material from `/data02/home/philip.yang/workspace/tnsr` into the existing Bazel-integrated `ferric_continuum/tnsr` module by selective feature porting.
+Incorporate useful material from `/data02/home/philip.yang/workspace/tnsr` into the existing Bazel-integrated `ferric_continuum/tnsr` module by selective feature porting, then retire the standalone checkout after the monorepo implementation is verified.
 
-The monorepo remains the source of truth. This effort should improve `ferric_continuum/tnsr` without replacing it, importing external repository history, or introducing frontend tooling.
+The monorepo remains the source of truth. This effort should improve `ferric_continuum/tnsr` without replacing it, importing external repository history, or introducing frontend tooling. The standalone `tnsr` repository is a temporary source reference only until final verification and retirement are complete.
 
 External source snapshot used for this plan:
 
@@ -20,6 +20,7 @@ External source snapshot used for this plan:
 - Port external behavior as adapted Ferric Continuum APIs, tests, docs, or examples. Do not copy overlapping old APIs wholesale.
 - Preserve Bazel as the primary build and validation path. Cargo metadata may be updated only as an editor/tooling mirror.
 - When a direct Rust dependency is added, update `MODULE.bazel`, regenerate `MODULE.bazel.lock` intentionally, and update `ferric_continuum/tnsr/Cargo.toml` only if the Cargo mirror needs it.
+- Before retiring the standalone checkout, audit every standalone commit and file class that is not already represented in the monorepo. Record whether each unique artifact was incorporated, intentionally skipped, or preserved only in the archive.
 
 * Implementation slices
 
@@ -157,6 +158,8 @@ Acceptance:
 4. Parallelism report reconciliation follows the memory slice and must account for existing `scaling/distributed/*`.
 5. Playground/debug CLI should follow the APIs it demonstrates.
 6. Docs/examples/tests should be updated with each slice, with a final docs pass after APIs settle.
+7. Final incorporation verification must pass before standalone retirement begins.
+8. Standalone retirement runs in three explicit gates: audit standalone-only work, remove `tnsr` from Ultron managed-repo tracking, then archive and delete the active checkout. Deletion may happen only after a verified archive exists and the user gives explicit deletion authority for that final action.
 
 * Accepted artifacts and destinations
 
@@ -167,6 +170,7 @@ Acceptance:
 - External trace JSON and pretty/debug concepts extend `ferric_continuum/tnsr/src/debug.rs` plus focused tests.
 - External tests become Bazel `rust_test` targets or additions to existing tests.
 - External docs/examples become Bazel-first monorepo docs, tests, or binaries.
+- The standalone `/data02/home/philip.yang/workspace/tnsr` checkout becomes an archived historical source after all accepted material is incorporated or explicitly rejected.
 
 * Out of scope
 
@@ -174,7 +178,8 @@ Acceptance:
 - Importing external git history through subtree, filter-repo, or submodule by default.
 - Importing `web/`, `web/dist`, `web/test-results`, `web/node_modules`, Vite, Three.js, npm, Playwright, or other frontend tooling in this batch.
 - Adding web, browser, WebGL, screenshot, or frontend build checks.
-- Changing remotes, pushing branches, or archiving the standalone external repository.
+- Changing remotes or pushing branches.
+- Deleting the standalone external repository before the archive path, archive digest, final verification evidence, and Ultron tracking removal are recorded.
 - Reworking unrelated Ferric Continuum modules outside the accepted `tnsr` integration boundaries.
 
 * Verification
@@ -235,6 +240,36 @@ Cargo checks are supplementary and do not replace Bazel validation:
 cargo check --workspace
 #+end_src
 
+Retirement audit before Ultron tracking removal:
+
+#+begin_src sh
+git -C /data02/home/philip.yang/workspace/tnsr fetch --prune origin
+git -C /data02/home/philip.yang/workspace/tnsr status --short
+git -C /data02/home/philip.yang/workspace/tnsr log --oneline --decorate --all -n 20
+git -C /data02/home/philip.yang/workspace/tnsr log --oneline origin/master..HEAD
+git -C /data02/home/philip.yang/workspace/tnsr diff --stat origin/master..HEAD
+#+end_src
+
+If network access is unavailable during the audit, record that fact and treat
+`origin/master` as a stale comparison point until a later agent can refresh it.
+
+Ultron tracking verification after removing `tnsr` from its managed-repo
+manifest:
+
+#+begin_src sh
+cd /data02/home/philip.yang/workspace/ultron
+python3 - <<'PY'
+import json
+from pathlib import Path
+manifest = json.loads(Path("docs/agents/agentic-workflow-repos.json").read_text())
+names = [repository["name"] for repository in manifest["repositories"]]
+assert "tnsr" not in names, names
+PY
+git diff -- docs/agents/agentic-workflow-repos.json tests/test_sync_agentic_workflow.py
+python3 -m unittest tests.test_sync_agentic_workflow
+python3 tools/sync_agentic_workflow.py --check
+#+end_src
+
 * Landing expectations
 
 - Land each implementation slice as normal Ferric Continuum commits on the working branch.
@@ -257,3 +292,6 @@ Co-authored-by: TRAE CLI <noreply@bytedance.com>
 - [[file:issues/13-add-bazel-playground-cli.org][13 Add Bazel-backed playground/debug CLI]]
 - [[file:issues/14-adapt-docs-examples-tests.org][14 Adapt docs examples and tests]]
 - [[file:issues/15-run-final-incorporation-verification.org][15 Run final incorporation verification]]
+- [[file:issues/16-audit-standalone-tnsr-before-retirement.org][16 Audit standalone tnsr before retirement]]
+- [[file:issues/17-remove-tnsr-from-ultron-tracking.org][17 Remove tnsr from Ultron tracking]]
+- [[file:issues/18-archive-delete-standalone-tnsr.org][18 Archive and delete standalone tnsr]]

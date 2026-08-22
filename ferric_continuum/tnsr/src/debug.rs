@@ -10,7 +10,7 @@
 //! - `write_dot` — Graphviz DOT graph of the op DAG
 //!
 //! These serve the same purpose as a TPU profiler at a conceptual level, though
-//! tnsr is CPU-only and produces no timing or hardware-counter data.
+//! they are trace exports rather than timing or hardware-counter data.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -402,7 +402,7 @@ impl DebugRecorder {
         }
     }
 
-    pub fn write_dot(&self, op_calls: &[OpCallRef], path: &str) {
+    pub fn dot_string(&self, op_calls: &[OpCallRef]) -> String {
         let mut s = String::new();
         s.push_str("digraph Autograd {\n");
         s.push_str("  rankdir=LR;\n");
@@ -426,6 +426,11 @@ impl DebugRecorder {
         }
 
         s.push_str("}\n");
+        s
+    }
+
+    pub fn write_dot(&self, op_calls: &[OpCallRef], path: &str) {
+        let s = self.dot_string(op_calls);
         std::fs::write(path, s).unwrap_or_else(|e| eprintln!("write_dot error: {}", e));
     }
 }

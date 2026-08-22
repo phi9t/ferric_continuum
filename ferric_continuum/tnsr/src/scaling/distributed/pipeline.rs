@@ -37,15 +37,16 @@ pub struct PipelineSchedule {
     /// Wasted-time fraction `(P−1)/(M+P−1)` for a GPipe-style schedule.
     pub bubble_fraction: f64,
     /// Bytes handed off between two adjacent stages per microbatch:
-    /// one activation tensor `[B/M, T, D]` in f32.
+    /// one activation tensor `[ceil(B/M), T, D]` in f32.
     pub activation_handoff_bytes: u64,
 }
 
 /// Compute the GPipe schedule metrics for `cfg` over `pp` stages and
 /// `num_microbatches` microbatches.
 ///
-/// The activation handoff assumes the global batch `cfg.batch` is split evenly
-/// into `num_microbatches` microbatches; each carries a `[B/M, T, D]` tensor.
+/// The activation handoff uses the largest microbatch when `cfg.batch` is not
+/// evenly divisible by `num_microbatches`; each carries up to
+/// `[ceil(B/M), T, D]` elements.
 pub fn pipeline_schedule(
     cfg: &TransformerConfig,
     pp: usize,
@@ -58,8 +59,8 @@ pub fn pipeline_schedule(
     let m = num_microbatches as f64;
     let bubble_fraction = (p - 1.0) / (m + p - 1.0);
 
-    // Activation tensor crossing a stage boundary: [B/M, T, D] f32 elements.
-    let micro_batch = (cfg.batch / num_microbatches).max(1) as u64;
+    // Activation tensor crossing a stage boundary: [ceil(B/M), T, D] f32 elements.
+    let micro_batch = cfg.batch.div_ceil(num_microbatches) as u64;
     let activation_handoff_bytes = micro_batch * cfg.seq as u64 * cfg.d_model as u64 * F32_BYTES;
 
     PipelineSchedule {

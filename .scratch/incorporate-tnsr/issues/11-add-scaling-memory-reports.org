@@ -1,6 +1,6 @@
 #+TITLE: Add scaling memory reports
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: resolved
 #+BLOCKED_BY: 08-collapse-map-to-build-spec
 #+PARENT: ../spec.org
 
@@ -49,3 +49,70 @@ bazel build //ferric_continuum/tnsr:tnsr_doc
 #+end_src
 
 * Comments
+
+* Answer
+
+Implemented a Bazel-tested `tnsr::scaling::memory` module in the primary Ferric Continuum checkout after isolated development and review.
+
+Files changed:
+
+- `ferric_continuum/tnsr/src/scaling/memory.rs`
+- `ferric_continuum/tnsr/src/scaling/mod.rs`
+- `ferric_continuum/tnsr/BUILD.bazel`
+- `ferric_continuum/tnsr/tests/scaling_memory_test.rs`
+
+Behavior added:
+
+- Parameter, gradient, Adam optimizer-state, bf16 master-weight, activation, and KV-cache byte estimates for `TransformerConfig`.
+- `TrainingMemoryConfig` and `TrainingMemoryReport` as the public memory-report interface.
+- `Precision`, `ActivationCheckpointing`, and `ZeroStage` policy enums for formula selection.
+- `zero_partitioned_memory` as a convenience view that uses the existing distributed FSDP return type while keeping communication semantics owned by `scaling::distributed::fsdp`.
+- Golden-value tests for default f32 memory, checkpointing modes, bf16 ZeRO-3, KV cache, Stage1/Stage2 partitioning, and non-divisible shard rounding.
+
+Review and repair:
+
+- Initial ticket review found that selective activation estimates did not match runtime `TransformerSelectivePolicy`, and that `training_memory_report` and `zero_partitioned_memory` used inconsistent rounding.
+- Fixed selective activation estimates to save `AttentionScores`, save `AttentionMix`, save `Softmax` only below the small-save threshold, and recompute GELU, LayerNorm, and large Linear sites.
+- Fixed public memory rounding so `training_memory_report` and `zero_partitioned_memory` both use ceil-rounded sharded byte ownership.
+- Scoped re-review found no remaining blocker.
+
+Verification run from `/data02/home/philip.yang/workspace/ferric_continuum`:
+
+#+begin_src sh
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:distributed_tests
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr_doc
+git diff --check
+#+end_src
+
+Results:
+
+- `//ferric_continuum/tnsr:tnsr` built successfully.
+- `//ferric_continuum/tnsr:lib_tests`, `:scaling_memory_tests`, `:scaling_tests`, and `:distributed_tests` passed.
+- `//ferric_continuum/tnsr:tnsr_doc` built successfully with pre-existing rustdoc warnings in `autograd.rs` and `qwen3_load.rs`.
+- `git diff --check` passed.
+
+Full Ferric code review follow-up:
+
+- A later clean-context review of the full incorporation diff found one
+  important issue in this ticket: selective activation accounting was documented
+  as mirroring runtime `TransformerSelectivePolicy`, but it counted
+  op-output-shaped sites rather than the tensors actually saved by the runtime
+  attention backward recipes.
+- Fixed `ActivationCheckpointing::Selective` to count runtime saved sites:
+  `AttentionScores` saves Q and K (`2*B*T*D`), `AttentionMix` saves attention
+  probabilities and V (`B*T*T + B*T*D`), and `Softmax` saves its output
+  (`B*T*T`) only under the small-save threshold.
+- Updated `scaling_memory_tests` goldens accordingly. For the tiny f32 config,
+  selective activation bytes changed from `4_816` to `11_312`; for the bf16
+  ZeRO-3 config, selective activation bytes changed from `2_408` to `5_656`
+  and total training bytes changed from `43_240` to `46_488`.
+- Focused re-verification:
+
+#+begin_src text
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests
+Test cases: finished with 2 passing, 0 skipped and 0 failing out of 2 test cases.
+#+end_src
+
+- Scoped re-review after the fix found no remaining Critical, Important, or
+  Minor issues.

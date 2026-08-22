@@ -26,8 +26,8 @@
 //! For an op `y = f(x)`, backward receives `∂L/∂y` (the gradient flowing in
 //! from downstream) and must return `∂L/∂x = (∂y/∂x)ᵀ · ∂L/∂y`. That local
 //! `∂y/∂x` is exactly what each `impl BackwardRecipe` encodes. Summing over all
-//! paths that reach a tensor is the multivariate chain rule — handled by
-//! [`Engine::accumulate`].
+//! paths that reach a tensor is the multivariate chain rule, handled by the
+//! engine's private gradient accumulator.
 //!
 //! # Mental model of the types
 //!
@@ -358,5 +358,10 @@ impl Engine {
     /// Emit the DAG as Graphviz DOT for visualizing the computation graph.
     pub fn write_dot(&self, path: &str) {
         self.debug.write_dot(&self.topo, path);
+    }
+
+    /// Render the DAG as Graphviz DOT for callers that need fallible I/O.
+    pub fn dot_string(&self) -> String {
+        self.debug.dot_string(&self.topo)
     }
 }

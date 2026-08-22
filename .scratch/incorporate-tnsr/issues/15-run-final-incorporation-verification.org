@@ -1,6 +1,6 @@
 #+TITLE: Run final incorporation verification
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: resolved
 #+BLOCKED_BY: 09-stabilize-debug-trace-json, 10-add-cpu-inference-primitives, 11-add-scaling-memory-reports, 12-reconcile-parallelism-reports, 13-add-bazel-playground-cli, 14-adapt-docs-examples-tests
 #+PARENT: ../spec.org
 
@@ -66,3 +66,144 @@ bazel test --config=cuda //ferric_continuum/tnsr:cuda_forward_tests
 #+end_src
 
 * Comments
+
+* Answer
+
+Final incorporation verification passed in the primary Ferric Continuum checkout
+after tickets 09-14 were present.
+
+Required CPU build:
+
+#+begin_src text
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr
+Build completed successfully.
+#+end_src
+
+Full CPU behavior matrix, including all focused targets introduced by the
+incorporation tickets:
+
+#+begin_src text
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:tnsr_tests //ferric_continuum/tnsr:debug_trace_tests //ferric_continuum/tnsr:inference_tests //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:qwen3_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:playground_cli_tests //ferric_continuum/tnsr:lib_tests
+Test cases: finished with 11 passing, 0 skipped and 0 failing out of 11 test cases.
+Executed 9 out of 11 tests: 11 tests pass.
+#+end_src
+
+Public docs:
+
+#+begin_src text
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr_doc
+Build completed successfully.
+#+end_src
+
+The rustdoc build still emits known pre-existing warnings in `autograd.rs` and
+`qwen3_load.rs`; they do not fail the target and were not introduced by the
+final docs/examples ticket.
+
+CLI smoke checks:
+
+#+begin_src text
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --help
+Help output includes Usage: tnsr_demo [--dot PATH] [--trace-json PATH].
+
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo
+Default run succeeded and wrote /tmp/block.dot.
+head -n 1 /tmp/block.dot
+digraph Autograd {
+#+end_src
+
+Artifact smoke for explicit DOT and trace JSON paths:
+
+#+begin_src text
+tmpdir=$(mktemp -d /tmp/tnsr-ticket14-primary-smoke.XXXXXX)
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --dot "$tmpdir/block.dot" --trace-json "$tmpdir/trace.json"
+head -n 1 "$tmpdir/block.dot"
+python3 -m json.tool "$tmpdir/trace.json" >/dev/null
+rg -q '"schema": "tnsr.debug_trace"' "$tmpdir/trace.json"
+DOT began with digraph Autograd; JSON parsed and had schema tnsr.debug_trace.
+#+end_src
+
+Whitespace:
+
+#+begin_src text
+git diff --check
+No output; exit 0.
+#+end_src
+
+Optional checks:
+
+- Qwen3 real-weight HuggingFace compatibility was required because the final
+  incorporation diff includes Qwen3 loader hardening. It was run after the
+  final review pass:
+
+#+begin_src text
+MODEL_DIR=/data02/home/philip.yang/models/qwen3-0.6b \
+  OUT_DIR=/tmp/tnsr_hf_compat_after_review \
+  BAZEL=/data02/home/philip.yang/.local/bin/bazel-9.2.0 \
+  ferric_continuum/tnsr/tools/verify_hf_compat.sh
+
+prompt[0]: The capital of France is
+token_ids match : True
+max_abs_diff    : 6.84111e-05
+cosine_sim      : 1.00000000
+top1 match      : True
+top5 overlap    : 5/5
+
+prompt[1]: Water is made of hydrogen and
+token_ids match : True
+max_abs_diff    : 5.05947e-05
+cosine_sim      : 1.00000000
+top1 match      : True
+top5 overlap    : 5/5
+
+prompt[2]: Once upon a time, there was a
+token_ids match : True
+max_abs_diff    : 5.81993e-05
+cosine_sim      : 1.00000000
+top1 match      : True
+top5 overlap    : 5/5
+
+ALL PROMPTS PASS
+#+end_src
+- CUDA forward agreement was not run because tickets 11-14 did not touch CUDA
+  kernels, `cuda_ffi`, CUDA build wiring, or CPU/GPU forward agreement. The
+  documented command remains opt-in and requires a CUDA GPU.
+
+Full review and post-fix verification:
+
+- Clean-context full review (`Hume`, 01a02131-1dfa-7b43-a180-ede529b900f6)
+  found two important accounting issues and one minor doc issue.
+- Fixed selective activation accounting to count the runtime saved sites used
+  by `TransformerSelectivePolicy`: attention-score Q/K, attention-mix P/V, and
+  the small softmax output.
+- Fixed hybrid distributed report accounting so ZeRO-1 counts DDP all-reduce,
+  while ZeRO-2 and ZeRO-3 count FSDP communication and do not double-count DDP
+  gradient synchronization.
+- Fixed stale inference scaling rustdoc that described the module as
+  training-only.
+- Scoped re-review (`Pasteur`, 01a0213a-3901-7063-ae2b-435d999836d6) returned
+  no critical, important, or minor findings and marked the work ready to merge.
+
+Focused post-review tests:
+
+#+begin_src text
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests
+//ferric_continuum/tnsr:scaling_memory_tests PASSED
+//ferric_continuum/tnsr:distributed_tests PASSED
+#+end_src
+
+Full post-review matrix:
+
+#+begin_src text
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:tnsr_tests //ferric_continuum/tnsr:debug_trace_tests //ferric_continuum/tnsr:inference_tests //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:qwen3_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:playground_cli_tests //ferric_continuum/tnsr:lib_tests
+Test cases: finished with 11 passing, 0 skipped and 0 failing out of 11 test cases.
+Bazel reported cached results for some targets in that historical run; the
+final landing pass reran the affected incorporation targets with
+~--cache_test_results=no~ and reran the Qwen3 real-weight compatibility script.
+
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr_doc
+Build completed successfully with the known pre-existing rustdoc warnings in
+autograd.rs and qwen3_load.rs.
+
+git diff --check
+No output; exit 0.
+#+end_src

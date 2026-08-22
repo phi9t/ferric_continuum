@@ -1,10 +1,12 @@
 #![allow(rustdoc::bare_urls)]
 //! # tnsr — transformer autograd + checkpointing library
 //!
-//! CPU-only, f32, no-external-deps Rust implementation of the per-device
-//! transformer math taught in Ch.4 of the JAX scaling book
+//! Bazel-integrated Rust implementation of the per-device transformer math
+//! taught in Ch.4 of the JAX scaling book
 //! ("How To Scale Your Model", <https://jax-ml.github.io/scaling-book/>),
 //! plus the gradient checkpointing / rematerialization strategies from Ch.5.
+//! The default build is CPU-only and f32; selected forward kernels can use the
+//! monorepo CUDA path when built with Bazel `--config=cuda`.
 //!
 //! See `SCALING_BOOK_MAP.md` at the crate root for the full chapter-by-chapter
 //! mapping between book formulas and crate modules.
@@ -25,6 +27,7 @@ pub mod dtensor;
 pub mod grad_mode;
 pub mod inference;
 pub mod ops;
+pub mod playground;
 pub mod qwen3;
 pub mod qwen3_load;
 pub mod saved;

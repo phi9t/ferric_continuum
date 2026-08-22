@@ -1,0 +1,228 @@
+#+TITLE: Archive and delete standalone tnsr
+#+TYPE: task
+#+STATUS: ready-for-human
+#+BLOCKED_BY: 17-remove-tnsr-from-ultron-tracking
+#+PARENT: ../spec.org
+
+* Context
+
+After Ferric Continuum becomes the sole maintained `tnsr` implementation, the standalone checkout audit is resolved, and Ultron no longer tracks `tnsr`, retire `/data02/home/philip.yang/workspace/tnsr` from the active workspace. The chosen policy is archive-first, then delete.
+
+The archive must preserve both Git refs and working-tree contents. Use a Git bundle for refs/history and a separate content tarball for the exact checkout contents, including untracked files only if the pre-archive audit explicitly allows them.
+
+* Requirements
+
+- Confirm ticket 17 is resolved and Ultron no longer tracks `tnsr`.
+- Confirm `/data02/home/philip.yang/workspace/tnsr` is clean immediately before archiving.
+- Create an archive directory outside active `~/workspace`, such as `/data02/home/philip.yang/archive/tnsr-retired-<date>/`.
+- Create a Git bundle with all refs from the standalone checkout.
+- Create a content tarball of the standalone checkout that includes `.git` and does not follow symlinks.
+- Record the archive directory, exact commands, byte sizes, and SHA-256 digests for both archive artifacts under `* Answer`.
+- Verify the bundle and list refs from the bundle before deletion.
+- Verify the content tarball contains `.git/HEAD` and representative project files before deletion.
+- Re-check both archive digests immediately before deletion.
+- Delete `/data02/home/philip.yang/workspace/tnsr` only after the user gives explicit final deletion authority in the trusted request stream.
+- Record the deletion command and post-delete absence check under `* Answer`.
+
+* Out of scope
+
+- Deleting the standalone checkout before archive evidence is recorded.
+- Deleting the standalone checkout without explicit final deletion authority.
+- Removing Ferric Continuum's `ferric_continuum/tnsr` module.
+- Changing `tnsr` remotes or pushing `tnsr` commits.
+- Repairing unrelated Ultron sync drift.
+
+* Verification
+
+Pre-archive:
+
+#+begin_src sh
+git -C /data02/home/philip.yang/workspace/tnsr status --short
+#+end_src
+
+Archive creation:
+
+#+begin_src sh
+archive_dir=/data02/home/philip.yang/archive/tnsr-retired-$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p "$archive_dir"
+git -C /data02/home/philip.yang/workspace/tnsr bundle create "$archive_dir/tnsr-all-refs.bundle" --all
+tar -C /data02/home/philip.yang/workspace -czf "$archive_dir/tnsr-working-tree.tar.gz" tnsr
+wc -c "$archive_dir/tnsr-all-refs.bundle" "$archive_dir/tnsr-working-tree.tar.gz"
+(
+  cd "$archive_dir"
+  sha256sum tnsr-all-refs.bundle tnsr-working-tree.tar.gz > SHA256SUMS
+  cat SHA256SUMS
+)
+#+end_src
+
+Archive verification:
+
+#+begin_src sh
+git bundle verify "$archive_dir/tnsr-all-refs.bundle"
+git ls-remote "$archive_dir/tnsr-all-refs.bundle"
+tar -tf "$archive_dir/tnsr-working-tree.tar.gz" | rg '^(tnsr/\.git/HEAD|tnsr/Cargo.toml|tnsr/src/)'
+(
+  cd "$archive_dir"
+  sha256sum -c SHA256SUMS
+)
+#+end_src
+
+Post-delete:
+
+#+begin_src sh
+rm -rf /data02/home/philip.yang/workspace/tnsr
+test ! -e /data02/home/philip.yang/workspace/tnsr
+#+end_src
+
+* Comments
+
+* Answer
+
+Archive creation and verification completed. Deletion has not been performed
+because this ticket requires explicit final deletion authority after archive
+verification. The latest trusted user request said "archive then delete" before
+the archive existed; this ticket's gate requires a final authority check after
+the archive evidence is available.
+
+Pre-archive state:
+
+#+begin_src text
+git -C /data02/home/philip.yang/workspace/tnsr status --short --untracked-files=all
+No output; active checkout was clean.
+
+git -C /data02/home/philip.yang/workspace/tnsr status --ignored --short
+!! .worktrees/
+!! target/
+!! web/dist/
+!! web/node_modules/
+!! web/test-results/
+#+end_src
+
+The active checkout was clean, but linked worktrees under `.worktrees/` had
+uncommitted side-work. To avoid dropping that work, a third archive artifact was
+created for linked worktrees in addition to the required Git bundle and main
+working-tree tarball.
+
+Archive directory:
+
+#+begin_src text
+/data02/home/philip.yang/archive/tnsr-retired-20260820T202757Z
+#+end_src
+
+Archive creation:
+
+#+begin_src text
+archive_dir=/data02/home/philip.yang/archive/tnsr-retired-20260820T202757Z
+mkdir -p "$archive_dir"
+git -C /data02/home/philip.yang/workspace/tnsr bundle create "$archive_dir/tnsr-all-refs.bundle" --all
+tar -C /data02/home/philip.yang/workspace \
+  --exclude='tnsr/.worktrees' \
+  --exclude='tnsr/target' \
+  --exclude='tnsr/web/dist' \
+  --exclude='tnsr/web/node_modules' \
+  --exclude='tnsr/web/test-results' \
+  -czf "$archive_dir/tnsr-working-tree.tar.gz" tnsr
+tar -C /data02/home/philip.yang/workspace/tnsr \
+  --exclude='.worktrees/*/target' \
+  --exclude='.worktrees/*/web/dist' \
+  --exclude='.worktrees/*/web/node_modules' \
+  --exclude='.worktrees/*/web/test-results' \
+  -czf "$archive_dir/tnsr-linked-worktrees.tar.gz" .worktrees
+#+end_src
+
+Archive sizes:
+
+#+begin_src text
+128037 /data02/home/philip.yang/archive/tnsr-retired-20260820T202757Z/tnsr-all-refs.bundle
+398161 /data02/home/philip.yang/archive/tnsr-retired-20260820T202757Z/tnsr-working-tree.tar.gz
+316818 /data02/home/philip.yang/archive/tnsr-retired-20260820T202757Z/tnsr-linked-worktrees.tar.gz
+#+end_src
+
+SHA-256 digests:
+
+#+begin_src text
+2c78f35e460c882e93bc157703d4f9a3e7ee2b151559d9d692f4280bf486ab18  tnsr-all-refs.bundle
+6dbd28647007a9000585f50ccfdfc384e77d4606296ec875b8927e0cb69e2d0a  tnsr-working-tree.tar.gz
+9a79d3156cc28666c5dac4231b2c0f659e17cd35f1b81bf6697add9077111d34  tnsr-linked-worktrees.tar.gz
+#+end_src
+
+Bundle verification:
+
+#+begin_src text
+git bundle verify "$archive_dir/tnsr-all-refs.bundle"
+/data02/home/philip.yang/archive/tnsr-retired-20260820T202757Z/tnsr-all-refs.bundle is okay
+The bundle contains these 10 refs:
+7c49c1912b6abced917854212371c441f8cde02e refs/heads/codex/active-work-tracker
+7c49c1912b6abced917854212371c441f8cde02e refs/heads/codex/ultron-mainline-policy
+392e524a05d9f46ae921f5cd5e73ac2d963f600b refs/heads/focused-transformer-visualization
+7c49c1912b6abced917854212371c441f8cde02e refs/heads/master
+7c49c1912b6abced917854212371c441f8cde02e refs/heads/ultron/mainline
+68addd6084d304ae5aae711f77f8a08515ffc556 refs/remotes/origin/master
+7c49c1912b6abced917854212371c441f8cde02e HEAD
+7c49c1912b6abced917854212371c441f8cde02e worktrees/ultron-mainline/HEAD
+7c49c1912b6abced917854212371c441f8cde02e worktrees/ultron-mainline-policy/HEAD
+7c49c1912b6abced917854212371c441f8cde02e worktrees/active-work-tracker/HEAD
+The bundle records a complete history.
+The bundle uses this hash algorithm: sha1
+#+end_src
+
+Bundle refs:
+
+#+begin_src text
+git ls-remote "$archive_dir/tnsr-all-refs.bundle"
+7c49c1912b6abced917854212371c441f8cde02e	worktrees/active-work-tracker/HEAD
+7c49c1912b6abced917854212371c441f8cde02e	worktrees/ultron-mainline-policy/HEAD
+7c49c1912b6abced917854212371c441f8cde02e	worktrees/ultron-mainline/HEAD
+7c49c1912b6abced917854212371c441f8cde02e	HEAD
+68addd6084d304ae5aae711f77f8a08515ffc556	refs/remotes/origin/master
+7c49c1912b6abced917854212371c441f8cde02e	refs/heads/ultron/mainline
+7c49c1912b6abced917854212371c441f8cde02e	refs/heads/master
+392e524a05d9f46ae921f5cd5e73ac2d963f600b	refs/heads/focused-transformer-visualization
+7c49c1912b6abced917854212371c441f8cde02e	refs/heads/codex/ultron-mainline-policy
+7c49c1912b6abced917854212371c441f8cde02e	refs/heads/codex/active-work-tracker
+#+end_src
+
+Tarball representative contents:
+
+#+begin_src text
+tnsr/.git/HEAD
+tnsr/Cargo.toml
+tnsr/README.md
+tnsr/src/
+tnsr/src/inference.rs
+tnsr/src/scaling/memory.rs
+tnsr/src/scaling/parallelism.rs
+tnsr/src/bin/tnsr-demo.rs
+tnsr/web/src/
+tnsr/web/src/scene.ts
+tnsr/web/src/trace.ts
+#+end_src
+
+Linked-worktree tarball representative contents:
+
+#+begin_src text
+.worktrees/ultron-mainline-policy/docs/agents/agentic-engineering.md
+.worktrees/ultron-mainline-policy/AGENTS.md
+.worktrees/ultron-mainline-policy/tools/ultron_mainline.py
+.worktrees/ultron-mainline-policy/tests/test_ultron_mainline.py
+.worktrees/active-work-tracker/.scratch/active-work-tracker/issues/01-kata-rollout.md
+.worktrees/active-work-tracker/docs/agents/agentic-engineering.md
+.worktrees/active-work-tracker/AGENTS.md
+.worktrees/active-work-tracker/tools/active_work.py
+#+end_src
+
+Digest re-check:
+
+#+begin_src text
+sha256sum -c SHA256SUMS
+tnsr-all-refs.bundle: OK
+tnsr-working-tree.tar.gz: OK
+tnsr-linked-worktrees.tar.gz: OK
+#+end_src
+
+Deletion pending explicit final authority:
+
+#+begin_src sh
+rm -rf /data02/home/philip.yang/workspace/tnsr
+test ! -e /data02/home/philip.yang/workspace/tnsr
+#+end_src

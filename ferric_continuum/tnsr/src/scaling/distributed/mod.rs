@@ -3,9 +3,9 @@
 //! Book reference: Ch.5 "Parallelize a Transformer for Training",
 //! <https://jax-ml.github.io/scaling-book/training/>.
 //!
-//! `tnsr` is CPU-only, single-threaded, and f32 — it never launches a device or
-//! opens a socket. This module teaches the *distributed* mechanisms PyTorch uses
-//! in the only faithful way a single process can:
+//! These estimates and simulations never launch a device or open a socket. This
+//! module teaches the *distributed* mechanisms PyTorch uses in the only faithful
+//! way a single process can:
 //!
 //! 1. **Symbolic cost estimates** (same pattern as [`super::sharding`]):
 //!    per-device FLOPs, memory, and collective bytes under the ring model.
