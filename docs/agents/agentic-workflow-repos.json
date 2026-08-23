@@ -1,0 +1,117 @@
+{
+  "version": "2026.08.15.2",
+  "source_repository": "ultron",
+  "managed_policy_files": [
+    "CONSTITUTION.md",
+    "docs/agents/agentic-engineering.md",
+    "docs/agents/skill-orchestration.md",
+    "docs/agents/agentic-workflow-repos.json",
+    "docs/agents/ultron-mainline.md",
+    "tools/ultron_mainline.py"
+  ],
+  "managed_repository_files": [
+    {
+      "source": "tests/test_ultron_mainline.py",
+      "destinations": {
+        "ultron": "tests/test_ultron_mainline.py",
+        "torchtitan": "tests/test_ultron_mainline.py",
+        "monarch": "python/tests/test_ultron_mainline.py",
+        "megatronlm": "tests/test_ultron_mainline.py",
+        "nccl": "tests/test_ultron_mainline.py",
+        "ferric_continuum": "tests/test_ultron_mainline.py",
+        "tnsr": "tests/test_ultron_mainline.py"
+      }
+    },
+    {
+      "source": "docs/agents/repository-adapters/ferric_continuum/tools/BUILD.bazel",
+      "destinations": {
+        "ferric_continuum": "tools/BUILD.bazel"
+      }
+    },
+    {
+      "source": "docs/agents/repository-adapters/ferric_continuum/tests/BUILD.bazel",
+      "destinations": {
+        "ferric_continuum": "tests/BUILD.bazel"
+      }
+    }
+  ],
+  "local_tracker_files": [
+    "docs/agents/issue-tracker.md",
+    "docs/agents/triage-labels.md",
+    "docs/agents/domain.md"
+  ],
+  "required_symlinks": [
+    {
+      "path": "torchtitan/AGENTS.md",
+      "target": ".claude/CLAUDE.md"
+    },
+    {
+      "path": "megatronlm/CLAUDE.md",
+      "target": "AGENTS.md"
+    }
+  ],
+  "required_content": [
+    {
+      "path": "monarch/CLAUDE.md",
+      "snippets": ["@CONSTITUTION.md", "`AGENTS.md`"]
+    }
+  ],
+  "repositories": [
+    {
+      "name": "ultron",
+      "upstream_mainline": "main",
+      "ultron_mainline": "ultron/mainline",
+      "ultron_mainline_bootstrap": "3c7e68147ec06869085777fa3d37798e48177219",
+      "instruction_files": ["AGENTS.md"],
+      "install_local_tracker": false
+    },
+    {
+      "name": "torchtitan",
+      "upstream_mainline": "main",
+      "ultron_mainline": "ultron/mainline",
+      "ultron_mainline_bootstrap": "d9d58bf2d3fe5f0f4434cf9aa943a867d8c551f3",
+      "instruction_files": [".claude/CLAUDE.md"],
+      "install_local_tracker": true
+    },
+    {
+      "name": "monarch",
+      "upstream_mainline": "main",
+      "ultron_mainline": "ultron/mainline",
+      "ultron_mainline_bootstrap": "2d9a3e102853f3bb2e465e46bd6b0aff1f9d33cf",
+      "instruction_files": ["AGENTS.md"],
+      "install_local_tracker": true
+    },
+    {
+      "name": "megatronlm",
+      "upstream_mainline": "main",
+      "ultron_mainline": "ultron/mainline",
+      "ultron_mainline_bootstrap": "122311a7e7a5c8f1861aad67961de6495ab82b39",
+      "instruction_files": ["AGENTS.md"],
+      "install_local_tracker": true
+    },
+    {
+      "name": "nccl",
+      "upstream_mainline": "master",
+      "ultron_mainline": "ultron/mainline",
+      "ultron_mainline_bootstrap": "1c1cb435012474385edfd32476499d2cfe97cdb7",
+      "instruction_files": ["AGENTS.md"],
+      "install_local_tracker": false
+    },
+    {
+      "name": "ferric_continuum",
+      "upstream_mainline": "main",
+      "ultron_mainline": "ultron/mainline",
+      "ultron_mainline_bootstrap": "d2a2c33fa8eb4ef84d93ff8f8e2a41d0e6afa323",
+      "instruction_files": ["AGENTS.md", "CLAUDE.md"],
+      "install_local_tracker": false
+    },
+    {
+      "name": "tnsr",
+      "upstream_mainline": "master",
+      "ultron_mainline": "ultron/mainline",
+      "ultron_mainline_bootstrap": "7c49c1912b6abced917854212371c441f8cde02e",
+      "instruction_files": ["AGENTS.md"],
+      "install_local_tracker": true
+    }
+  ]
+}

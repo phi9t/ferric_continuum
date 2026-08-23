@@ -1,0 +1,7 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "ultron_mainline",
+    srcs = ["ultron_mainline.py"],
+    visibility = ["//tests:__pkg__"],
+)

@@ -1,0 +1,8 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+py_test(
+    name = "ultron_mainline_test",
+    srcs = ["test_ultron_mainline.py"],
+    main = "test_ultron_mainline.py",
+    deps = ["//tools:ultron_mainline"],
+)

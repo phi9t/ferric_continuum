@@ -1,4 +1,4 @@
-<!-- Agentic Engineering Workflow v2026.08.14.1. Canonical source: ultron/docs/agents/agentic-engineering.md. Sibling copies are managed by Ultron. -->
+<!-- Agentic Engineering Workflow v2026.08.15.2. Canonical source: ultron/docs/agents/agentic-engineering.md. Sibling copies are managed by Ultron. -->
 # Agentic Engineering Workflow
 
 > Scale agent execution, not agent authority.
@@ -42,13 +42,23 @@ invariant, production infrastructure, or architectural decision.
 If any condition fails, use the **gated path**. Record the classification and
 its evidence in the durable ticket before implementation begins.
 
-## 2. Short path
+## 2. Ultron branch authority
+
+Ultron-related work reads `docs/agents/ultron-mainline.md` before choosing or
+validating a base. Its isolated ticket branch and repo-local worktree start
+from the exact current `ultron/mainline` tip, and the merge-base is verified
+before implementation. Every worktree stays within its own repository. Run
+the synchronized contract test from the repository-specific destination and
+native test runner declared in the operations guide. Agents never work
+directly on, advance, or publish `ultron/mainline`.
+
+## 3. Short path
 
 Keep the primary context. Define the behavior, implement red-green slices, run
 focused tests, perform the standard two-axis code review, and inspect the final
 diff. Completion requires fresh verification evidence and human-owned merge.
 
-## 3. Bug path
+## 4. Bug path
 
 Before broad investigation, Matt's diagnosis loop must establish a fast command
 that can turn red and minimize the failure. Then use Superpowers root-cause and
@@ -57,7 +67,7 @@ and encode the verified cause as a failing regression test before fixing it.
 After three failed fixes, stop patching and escalate to architectural review.
 The crosswalk defines the full hard-bug recipe.
 
-## 4. Gated path
+## 5. Gated path
 
 Complete these gates in order:
 
