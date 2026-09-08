@@ -6,18 +6,27 @@
 //! computes only that rank's query rows, and retains one probability block per
 //! rank for the explicit backward pass.
 
+use crate::attention_layout::{AttentionLayoutError, EqualContiguousAttentionLayout};
 use crate::autograd::{BackwardCtx, BackwardRecipe, GradEdge, GradTarget, OpKind};
 use crate::tensor::{Shape, Tensor, TensorValue};
+use crate::typed::{ShardKvHeads, ShardQueryHeads, TypedTensor};
 
 /// Validated dimensions shared by context-parallel forward and backward.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ContextParallelGqaShape {
+    /// Batch extent.
     pub b: usize,
+    /// Context-parallel degree (number of logical sequence shards).
     pub cp: usize,
+    /// Sequence extent owned by each logical rank.
     pub local_t: usize,
+    /// Materialized sequence extent across all logical ranks.
     pub global_t: usize,
+    /// Number of query heads.
     pub hq: usize,
+    /// Number of shared key/value heads.
     pub hk: usize,
+    /// Feature extent within each head.
     pub dh: usize,
 }
 
@@ -29,6 +38,7 @@ impl ContextParallelGqaShape {
 
 /// Forward state needed to apply the exact local chain rule in backward.
 pub struct ContextParallelGqaSaved {
+    /// Validated extents used by both mathematical passes.
     pub shape: ContextParallelGqaShape,
     // Rank r stores [B,Hq,local_t,global_t] in row-major order.
     probabilities: Vec<Vec<f32>>,
@@ -36,8 +46,11 @@ pub struct ContextParallelGqaSaved {
 
 /// Explicit gradients returned to the three logical-shard input groups.
 pub struct ContextParallelGqaGrads {
+    /// Query gradients in logical-rank order.
     pub dq: Vec<TensorValue>,
+    /// Key gradients scattered back into logical-rank order.
     pub dk: Vec<TensorValue>,
+    /// Value gradients scattered back into logical-rank order.
     pub dv: Vec<TensorValue>,
 }
 
@@ -74,7 +87,9 @@ fn validate_shards(
         local_t > 0,
         "context_parallel_gqa: local sequence length must be positive"
     );
+    assert!(hq > 0, "context_parallel_gqa: Hq must be positive");
     assert!(hk > 0, "context_parallel_gqa: Hk must be positive");
+    assert!(dh > 0, "context_parallel_gqa: Dh must be positive");
     assert_eq!(
         hq % hk,
         0,
@@ -109,71 +124,25 @@ fn validate_shards(
         );
     }
 
+    let layout =
+        EqualContiguousAttentionLayout::new(q_shards.len(), local_t).unwrap_or_else(|error| {
+            match error {
+                AttentionLayoutError::GlobalSequenceOverflow { .. } => {
+                    panic!("context_parallel_gqa: global sequence length overflow")
+                }
+                _ => unreachable!("shard count and local length were validated"),
+            }
+        });
+
     ContextParallelGqaShape {
         b,
         cp: q_shards.len(),
         local_t,
-        global_t: local_t * q_shards.len(),
+        global_t: layout.global_sequence(),
         hq,
         hk,
         dh,
     }
-}
-
-/// Gather equal sequence shards into one batch-major `[B,T,H,Dh]` buffer.
-fn gather_sequence(
-    shards: &[TensorValue],
-    b: usize,
-    local_t: usize,
-    h: usize,
-    dh: usize,
-) -> Vec<f32> {
-    let global_t = local_t * shards.len();
-    let mut full = vec![0.0f32; b * global_t * h * dh];
-    for (rank, shard) in shards.iter().enumerate() {
-        let src = shard.data.as_ref();
-        for bi in 0..b {
-            for local_ti in 0..local_t {
-                let global_ti = rank * local_t + local_ti;
-                for hi in 0..h {
-                    let src_base = ((bi * local_t + local_ti) * h + hi) * dh;
-                    let dst_base = ((bi * global_t + global_ti) * h + hi) * dh;
-                    full[dst_base..dst_base + dh].copy_from_slice(&src[src_base..src_base + dh]);
-                }
-            }
-        }
-    }
-    full
-}
-
-/// Scatter one batch-major `[B,T,H,Dh]` buffer into equal sequence shards.
-fn scatter_sequence(
-    full: &[f32],
-    b: usize,
-    cp: usize,
-    local_t: usize,
-    h: usize,
-    dh: usize,
-) -> Vec<TensorValue> {
-    let global_t = cp * local_t;
-    assert_eq!(full.len(), b * global_t * h * dh);
-    (0..cp)
-        .map(|rank| {
-            let mut shard = vec![0.0f32; b * local_t * h * dh];
-            for bi in 0..b {
-                for local_ti in 0..local_t {
-                    let global_ti = rank * local_t + local_ti;
-                    for hi in 0..h {
-                        let src_base = ((bi * global_t + global_ti) * h + hi) * dh;
-                        let dst_base = ((bi * local_t + local_ti) * h + hi) * dh;
-                        shard[dst_base..dst_base + dh]
-                            .copy_from_slice(&full[src_base..src_base + dh]);
-                    }
-                }
-            }
-            TensorValue::from_vec(Shape(vec![b, local_t, h, dh]), shard)
-        })
-        .collect()
 }
 
 /// Context-parallel causal GQA forward over equal contiguous logical shards.
@@ -196,23 +165,32 @@ pub fn raw_context_parallel_gqa_forward(
         hk,
         dh,
     } = shape;
+    let layout = EqualContiguousAttentionLayout::new(cp, local_t)
+        .expect("validated context-parallel attention layout");
     let group_size = shape.group_size();
     let scale = (dh as f32).sqrt().recip();
-    let global_k = gather_sequence(k_shards, b, local_t, hk, dh);
-    let global_v = gather_sequence(v_shards, b, local_t, hk, dh);
+    let global_k_value = layout.gather_bshd(k_shards);
+    let global_v_value = layout.gather_bshd(v_shards);
+    let global_k = global_k_value.data.as_ref();
+    let global_v = global_v_value.data.as_ref();
 
     let mut outputs = Vec::with_capacity(cp);
     let mut probabilities = Vec::with_capacity(cp);
     for (rank, q_shard) in q_shards.iter().enumerate() {
+        let query_block = layout
+            .query_block(rank)
+            .expect("validated context-parallel rank");
         let q = q_shard.data.as_ref();
-        let mut out = vec![0.0f32; b * local_t * hq * dh];
-        let mut p_rank = vec![0.0f32; b * hq * local_t * global_t];
+        let mut out = vec![0.0f32; Shape(vec![b, local_t, hq, dh]).numel()];
+        let mut p_rank = vec![0.0f32; Shape(vec![b, hq, local_t, global_t]).numel()];
 
         for bi in 0..b {
             for hi in 0..hq {
                 let kh = hi / group_size;
                 for local_q in 0..local_t {
-                    let global_q = rank * local_t + local_q;
+                    let global_q = query_block
+                        .global_position(local_q)
+                        .expect("validated local query position");
                     let q_base = ((bi * local_t + local_q) * hq + hi) * dh;
                     let p_base = ((bi * hq + hi) * local_t + local_q) * global_t;
 
@@ -299,6 +277,8 @@ pub fn raw_context_parallel_gqa_backward(
         hk,
         dh,
     } = shape;
+    let layout = EqualContiguousAttentionLayout::new(cp, local_t)
+        .expect("validated context-parallel attention layout");
     for dout in dout_shards {
         assert_eq!(
             dout.shape.0.as_slice(),
@@ -309,24 +289,32 @@ pub fn raw_context_parallel_gqa_backward(
 
     let group_size = shape.group_size();
     let scale = (dh as f32).sqrt().recip();
-    let global_k = gather_sequence(k_shards, b, local_t, hk, dh);
-    let global_v = gather_sequence(v_shards, b, local_t, hk, dh);
+    let global_k_value = layout.gather_bshd(k_shards);
+    let global_v_value = layout.gather_bshd(v_shards);
+    let global_k = global_k_value.data.as_ref();
+    let global_v = global_v_value.data.as_ref();
     let mut dq_shards = Vec::with_capacity(cp);
-    let mut global_dk = vec![0.0f32; b * global_t * hk * dh];
-    let mut global_dv = vec![0.0f32; b * global_t * hk * dh];
+    let global_kv_shape = Shape(vec![b, global_t, hk, dh]);
+    let mut global_dk = vec![0.0f32; global_kv_shape.numel()];
+    let mut global_dv = vec![0.0f32; global_kv_shape.numel()];
 
     for rank in 0..cp {
+        let query_block = layout
+            .query_block(rank)
+            .expect("validated context-parallel rank");
         let q = q_shards[rank].data.as_ref();
         let dout = dout_shards[rank].data.as_ref();
         let probabilities = &saved.probabilities[rank];
         assert_eq!(probabilities.len(), b * hq * local_t * global_t);
-        let mut dq = vec![0.0f32; b * local_t * hq * dh];
+        let mut dq = vec![0.0f32; Shape(vec![b, local_t, hq, dh]).numel()];
 
         for bi in 0..b {
             for hi in 0..hq {
                 let kh = hi / group_size;
                 for local_q in 0..local_t {
-                    let global_q = rank * local_t + local_q;
+                    let global_q = query_block
+                        .global_position(local_q)
+                        .expect("validated local query position");
                     let q_base = ((bi * local_t + local_q) * hq + hi) * dh;
                     let p_base = ((bi * hq + hi) * local_t + local_q) * global_t;
 
@@ -369,10 +357,12 @@ pub fn raw_context_parallel_gqa_backward(
         dq_shards.push(TensorValue::from_vec(Shape(vec![b, local_t, hq, dh]), dq));
     }
 
+    let global_dk = TensorValue::from_vec(global_kv_shape.clone(), global_dk);
+    let global_dv = TensorValue::from_vec(global_kv_shape, global_dv);
     ContextParallelGqaGrads {
         dq: dq_shards,
-        dk: scatter_sequence(&global_dk, b, cp, local_t, hk, dh),
-        dv: scatter_sequence(&global_dv, b, cp, local_t, hk, dh),
+        dk: layout.scatter_bshd(&global_dk),
+        dv: layout.scatter_bshd(&global_dv),
     }
 }
 
@@ -473,4 +463,33 @@ pub fn context_parallel_gqa_attention(
         recipe,
         vec![],
     )
+}
+
+/// Typed causal GQA over equal contiguous sequence shards.
+///
+/// Slice order defines logical rank order. Every returned typed handle wraps
+/// the exact output produced by the one shared multi-output autograd node.
+pub fn context_parallel_gqa_attention_typed(
+    q_shards: &[ShardQueryHeads],
+    k_shards: &[ShardKvHeads],
+    v_shards: &[ShardKvHeads],
+    name: &str,
+) -> Vec<ShardQueryHeads> {
+    let q: Vec<Tensor> = q_shards
+        .iter()
+        .map(|tensor| tensor.as_tensor().clone())
+        .collect();
+    let k: Vec<Tensor> = k_shards
+        .iter()
+        .map(|tensor| tensor.as_tensor().clone())
+        .collect();
+    let v: Vec<Tensor> = v_shards
+        .iter()
+        .map(|tensor| tensor.as_tensor().clone())
+        .collect();
+
+    context_parallel_gqa_attention(&q, &k, &v, name)
+        .into_iter()
+        .map(TypedTensor::from_proven_axes)
+        .collect()
 }

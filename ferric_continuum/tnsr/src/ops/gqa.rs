@@ -18,6 +18,7 @@
 
 use crate::autograd::{BackwardCtx, BackwardRecipe, GradEdge, GradTarget, OpKind};
 use crate::tensor::{Shape, Tensor, TensorValue};
+use crate::typed::{FullKvHeads, FullQueryHeads, TypedTensor};
 
 #[derive(Clone, Copy, Debug)]
 pub struct GqaShape {
@@ -49,6 +50,10 @@ fn check_shape_qkv(q: &TensorValue, k: &TensorValue, v: &TensorValue) -> GqaShap
     assert_eq!(ks[2], vs[2]);
     assert_eq!(qs[3], ks[3]);
     assert_eq!(qs[3], vs[3]);
+    assert!(qs[2] > 0, "gqa: Hq must be positive");
+    assert!(ks[2] > 0, "gqa: Hk must be positive");
+    assert!(qs[3] > 0, "gqa: Dh must be positive");
+    assert_eq!(qs[2] % ks[2], 0, "gqa: Hq must be divisible by Hk");
     GqaShape {
         b: qs[0],
         t: qs[1],
@@ -283,4 +288,22 @@ pub fn gqa_attention(q: &Tensor, k: &Tensor, v: &Tensor, name: &str) -> Tensor {
         recipe,
         vec![],
     )
+}
+
+/// Typed full-sequence causal GQA.
+///
+/// The signature makes query-head versus KV-head ownership a compile-time
+/// contract; the explicit forward/backward derivation above remains unchanged.
+pub fn gqa_attention_typed(
+    q: &FullQueryHeads,
+    k: &FullKvHeads,
+    v: &FullKvHeads,
+    name: &str,
+) -> FullQueryHeads {
+    TypedTensor::from_proven_axes(gqa_attention(
+        q.as_tensor(),
+        k.as_tensor(),
+        v.as_tensor(),
+        name,
+    ))
 }

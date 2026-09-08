@@ -1,0 +1,256 @@
+#+TITLE: Deepen tnsr transformer architecture
+#+TYPE: spec
+#+STATUS: resolved
+
+* Outcome
+
+Deepen the in-process tnsr modules that support readable transformer
+mathematics. Named dimensions become computational evidence, equal-contiguous
+Attention layout owns its sequence-routing mechanics, autograd recording has
+an explicit lifetime, graph topology is observable through a stable verifier
+seam, Shape arithmetic is checked, and Qwen3 typed execution consumes one
+coherent call-time state snapshot.
+
+The ordinary and context-parallel Causal GQA semantics remain separate
+executable derivations. The legacy and typed Qwen3 full/context-parallel
+methods also remain separate executable derivations. Duplication is retained
+where it keeps equations, causal visibility, or gradient ownership local.
+
+* Route and authority
+
+This is the gated architectural path: it adds public observation interfaces and
+moves several internal seams. The architecture-review report supplied the
+alternatives, trade-offs, deletion tests, and six candidate designs. The user
+approved all six by saying =proceed to do all= on 2026-09-08.
+
+The =ask-matt= route owner is not invocable in the current skill catalog, so the
+repository's written gated-path crosswalk is the executable fallback. The work
+continues in the existing linked worktree
+=.worktrees/typed-transformer-math= because the authorized Wave A implementation
+is an uncommitted prerequisite and Git actions remain outside current
+authority. Tickets execute sequentially in that worktree; implementation
+agents must not edit it concurrently.
+
+Code, tests, documentation, tracker updates, and independent review are
+authorized. Commit, push, pull-request creation, and merge are not authorized.
+
+* Protected architecture
+
+- Do not create an attention engine, strategy trait, runtime mode enum, or
+  shared forward/backward semantic core.
+- Keep ordinary GQA and context-parallel GQA equations in their own pristine
+  implementations.
+- Keep legacy full, typed full, legacy context-parallel, and typed
+  context-parallel Qwen3 methods as four visible executable derivations.
+- Keep the scalar GQA oracle and verifier partition arithmetic independent from
+  production Attention layout mechanics.
+- Preserve valid-input numerics, gradients, operation kinds/names, producer
+  topology, shared parameter identity, and existing public interfaces, except
+  for the intentional recording-lifetime semantic change: =Engine::new= no
+  longer starts ambient capture and trace consumers must use
+  =Engine::with_recording=.
+- No CUDA/NCCL/ring attention, ragged shards, arbitrary position IDs, KV cache,
+  full-model sharding, dtype/device redesign, or static-extent Wave B work.
+
+* Public and internal seams
+
+** Checked Shape arithmetic
+
+=Shape::checked_product(&[usize]) -> Option<usize>=,
+=Shape::checked_numel() -> Option<usize>=, and
+=Shape::checked_bytes_f32() -> Option<usize>= expose non-panicking arithmetic.
+Existing =numel()= and =bytes_f32()= remain and panic deterministically with
+=shape: element count overflow= and =shape: f32 byte size overflow=. Tensor and
+TensorValue shape-driven allocation plus per-shape debug accounting use those
+methods; migrating every operation-local scratch-buffer product and aggregate
+report sum is explicitly not claimed by this slice.
+
+** Named-dimension computational evidence
+
+Add =AxisExtent<A>= as the runtime extent of one compile-time Named dimension,
+including checked =Merged<A,B>= construction. Canonical typed tensor layouts
+expose named accessors such as =batch_extent=, =sequence_extent=,
+=hidden_extent=, =query_heads_extent=, =kv_heads_extent=, and
+=head_dim_extent=. Typed projection, reshape, norm, RoPE, and Qwen3 code consumes
+this evidence instead of indexing =Shape.0= by numeric coordinates.
+=named_shape()= remains the dynamic display interface and downstream custom axes
+remain supported. Existing typed reshape call shapes continue accepting raw
+=usize= extents for compatibility while also accepting the corresponding typed
+extent evidence; typed Qwen3 uses the evidence-bearing form.
+
+Because the legacy public =Tensor= interior remains mutable for source
+compatibility, every shape-bearing typed access revalidates rank after axis
+attachment. Allocation-free =Tensor::rank= and =Tensor::dim= accessors keep
+that check out of shape-vector allocation paths. Same-rank semantic meaning
+remains the caller's declared assertion because storage cannot infer it.
+
+** Equal-contiguous Attention layout
+
+Add one crate-internal concrete =EqualContiguousAttentionLayout= plus
+=QueryBlock=. The layout validates nonzero shard count/local sequence and
+checked global length, derives each rank's global Query block, and owns
+batch-major gather/scatter for =[B,S,H,Dh]= =TensorValue=s. Gather/scatter infer
+batch/head/head-dimension extents from the already semantically validated
+values rather than requiring callers to repeat positional sizes.
+Context-parallel GQA performs its existing semantic validation first and keeps
+all forward/backward equations local, then delegates ownership mechanics.
+Qwen3 context-parallel paths obtain rank RoPE starts from Query blocks. There is
+no generic layout strategy or DTensor coupling.
+
+** Scoped autograd recording
+
+=Engine::new()= becomes side-effect free. =Engine::with_recording(|| ...)= installs the
+engine's =DebugRecorder= only for the closure's dynamic extent and restores any
+outer recorder on success or unwind. Operation/save/checkpoint events target
+the active recorder; execution without a recording scope still builds a valid
+autograd graph and backward still works. The engine on which =backward= is
+invoked owns every backward, saved-tensor unpack, and checkpoint recomputation
+event for that call, regardless of which engine (if any) observed the original
+forward. =backward= therefore installs its recorder for its complete dynamic
+extent. Forward events remain owned only by the recorder active when that
+forward operation ran.
+
+Recorder scope, checkpoint scope, and =is_recomputing= state each use RAII
+restoration. A panic in an original checkpoint body must pop the exact stack
+entry and remove its exact registry entry. A recomputation panic must pop the
+stack entry, restore =is_recomputing=false=, clear partial cache, and reset the
+cursor before unwinding. Tests cover nesting, cross-engine backward ownership,
+forward checkpoint panic, and a panic-once/retry-success recomputation.
+
+** Graph observability
+
+=GraphObservation::from_outputs= projects the loss/output-reachable autograd DAG
+into a canonical, ID-independent graph view with normalized operation/tensor
+identities, operation kind/name, ordered input/output edges, and shapes.
+=DebugRecorder::graph_observation()= produces the same view for an explicitly
+recorded prefix, including validation-failure observation. The observation can
+locate the producer of a live =Tensor=. =Tensor= also exposes immutable value
+snapshots, handle-identity comparison, and producer identity without exposing
+=Rc=/=RefCell=/=OpCall= internals to verifier code. Existing trace JSON remains
+schema-compatible.
+
+Each observed operation edge is one =GraphTensor { id, shape }= value rather
+than parallel identity and shape arrays. =GraphObservation::operation= safely
+resolves an observation-local =GraphOpIndex= returned by producer lookup.
+
+The deterministic projection algorithm is: visit root outputs in caller order;
+for each root's producer, run post-order DFS by the operation's declared input
+order; deduplicate operations by raw =OpCallId= during construction; append an
+operation after all reachable input producers. Assign canonical tensor IDs on
+the resulting operation sequence in first-occurrence order, visiting each
+operation's inputs before its outputs. If a root is a leaf, give it an ID after
+the operation scan in root order. Observation equality compares only the
+canonical operation records and canonical root IDs/shapes; any private raw-ID
+index used for live lookup is excluded. Producer lookup returns =Ok(None)= for
+an observed leaf, =Ok(Some(op))= for an observed produced tensor, and
+=UnobservedTensor= for a foreign tensor. Recorder-prefix projection uses
+recorder insertion order as its operation order, then applies the same
+first-occurrence normalization. Its inferred roots are recorded outputs that
+never occur as an input in the same prefix, ordered by operation insertion and
+then declared output order. It is not claimed equal to a reachable-DAG
+projection when independent sibling execution order differs.
+
+** Coherent Qwen3 attention state
+
+The current mutable public fields remain for compatibility. Each typed forward
+validates them and constructs one ephemeral =ValidatedAttentionState= containing
+named head geometry and typed views of the same live parameter handles. No
+state is cached or stored in =Qwen3Attention=, because public replacement and
+checkpoint loading would make a second stored representation stale. Legacy
+methods do not delegate through typed methods or gain graph operations.
+
+The state snapshots scalar values (=n_q_heads=, =n_kv_heads=, =head_dim=,
+derived query/KV widths, and =rope_cfg=) and clones current tensor handles; it
+does not snapshot parameter values. This is coherent under tnsr's current
+single-threaded, callback-free forward execution. After state construction,
+typed executable derivations read only the state, not =Qwen3Attention= fields.
+A valid between-call public-field/parameter replacement test proves every call
+revalidates fresh state and rules out caching; existing parity and invalid
+mutation tests remain compatibility evidence rather than structural proof.
+
+* Behavioral proof
+
+- New Shape overflow tests visibly fail before checked arithmetic lands.
+- New named-extent tests visibly fail before the semantic extent interface
+  lands; compile-time axis tests remain green.
+- New Query-block tests visibly fail before the layout module lands; existing
+  P=1/2/4, B=2, causality, reconstruction, finite-difference, and Qwen3 CP
+  parity tests prove its integration. A nonuniform upstream-gradient oracle
+  compares concatenated dQ/dK/dV with independent unsharded GQA at every
+  P=1/2/4 degree.
+- New interleaved/nested Engine tests visibly fail before scoped recording
+  lands and prove restoration and isolation.
+- New graph-observation tests visibly fail before the verifier seam lands and
+  prove ID-independent equality plus multi-output producer identity.
+- Existing typed/legacy Qwen3 forward, input-gradient, parameter-gradient, and
+  topology parity provide compatibility evidence for the call-time state
+  refactor; a valid between-call mutation test and structural no-field-read
+  review prove its freshness and coherence.
+- Focused tests run after every red-green slice, followed by the complete tnsr
+  CPU test matrix and Bazel rustfmt verification.
+
+* Independent critique reconciliation
+
+The Qwen3 critique rejected private fields, a stored parameter bundle, and a
+cached geometry object: each would either break source compatibility or create
+two sources of truth. This spec adopts the critique's call-time snapshot and
+retains current live tensor handles. Additional independent critique of the
+assembled specification and final diff is required before handoff.
+
+The assembled-spec critique also found ambiguous checkpoint trace ownership,
+panic-leaking checkpoint state, underspecified graph normalization, and an
+unsafe ticket dependency graph. This revision assigns recomputation to the
+engine invoking =backward=, requires RAII for every dynamic stack/state flag,
+defines graph traversal, normalization, equality, and lookup exactly, and makes
+the durable implementation sequence =01 -> 02 -> 03 -> 04 -> 05 -> 06=. It
+also upgrades Qwen3 proof from numerical parity alone to structural review plus
+a valid between-call mutation test.
+
+Final critique additionally required explicit recorder roots and foreign-tensor
+lookup, complete checkpoint-registry/retry cleanup, ticket-local contracts, an
+explicit =Engine::new= compatibility carve-out, narrowed Shape scope, and a
+deeper crate-internal Attention layout interface. Those requirements are now
+part of this spec and the executable tickets below it.
+
+* Comments
+
+- 2026-09-08: User approved implementing all six architecture-review
+  candidates.
+- 2026-09-08: Ruling: realize speculative Qwen3 state coherence as an ephemeral
+  validated snapshot, not a stored/private bundle. Cost if wrong: callers keep
+  a wider mutable interface, but no source compatibility or parameter-identity
+  break is introduced.
+- 2026-09-08: Ruling: execute sequentially in the existing isolated Wave A
+  worktree because the prerequisite is uncommitted and commit authority is not
+  available. Cost if wrong: ticket diffs are less physically isolated, so
+  focused tests and independent reviews must carry more separation burden.
+- 2026-09-08: Accepted final review fixes make typed rank evidence resilient to
+  legacy alias rank mutation, consume named extents in projection and RoPE
+  adapters, pair observed graph identity/shape atomically, and add nonuniform
+  P=1/2/4 CP backward parity. Generic attention cores and centralized strategy
+  switches remain rejected because they would weaken equation locality.
+- 2026-09-08: Final independent spec/correctness, engineering/architecture,
+  and lesson-accuracy reviews are clean after migrating the last direct graph
+  index consumer to =GraphObservation::operation=.
+
+* Answer
+
+All six architecture slices are implemented in the isolated
+=codex/typed-transformer-math= worktree. =Shape= owns checked foundational
+arithmetic; typed tensors carry named extent evidence and revalidate rank;
+equal-contiguous Attention layout owns only sequence routing; recording and
+checkpoint state have unwind-safe dynamic lifetimes; graph observation is
+canonical and structurally atomic; and every typed Qwen3 call consumes one
+fresh coherent state snapshot.
+
+The protected mathematical locality remains intact: ordinary and
+context-parallel GQA retain separate explicit forward/backward derivations,
+the four Qwen3 attention methods remain separately readable programs, and the
+scalar oracle plus test-local shard arithmetic remain independent of
+production layout code.
+
+Fresh final proof on 2026-09-08 passed all 14 tnsr CPU test targets, all seven
+requested library/Rustdoc/Qwen3 binary build targets, and the scoped 11-target
+Bazel rustfmt aspect. Independent final spec, standards, and lesson reviews
+reported no remaining substantive findings. Git commit, push, and merge were
+not performed because they remain outside this tracker's authority.

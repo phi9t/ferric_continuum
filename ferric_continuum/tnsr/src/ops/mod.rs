@@ -49,7 +49,7 @@ pub fn finish_op(
             debug_saved,
         });
 
-        crate::debug::record_op_call_global(&call);
+        crate::debug::record_op_call_current(&call);
 
         out.inner.borrow_mut().autograd.producer = Some(call);
         out.inner.borrow_mut().autograd.is_leaf = false;
@@ -101,7 +101,7 @@ pub fn finish_op_multi(
             debug_saved,
         });
 
-        crate::debug::record_op_call_global(&call);
+        crate::debug::record_op_call_current(&call);
 
         // Point every output at the shared call, and mark them non-leaf.
         for o in &outs {

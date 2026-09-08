@@ -27,12 +27,40 @@ pub struct TensorId(pub usize);
 pub struct Shape(pub Vec<usize>);
 
 impl Shape {
-    pub fn numel(&self) -> usize {
-        self.0.iter().product()
+    /// Multiply runtime extents without wrapping.
+    ///
+    /// Any zero extent makes the shape empty, even when nonzero factors would
+    /// overflow if multiplied first. An empty extent list is a scalar and has
+    /// one element.
+    pub fn checked_product(extents: &[usize]) -> Option<usize> {
+        if extents.contains(&0) {
+            return Some(0);
+        }
+        extents
+            .iter()
+            .try_fold(1usize, |product, &extent| product.checked_mul(extent))
     }
 
+    /// Return the element count, or `None` when multiplying extents overflows.
+    pub fn checked_numel(&self) -> Option<usize> {
+        Self::checked_product(&self.0)
+    }
+
+    /// Return the element count, panicking deterministically on overflow.
+    pub fn numel(&self) -> usize {
+        self.checked_numel().expect("shape: element count overflow")
+    }
+
+    /// Return the f32 storage size in bytes, or `None` on overflow.
+    pub fn checked_bytes_f32(&self) -> Option<usize> {
+        self.checked_numel()?
+            .checked_mul(std::mem::size_of::<f32>())
+    }
+
+    /// Return the f32 storage size in bytes, panicking on overflow.
     pub fn bytes_f32(&self) -> usize {
-        self.numel() * 4
+        self.checked_bytes_f32()
+            .expect("shape: f32 byte size overflow")
     }
 }
 
@@ -132,6 +160,26 @@ impl Tensor {
         Self::from_value(value, false)
     }
 
+    /// Return a cheap immutable snapshot of this tensor's current value.
+    pub fn value(&self) -> TensorValue {
+        self.inner.borrow().value.clone()
+    }
+
+    /// Whether two handles refer to the same tensor storage and autograd node.
+    pub fn shares_storage_with(&self, other: &Tensor) -> bool {
+        Rc::ptr_eq(&self.inner, &other.inner)
+    }
+
+    /// Identity of the operation that produced this tensor, if any.
+    pub fn producer_id(&self) -> Option<crate::autograd::OpCallId> {
+        self.inner
+            .borrow()
+            .autograd
+            .producer
+            .as_ref()
+            .map(|producer| producer.id)
+    }
+
     pub fn zeros(shape: &[usize]) -> Self {
         let shape = Shape(shape.to_vec());
         Self::from_value(TensorValue::zeros(shape), false)
@@ -180,6 +228,18 @@ impl Tensor {
 
     pub fn shape(&self) -> Shape {
         self.inner.borrow().value.shape.clone()
+    }
+
+    /// Return the current number of runtime dimensions without cloning shape storage.
+    pub fn rank(&self) -> usize {
+        self.inner.borrow().value.shape.0.len()
+    }
+
+    /// Return one current runtime extent without cloning shape storage.
+    ///
+    /// Panics when `index` is outside the tensor's current rank.
+    pub fn dim(&self, index: usize) -> usize {
+        self.inner.borrow().value.shape.0[index]
     }
 
     pub fn id(&self) -> TensorId {

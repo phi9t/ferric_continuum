@@ -111,11 +111,13 @@ impl SavedTensor {
     }
 }
 
-pub fn default_save(t: &Tensor, site: SaveSite, debug: &DebugRecorder) -> SavedTensor {
+pub fn default_save(t: &Tensor, site: SaveSite, debug: Option<&DebugRecorder>) -> SavedTensor {
     match site.role {
         SaveRole::Parameter => {
             let inner = t.inner.borrow();
-            debug.record_save_borrowed(&site);
+            if let Some(debug) = debug {
+                debug.record_save_borrowed(&site);
+            }
             SavedTensor::Borrowed {
                 tensor: Rc::downgrade(&t.inner),
                 version: inner.version,
@@ -123,7 +125,9 @@ pub fn default_save(t: &Tensor, site: SaveSite, debug: &DebugRecorder) -> SavedT
             }
         }
         _ => {
-            debug.record_save_materialized(&site);
+            if let Some(debug) = debug {
+                debug.record_save_materialized(&site);
+            }
             SavedTensor::Materialized {
                 value: t.inner.borrow().value.clone(),
                 site,

@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use tnsr::{
-    autograd::{Engine, OpKind},
+    autograd::{Engine, GraphObservation, GraphOpIndex, OpKind},
     ops::{
         basic,
         context_parallel_gqa::{
@@ -22,6 +22,25 @@ fn deterministic_value(shape: &[usize], scale: f32, offset: f32) -> TensorValue 
         .map(|i| (((i * 17 + 5) % 29) as f32 - 14.0) * scale + offset)
         .collect();
     TensorValue::from_vec(Shape(shape.to_vec()), data)
+}
+
+fn clone_leaf(tensor: &Tensor) -> Tensor {
+    Tensor::from_value(tensor.value(), true)
+}
+
+fn clone_attention(source: &Qwen3Attention) -> Qwen3Attention {
+    Qwen3Attention {
+        n_q_heads: source.n_q_heads,
+        n_kv_heads: source.n_kv_heads,
+        head_dim: source.head_dim,
+        rope_cfg: source.rope_cfg,
+        wq: clone_leaf(&source.wq),
+        wk: clone_leaf(&source.wk),
+        wv: clone_leaf(&source.wv),
+        wo: clone_leaf(&source.wo),
+        q_norm: clone_leaf(&source.q_norm),
+        k_norm: clone_leaf(&source.k_norm),
+    }
 }
 
 /// Split `[B,T,H,Dh]` into equal contiguous sequence shards while preserving
@@ -180,7 +199,7 @@ fn raw_forward_matches_unsharded_gqa_for_multiple_cp_degrees_and_batches() {
         &Tensor::from_value_no_grad(v.clone()),
         "reference",
     );
-    let reference_value = reference.inner.borrow().value.clone();
+    let reference_value = reference.value();
 
     for cp in [1usize, 2, 4] {
         let q_shards = split_sequence(&q, cp);
@@ -250,6 +269,61 @@ fn raw_backward_matches_finite_differences_for_every_shard_input() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn raw_backward_matches_unsharded_gqa_for_nonuniform_upstream_gradients_at_every_degree() {
+    let (b, t, hq, hk, dh) = (2, 4, 4, 2, 2);
+    let q = deterministic_value(&[b, t, hq, dh], 0.025, -0.1);
+    let k = deterministic_value(&[b, t, hk, dh], 0.035, 0.05);
+    let v = deterministic_value(&[b, t, hk, dh], 0.045, -0.2);
+    let dout = deterministic_value(&[b, t, hq, dh], 0.019, 0.07);
+
+    let q_full = Tensor::from_value(q.clone(), true);
+    let k_full = Tensor::from_value(k.clone(), true);
+    let v_full = Tensor::from_value(v.clone(), true);
+    let output = gqa::gqa_attention(&q_full, &k_full, &v_full, "weighted.reference");
+    let weighted = basic::mul(
+        &output,
+        &Tensor::from_value_no_grad(dout.clone()),
+        "weighted.reference.multiply",
+    );
+    let mut engine = Engine::new();
+    engine.backward(&basic::sum(&weighted, "weighted.reference.loss"));
+    let expected_dq = q_full.grad().unwrap();
+    let expected_dk = k_full.grad().unwrap();
+    let expected_dv = v_full.grad().unwrap();
+
+    for cp in [1usize, 2, 4] {
+        let q_shards = split_sequence(&q, cp);
+        let k_shards = split_sequence(&k, cp);
+        let v_shards = split_sequence(&v, cp);
+        let dout_shards = split_sequence(&dout, cp);
+        let (_, saved) = raw_context_parallel_gqa_forward(&q_shards, &k_shards, &v_shards);
+        let actual = raw_context_parallel_gqa_backward(
+            &dout_shards,
+            &q_shards,
+            &k_shards,
+            &v_shards,
+            &saved,
+        );
+
+        assert_close(
+            join_sequence(&actual.dq).data.as_ref(),
+            expected_dq.data.as_ref(),
+            2e-6,
+        );
+        assert_close(
+            join_sequence(&actual.dk).data.as_ref(),
+            expected_dk.data.as_ref(),
+            2e-6,
+        );
+        assert_close(
+            join_sequence(&actual.dv).data.as_ref(),
+            expected_dv.data.as_ref(),
+            2e-6,
+        );
     }
 }
 
@@ -384,20 +458,18 @@ fn debug_records_one_context_parallel_multi_output_operation() {
     let v1 = Tensor::randn(&[1, 1, 1, 2]).requires_grad();
     let mut engine = Engine::new();
     let outputs = context_parallel_gqa_attention(&[q0, q1], &[k0, k1], &[v0, v1], "cp.debug");
-
-    let producer0 = outputs[0].inner.borrow().autograd.producer.clone().unwrap();
-    let producer1 = outputs[1].inner.borrow().autograd.producer.clone().unwrap();
-    assert!(Rc::ptr_eq(&producer0, &producer1));
+    let graph = GraphObservation::from_outputs(&[&outputs[0], &outputs[1]]);
+    assert_eq!(graph.operations().len(), 1);
+    assert_eq!(
+        graph.operations()[0].kind,
+        OpKind::ContextParallelGqaAttention
+    );
+    assert_eq!(graph.operations()[0].name, "cp.debug");
+    assert_eq!(graph.operations()[0].outputs.len(), 2);
+    assert_eq!(graph.producer_of(&outputs[0]), Ok(Some(GraphOpIndex(0))));
+    assert_eq!(graph.producer_of(&outputs[1]), Ok(Some(GraphOpIndex(0))));
 
     engine.backward(&basic::sum(&outputs[0], "loss"));
-
-    let records = engine.debug.op_call_records();
-    let record = records
-        .iter()
-        .find(|r| r.kind == OpKind::ContextParallelGqaAttention)
-        .expect("context-parallel GQA record");
-    assert_eq!(record.name, "cp.debug");
-    assert_eq!(record.output_shapes.len(), 2);
 }
 
 #[test]
@@ -435,6 +507,45 @@ fn incompatible_gqa_head_counts_are_rejected() {
 }
 
 #[test]
+#[should_panic(expected = "context_parallel_gqa: Hq must be positive")]
+fn zero_query_heads_are_rejected() {
+    let q = deterministic_value(&[1, 1, 0, 2], 0.1, 0.0);
+    let k = deterministic_value(&[1, 1, 1, 2], 0.1, 0.0);
+    let v = k.clone();
+
+    raw_context_parallel_gqa_forward(&[q], &[k], &[v]);
+}
+
+#[test]
+#[should_panic(expected = "context_parallel_gqa: Dh must be positive")]
+fn zero_head_dimension_is_rejected() {
+    let q = deterministic_value(&[1, 1, 2, 0], 0.1, 0.0);
+    let k = deterministic_value(&[1, 1, 1, 0], 0.1, 0.0);
+    let v = k.clone();
+
+    raw_context_parallel_gqa_forward(&[q], &[k], &[v]);
+}
+
+#[test]
+#[should_panic(expected = "context_parallel_gqa: global sequence length overflow")]
+fn global_sequence_length_overflow_is_rejected() {
+    let impossible_q = TensorValue {
+        shape: Shape(vec![1, usize::MAX, 2, 2]),
+        data: Rc::new(Vec::new()),
+    };
+    let impossible_kv = TensorValue {
+        shape: Shape(vec![1, usize::MAX, 1, 2]),
+        data: Rc::new(Vec::new()),
+    };
+
+    raw_context_parallel_gqa_forward(
+        &[impossible_q.clone(), impossible_q],
+        &[impossible_kv.clone(), impossible_kv.clone()],
+        &[impossible_kv.clone(), impossible_kv],
+    );
+}
+
+#[test]
 fn qwen3_attention_context_parallel_forward_matches_unsharded() {
     let cfg = Qwen3Config::tiny();
     let attention = Qwen3Attention::new(&cfg);
@@ -445,41 +556,62 @@ fn qwen3_attention_context_parallel_forward_matches_unsharded() {
         .map(Tensor::from_value_no_grad)
         .collect();
     let outputs = attention.forward_context_parallel(&x_shards);
-    let output_values: Vec<TensorValue> = outputs
-        .iter()
-        .map(|t| t.inner.borrow().value.clone())
-        .collect();
+    let output_values: Vec<TensorValue> = outputs.iter().map(Tensor::value).collect();
     let actual = join_hidden_sequence(&output_values);
-    assert_close(
-        actual.data.as_ref(),
-        reference.inner.borrow().value.data.as_ref(),
-        1e-5,
-    );
+    assert_close(actual.data.as_ref(), reference.value().data.as_ref(), 1e-5);
 }
 
 #[test]
-fn qwen3_attention_context_parallel_backward_produces_finite_gradients() {
+fn qwen3_attention_context_parallel_backward_matches_unsharded() {
     let cfg = Qwen3Config::tiny();
-    let attention = Qwen3Attention::new(&cfg);
-    let x_value = deterministic_value(&[1, 4, cfg.hidden_size], 0.015, -0.05);
+    let seed = Qwen3Attention::new(&cfg);
+    let full_attention = clone_attention(&seed);
+    let cp_attention = clone_attention(&seed);
+    let x_value = deterministic_value(&[2, 4, cfg.hidden_size], 0.015, -0.05);
+    let full_input = Tensor::from_value(x_value.clone(), true);
     let x_shards: Vec<Tensor> = split_hidden_sequence(&x_value, 2)
         .into_iter()
         .map(|x| Tensor::from_value(x, true))
         .collect();
-    let mut engine = Engine::new();
-    let outputs = attention.forward_context_parallel(&x_shards);
-    engine.backward(&summed_loss(&outputs, "qwen.cp.loss"));
 
-    for (rank, x) in x_shards.iter().enumerate() {
-        let grad = x
+    let mut full_engine = Engine::new();
+    let full_output = full_attention.forward(&full_input);
+    full_engine.backward(&basic::sum(&full_output, "qwen.full.loss"));
+
+    let mut cp_engine = Engine::new();
+    let cp_outputs = cp_attention.forward_context_parallel(&x_shards);
+    cp_engine.backward(&summed_loss(&cp_outputs, "qwen.cp.loss"));
+
+    let cp_input_grads: Vec<TensorValue> = x_shards
+        .iter()
+        .map(|input| input.grad().expect("context-parallel input gradient"))
+        .collect();
+    assert_close(
+        join_hidden_sequence(&cp_input_grads).data.as_ref(),
+        full_input
             .grad()
-            .unwrap_or_else(|| panic!("missing x grad for rank {rank}"));
-        assert!(grad.data.iter().all(|x| x.is_finite()));
-    }
-    for (index, parameter) in attention.parameters().iter().enumerate() {
-        let grad = parameter
-            .grad()
-            .unwrap_or_else(|| panic!("missing parameter grad {index}"));
-        assert!(grad.data.iter().all(|x| x.is_finite()));
+            .expect("unsharded input gradient")
+            .data
+            .as_ref(),
+        2e-5,
+    );
+    for (cp_parameter, full_parameter) in cp_attention
+        .parameters()
+        .into_iter()
+        .zip(full_attention.parameters())
+    {
+        assert_close(
+            cp_parameter
+                .grad()
+                .expect("context-parallel parameter gradient")
+                .data
+                .as_ref(),
+            full_parameter
+                .grad()
+                .expect("unsharded parameter gradient")
+                .data
+                .as_ref(),
+            2e-5,
+        );
     }
 }

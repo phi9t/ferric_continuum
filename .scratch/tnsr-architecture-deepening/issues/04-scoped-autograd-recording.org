@@ -1,0 +1,51 @@
+#+TITLE: Scope autograd recording lifetime
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY: 03-equal-contiguous-attention-layout
+#+PARENT: ../spec.org
+
+* Context
+
+=Engine::new= currently replaces a thread-global recorder. Trace ownership
+therefore depends on construction order rather than the execution being traced.
+
+* Requirements
+
+- Make =Engine::new= side-effect free.
+- Add =Engine::with_recording= with nesting and unwind-safe restoration.
+- Rename global-recording helpers around the active scoped recorder.
+- Ensure no-scope execution still builds valid graphs and backward gradients.
+- The engine invoking =backward= owns all backward/unpack/recompute events,
+  independent of which engine observed forward.
+- Make recorder and checkpoint stacks unwind-safe. A forward checkpoint panic
+  also removes its exact registry entry. A recompute panic resets
+  =is_recomputing=, clears partial cache, resets cursor, and permits a clean
+  panic-once/retry-success replay.
+- Migrate trace-producing binaries/tests to explicit recording scopes.
+- Document the intentional compatibility change: =Engine::new= alone no longer
+  captures ambient forward operations.
+
+* Out of scope
+
+- Changing reverse-mode gradient semantics or making Tensor thread-safe.
+- A process-wide tracing framework.
+- Git actions.
+
+* Verification
+
+- Red then green independent/interleaved/nested recorder tests, cross-engine
+  backward ownership, forward checkpoint unwind, and recompute retry cleanup.
+- Debug JSON, checkpoint, autograd, and demo targets remain green.
+
+* Answer
+
+=Engine::new= is now inert and =Engine::with_recording= owns forward
+observation for one unwind-safe dynamic scope. Nested and interleaved engines
+restore the previous recorder correctly. =Engine::backward= installs its own
+recorder across reverse execution, saved-tensor unpack, and checkpoint
+recomputation without changing gradient semantics.
+
+Recorder, checkpoint-stack, registry, cache, cursor, and recomputation-flag
+cleanup use RAII guards. Tests cover unscoped autograd, nesting, cross-engine
+ownership, forward panic cleanup, recomputation panic, and clean retry. Trace
+producers and demos now opt into recording explicitly.

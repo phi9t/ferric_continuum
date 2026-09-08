@@ -1,0 +1,66 @@
+#+TITLE: Implement the Wave A typed Qwen3 attention tracer
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY:
+#+PARENT: ../spec.org
+
+* Context
+
+Implement the authorized Wave A slice from =../spec.org=. This is one vertical
+tracer ticket so the uncommitted isolated worktree remains self-contained under
+the repository's human-owned Git policy.
+
+* Requirements
+
+- Add the transparent typed tensor carrier, canonical axes, aliases, rank error,
+  named-shape inspection, and explicit erasure.
+- Add typed operation variants for projection, head split/merge, Q/K norm,
+  Q/K RoPE, ordinary GQA, and context-parallel GQA.
+- Add typed ordinary and context-parallel =Qwen3Attention= forwards while
+  preserving existing untyped APIs and behavior.
+- Add Bazel-native compile-pass/compile-fail verifier coverage.
+- Add runtime identity, shape, forward, gradient, and topology tests.
+- Add Markdown lesson/reference material covering Wave A and the Wave B/C
+  successor designs.
+
+* Out of scope
+
+- Wave B or C implementation.
+- Refactoring the explicit raw GQA/CP equations into shared semantics.
+- New execution backends or parallel algorithms.
+- Commit, push, PR, or merge.
+
+* Verification
+
+- Visible red-green evidence for the carrier, typed operation contracts, and
+  typed Qwen3 path.
+- Focused =typed_tensor_tests= and =typed_tensor_compile_tests= targets.
+- Existing tnsr, Qwen3, CP GQA, library, debug, distributed, and scaling tests.
+- Rustfmt build.
+- Standards and Spec review plus independent whole-branch defect review.
+
+* Comments
+
+- 2026-09-07: User authorized implementation by saying “proceed to impl”.
+- 2026-09-07: Implementation completed without commit, push, PR, or merge in
+  the isolated =codex/typed-transformer-math= worktree.
+
+* Answer
+
+Wave A is implemented as an additive semantic-axis layer over the existing
+=Tensor= handle. Typed operation wrappers and separate ordinary/context-
+parallel Qwen3 attention derivations preserve tensor identity, autograd
+topology, and the legacy APIs. Wave B static extents and Wave C named runtime
+boundaries are specified in the Markdown lesson but remain unimplemented.
+
+Verification completed on the final snapshot:
+
+- all 14 selected CPU Bazel test targets passed with uncached test results;
+- the pinned Bazel rustfmt aspect passed for the library and new verifier
+  targets; and
+- independent Standards, Spec, and whole-diff defect reviews all passed with
+  no blocking findings.
+
+The existing f32 RoPE equation is intentionally retained for compatibility.
+Improving precision for offsets above =2^24= is recorded as separate future
+work because it would change valid-input numerics.

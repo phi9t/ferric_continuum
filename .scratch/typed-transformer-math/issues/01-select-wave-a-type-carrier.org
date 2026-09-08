@@ -1,0 +1,40 @@
+#+TITLE: Select the Wave A semantic type carrier
+#+TYPE: prototype
+#+STATUS: resolved
+#+BLOCKED_BY:
+#+PARENT: ../map.org
+
+* Question
+
+Which Rust representation best adds compile-time semantic axes and rank while
+preserving the identity, storage, autograd graph, and ergonomics of the current
+=Tensor=: a transparent =TypedTensor<Axes>= wrapper, a generic =Tensor<Axes>=,
+or operation-specific semantic newtypes?
+
+* Evidence required
+
+- Prototype the smallest vertical path from =[Batch, Sequence, Hidden]= through
+  a projection and reshape to =[Batch, Sequence, QueryHead, HeadDim]=.
+- Show cloning, borrowing, =TensorId=, gradients, and producer identity remain
+  unchanged.
+- Compare function signatures and compiler diagnostics for an illegal axis
+  order and an illegal operation pairing.
+- Confirm the design does not force runtime operation-variant branches.
+
+* Out of scope
+
+- Migrating all operations.
+- Static numerical extents.
+- Runtime axis-name metadata.
+
+* Comments
+
+- 2026-09-07: This is the first Wave A load-bearing decision.
+
+* Answer
+
+Use one additive transparent =TypedTensor<Axes>= wrapper around =Tensor=. Keep
+erasure explicit and preserve the wrapped =Tensor='s identity. Reject a generic
+replacement =Tensor<Axes>= because it would force a flag-day API/autograd
+migration; reject operation-specific value newtypes because they conflate axes
+with provenance and multiply conversions.

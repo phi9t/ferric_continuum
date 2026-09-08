@@ -3,8 +3,8 @@
 //! Book reference: Ch.9 "Profile TPU Code" (conceptual analog),
 //! <https://jax-ml.github.io/scaling-book/profiling/>
 //!
-//! `DebugRecorder` intercepts every op call, save event, and grad accumulation
-//! during a forward+backward pass and renders three reports:
+//! While explicitly scoped to an execution, `DebugRecorder` observes op calls,
+//! save events, and grad accumulations and renders three reports:
 //! - `print_op_table` — ordered list of ops with input/output shapes
 //! - `print_saved_tensor_table` — bytes saved per tensor (materialized / borrowed / recompute)
 //! - `write_dot` — Graphviz DOT graph of the op DAG
@@ -15,7 +15,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::autograd::{GradTarget, OpCallId, OpCallRef, OpKind};
+use crate::autograd::{GradTarget, GraphObservation, OpCallId, OpCallRef, OpKind};
 use crate::saved::{SaveRole, SaveSite};
 use crate::tensor::{Shape, TensorId, TensorValue};
 
@@ -117,6 +117,14 @@ impl DebugRecorder {
     /// what the forward pass dispatched without touching the private store.
     pub fn op_call_records(&self) -> Vec<OpCallRecord> {
         self.inner.borrow().op_calls.clone()
+    }
+
+    /// Canonical structural view of the explicitly recorded prefix.
+    ///
+    /// Terminal roots are outputs not consumed by another recorded operation,
+    /// ordered by operation insertion and declared output order.
+    pub fn graph_observation(&self) -> GraphObservation {
+        GraphObservation::from_recorded_ops(&self.inner.borrow().op_calls)
     }
 
     /// Clone out the `OpKind` of every op applied during the backward pass, in
@@ -436,7 +444,20 @@ impl DebugRecorder {
 }
 
 thread_local! {
-    static GLOBAL_RECORDER: RefCell<Option<DebugRecorder>> = const { RefCell::new(None) };
+    static RECORDER_STACK: RefCell<Vec<DebugRecorder>> = const { RefCell::new(Vec::new()) };
+}
+
+struct RecorderScopeGuard;
+
+impl Drop for RecorderScopeGuard {
+    fn drop(&mut self) {
+        RECORDER_STACK.with(|stack| {
+            stack
+                .borrow_mut()
+                .pop()
+                .expect("recorder scope stack underflow");
+        });
+    }
 }
 
 fn forward_op_json(call: &OpCallRecord) -> serde_json::Value {
@@ -647,34 +668,30 @@ fn save_role_name(role: SaveRole) -> &'static str {
     }
 }
 
-pub fn set_global_recorder(r: DebugRecorder) {
-    GLOBAL_RECORDER.with(|g| *g.borrow_mut() = Some(r));
+pub(crate) fn with_recorder<R>(recorder: &DebugRecorder, f: impl FnOnce() -> R) -> R {
+    RECORDER_STACK.with(|stack| stack.borrow_mut().push(recorder.clone()));
+    let _guard = RecorderScopeGuard;
+    f()
 }
 
-pub fn record_op_call_global(call: &OpCallRef) {
-    GLOBAL_RECORDER.with(|g| {
-        if let Some(r) = g.borrow().as_ref() {
-            r.record_op_call(call);
-        }
-    });
+pub(crate) fn current_recorder() -> Option<DebugRecorder> {
+    RECORDER_STACK.with(|stack| stack.borrow().last().cloned())
 }
 
-pub fn record_op_call_global_checkpoint_enter(id: usize, name: &str) {
-    GLOBAL_RECORDER.with(|g| {
-        if let Some(r) = g.borrow().as_ref() {
-            r.record_checkpoint_enter(id, name);
-        }
-    });
+pub(crate) fn record_op_call_current(call: &OpCallRef) {
+    if let Some(recorder) = current_recorder() {
+        recorder.record_op_call(call);
+    }
 }
 
-pub fn record_op_call_global_checkpoint_exit(id: usize) {
-    GLOBAL_RECORDER.with(|g| {
-        if let Some(r) = g.borrow().as_ref() {
-            r.record_checkpoint_exit(id);
-        }
-    });
+pub(crate) fn record_checkpoint_enter_current(id: usize, name: &str) {
+    if let Some(recorder) = current_recorder() {
+        recorder.record_checkpoint_enter(id, name);
+    }
 }
 
-pub fn get_global_recorder() -> DebugRecorder {
-    GLOBAL_RECORDER.with(|g| g.borrow().clone().unwrap_or_else(DebugRecorder::new))
+pub(crate) fn record_checkpoint_exit_current(id: usize) {
+    if let Some(recorder) = current_recorder() {
+        recorder.record_checkpoint_exit(id);
+    }
 }

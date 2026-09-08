@@ -92,12 +92,7 @@ pub fn softmax_f32(rows: usize, cols: usize, x: &[f32]) -> Option<Vec<f32>> {
     }
     let mut out = vec![0.0f32; x.len()];
     let status = unsafe {
-        ffi::ferric_cuda_softmax_f32(
-            rows as i32,
-            cols as i32,
-            x.as_ptr(),
-            out.as_mut_ptr(),
-        )
+        ffi::ferric_cuda_softmax_f32(rows as i32, cols as i32, x.as_ptr(), out.as_mut_ptr())
     };
     if status == ffi::FerricCudaStatus::Ok {
         Some(out)

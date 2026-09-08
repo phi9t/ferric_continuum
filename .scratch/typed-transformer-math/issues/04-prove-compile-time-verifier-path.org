@@ -1,0 +1,31 @@
+#+TITLE: Prove the compile-time verifier path
+#+TYPE: research
+#+STATUS: resolved
+#+BLOCKED_BY:
+#+PARENT: ../map.org
+
+* Question
+
+What hermetic Bazel-compatible test structure should prove that invalid tensor
+rank, axis order, and operation pairings fail at compile time while valid typed
+programs compile and run?
+
+* Evidence required
+
+- Inspect the repository's Rust/Bazel capabilities before adding dependencies.
+- Compare a dedicated negative =rust_library= target, compile-fail fixtures, and
+  any viable UI-test mechanism.
+- Recommend the smallest deterministic mechanism with readable failures.
+- Keep numerical verifier tests separate from type-system verifier tests.
+
+* Out of scope
+
+- Implementing the full verifier suite.
+- Adding an external dependency without a separate decision.
+
+* Answer
+
+Use =rules_rust='s native =rust_doc_test= with paired legal and =compile_fail=
+examples. It uses the pinned toolchain hermetically and adds no dependency.
+Reject expected-failure libraries, nested Bazel, host-rustc shell tests,
+=trybuild=, and =ui_test= for Wave A.

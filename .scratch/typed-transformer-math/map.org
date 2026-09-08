@@ -1,0 +1,110 @@
+#+TITLE: Wayfinder map: typed transformer mathematics
+#+STATUS: resolved
+
+* Destination
+
+Produce three reviewed design specifications with an explicit wave boundary:
+
+- Wave A is implementation-ready: =Tensor= remains the storage/autograd
+  abstraction while semantic axis roles, tensor rank, and operation
+  compatibility are expressed in Rust types; extents remain runtime values.
+- Wave B is decision-ready but not authorized for implementation: assess a
+  fully static, const-generic extent layer for selected fixed-shape programs.
+- Wave C is decision-ready but not authorized for implementation: assess
+  runtime named-axis metadata for dynamic interchange, inspection, and model
+  loading.
+
+Wave A must make transformer equations readable at call sites and inside each
+operation. It must not replace distinct ordinary and context-parallel attention
+derivations with runtime strategy flags or a generic attention engine.
+
+Source intent: [[file:../deepen-gqa-semantics/intent.org][deepen-gqa-semantics/intent.org]].
+
+* Notes
+
+- The current =Tensor= owns runtime =Shape=, f32 storage, autograd metadata,
+  producer identity, and optional distributed layout metadata.
+- Current operation interfaces accept untyped =&Tensor= values and validate
+  rank/axis relationships with runtime assertions.
+- Qwen3 makes transformer layouts visible in comments, but the Rust type system
+  cannot distinguish =[B,T,D]=, =[B,T,Hq,Dh]=, =[D,Hq*Dh]=, or =[Dh]=.
+- Model configuration and checkpoints supply extents at runtime. Wave A cannot
+  prove numerical extent equality during compilation without changing that
+  loading model.
+- Semantic wrappers must preserve tensor identity and producer topology rather
+  than copying storage or creating extra autograd nodes.
+- Operation variants remain separate modules/functions. Typed axes constrain
+  their inputs and outputs; they do not select algorithms through runtime mode
+  branches.
+- Existing public untyped APIs and panic behavior are compatibility constraints
+  until the migration seam is explicitly decided.
+- Correctness needs positive runtime tests, negative compile-time tests, and
+  numerical/verifier tests for each mathematical implementation.
+
+* Decisions so far
+
+- 2026-09-07: Keep =Tensor= as the legitimate tensor/autograd abstraction.
+- 2026-09-07: Choose Wave A first: compile-time semantic roles, rank, and
+  operator compatibility; retain runtime extents.
+- 2026-09-07: Treat readable executable transformer derivations as a first-order
+  design constraint. Intentional duplication is acceptable.
+- 2026-09-07: Distinct mathematical and parallel operation variants receive
+  pristine implementations; avoid runtime flags that switch their semantics.
+- 2026-09-07: Wave B and Wave C receive separate future-facing specs, but no
+  implementation tickets in this wave.
+- 2026-09-07: Preserve ordinary GQA, context-parallel GQA, Qwen3, autograd, and
+  debug behavior while the typed layer is introduced.
+- 2026-09-07: [[file:issues/01-select-wave-a-type-carrier.org][Select the Wave A semantic type carrier]] resolved in favor of an additive transparent wrapper.
+- 2026-09-07: [[file:issues/02-define-axis-language-and-contracts.org][Define the axis language and contracts]] resolved with seven axes, merged axes, and explicit transforms.
+- 2026-09-07: [[file:issues/03-design-autograd-and-dynamic-boundary.org][Design the autograd and dynamic tensor boundary]] resolved with explicit promotion/erasure over identical tensor identity.
+- 2026-09-07: [[file:issues/04-prove-compile-time-verifier-path.org][Prove the compile-time verifier path]] resolved with Bazel-native rustdoc tests.
+- 2026-09-07: [[file:issues/05-select-wave-a-migration-slices.org][Select the Wave A migration slices]] resolved as one Qwen3 attention tracer.
+- 2026-09-07: [[file:issues/06-spec-wave-b-static-extents.org][Specify Wave B static extents]] resolved as an optional future refinement.
+- 2026-09-07: [[file:issues/07-spec-wave-c-runtime-named-axes.org][Specify Wave C runtime named axes]] resolved as future dynamic-boundary metadata.
+- 2026-09-07: [[file:issues/08-reconcile-three-wave-architecture.org][Reconcile the three-wave architecture]] resolved with Wave A as the single semantic source of truth.
+- 2026-09-07: [[file:issues/09-implement-wave-a-attention-tracer.org][Implement the Wave A typed Qwen3 attention tracer]] resolved with all verification and independent review gates passing.
+
+* Frontier
+
+Wayfinding and the authorized Wave A implementation are complete. Waves B and
+C remain specified future work without implementation tickets.
+
+* Not yet specified
+
+- Whether semantic typing is a generic =Tensor<Axes>=, a transparent typed
+  wrapper around =Tensor=, or operation-specific semantic newtypes.
+- The precise type-level axis vocabulary, including query-head versus KV-head,
+  input versus output hidden dimensions, vocabulary, logits, and local versus
+  global sequence ownership.
+- How reshape, projection, residual addition, normalization, RoPE, GQA, and
+  context-parallel GQA express legal axis transformations.
+- Where dynamic =Tensor= values are checked and promoted into semantic tensors.
+- How typed tensors cross autograd, checkpoint loading, debugging, distributed
+  layout metadata, and public compatibility boundaries without duplicated
+  storage or graph nodes.
+- Which compile-fail test mechanism works hermetically under this Bazel/Rust
+  workspace and produces useful diagnostic evidence.
+- The Wave A migration order and whether the untyped API is retained,
+  deprecated, or made private after expansion.
+- Whether Wave B is a separate tensor family, a refinement of Wave A, or code
+  generated for selected configurations.
+- Whether Wave C metadata is observational only or participates in checked
+  conversion into Wave A types.
+- How Waves A, B, and C compose without creating three competing tensor
+  abstractions.
+
+* Out of scope
+
+- Implementing Wave B or Wave C in the Wave A delivery.
+- Encoding runtime-loaded model extents as compile-time facts in Wave A.
+- A universal Einstein-notation DSL, generic attention strategy engine, or
+  runtime mode enum for ordinary/context-parallel/ring attention.
+- CUDA, NCCL, ring attention, ragged sequence shards, KV cache, or full-model
+  context parallelism.
+- Changing tensor storage dtype, device ownership, or the autograd algorithm.
+
+* Exit
+
+Wayfinding is complete when every child decision is resolved and the map can be
+synthesized into one implementation-ready Wave A spec plus separate Wave B and
+Wave C design specs. Only the Wave A spec proceeds to implementation tickets.

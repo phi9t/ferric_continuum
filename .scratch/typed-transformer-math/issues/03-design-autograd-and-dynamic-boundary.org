@@ -1,0 +1,35 @@
+#+TITLE: Design the autograd and dynamic tensor boundary
+#+TYPE: prototype
+#+STATUS: resolved
+#+BLOCKED_BY: 01-select-wave-a-type-carrier, 02-define-axis-language-and-contracts
+#+PARENT: ../map.org
+
+* Question
+
+Where should semantic types be introduced, checked, preserved, and erased so
+that model loading and generic storage stay dynamic while transformer code and
+operation signatures remain statically meaningful?
+
+* Evidence required
+
+- Demonstrate checked promotion from an untyped runtime =Tensor=.
+- Demonstrate output typing through one forward/backward operation.
+- Demonstrate that backward recipes may continue storing =TensorValue= and
+  =GradTarget= without losing caller-visible semantic guarantees.
+- Show that wrapper conversion does not create a tensor, copy data, or alter
+  producer identity.
+- Specify the boundary for checkpoint loading, debug tracing, and distributed
+  layout metadata.
+
+* Out of scope
+
+- Whole-model migration.
+- Static extents and runtime named-axis metadata.
+
+* Answer
+
+Dynamic callers explicitly declare axes through a rank-checked constructor.
+Operations preserve or transform the type parameter while operating on the
+same underlying =Tensor=. Autograd, saved values, debug tracing, checkpoint
+loading, and distributed layout metadata remain untyped internals in Wave A;
+typed erasure/promotion creates neither storage nor graph nodes.

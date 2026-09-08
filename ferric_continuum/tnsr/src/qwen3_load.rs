@@ -47,8 +47,7 @@ use crate::tensor::{Shape, Tensor, TensorValue};
 impl Qwen3Config {
     /// Build a config from a Hugging Face `config.json` at `path`.
     pub fn from_hf_json(path: &Path) -> Result<Qwen3Config, String> {
-        let text = fs::read_to_string(path)
-            .map_err(|e| format!("read {}: {e}", path.display()))?;
+        let text = fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
         let json: serde_json::Value =
             serde_json::from_str(&text).map_err(|e| format!("parse config.json: {e}"))?;
 
@@ -227,8 +226,7 @@ pub fn load_qwen3(model_dir: &Path) -> Result<Qwen3Model, String> {
 
     let st_path = model_dir.join("model.safetensors");
     let raw = fs::read(&st_path).map_err(|e| format!("read {}: {e}", st_path.display()))?;
-    let st = SafeTensors::deserialize(&raw)
-        .map_err(|e| format!("parse safetensors: {e}"))?;
+    let st = SafeTensors::deserialize(&raw).map_err(|e| format!("parse safetensors: {e}"))?;
 
     let d = cfg.hidden_size;
     let f = cfg.intermediate_size;
@@ -303,12 +301,7 @@ pub fn load_qwen3(model_dir: &Path) -> Result<Qwen3Model, String> {
         expect_shape(&q_proj_name, &sq, &[hq * dh, d])?;
         let wq_t = transpose_2d(&q_proj_name, &wq, hq * dh, d)?; // [D, Hq*Dh]
         let wq_i = interleave_headdim(&q_proj_name, &wq_t, d, hq, dh)?;
-        set_param(
-            &layer.self_attn.wq,
-            &q_proj_name,
-            &[d, hq * dh],
-            wq_i,
-        )?;
+        set_param(&layer.self_attn.wq, &q_proj_name, &[d, hq * dh], wq_i)?;
 
         // k_proj: HF [Hk*Dh, D] -> transpose [D, Hk*Dh] -> interleave head cols.
         let k_proj_name = p("self_attn.k_proj.weight");
@@ -316,36 +309,21 @@ pub fn load_qwen3(model_dir: &Path) -> Result<Qwen3Model, String> {
         expect_shape(&k_proj_name, &sk, &[hk * dh, d])?;
         let wk_t = transpose_2d(&k_proj_name, &wk, hk * dh, d)?; // [D, Hk*Dh]
         let wk_i = interleave_headdim(&k_proj_name, &wk_t, d, hk, dh)?;
-        set_param(
-            &layer.self_attn.wk,
-            &k_proj_name,
-            &[d, hk * dh],
-            wk_i,
-        )?;
+        set_param(&layer.self_attn.wk, &k_proj_name, &[d, hk * dh], wk_i)?;
 
         // v_proj: HF [Hk*Dh, D] -> transpose [D, Hk*Dh]; NO permute (V unroped).
         let v_proj_name = p("self_attn.v_proj.weight");
         let (wv, sv) = get_shaped(&v_proj_name)?;
         expect_shape(&v_proj_name, &sv, &[hk * dh, d])?;
         let wv_t = transpose_2d(&v_proj_name, &wv, hk * dh, d)?;
-        set_param(
-            &layer.self_attn.wv,
-            &v_proj_name,
-            &[d, hk * dh],
-            wv_t,
-        )?;
+        set_param(&layer.self_attn.wv, &v_proj_name, &[d, hk * dh], wv_t)?;
 
         // o_proj: HF [D, Hq*Dh] -> transpose [Hq*Dh, D]; NO permute.
         let o_proj_name = p("self_attn.o_proj.weight");
         let (wo, so) = get_shaped(&o_proj_name)?;
         expect_shape(&o_proj_name, &so, &[d, hq * dh])?;
         let wo_t = transpose_2d(&o_proj_name, &wo, d, hq * dh)?;
-        set_param(
-            &layer.self_attn.wo,
-            &o_proj_name,
-            &[hq * dh, d],
-            wo_t,
-        )?;
+        set_param(&layer.self_attn.wo, &o_proj_name, &[hq * dh, d], wo_t)?;
 
         // q_norm / k_norm [Dh] — interleave to match the permuted Q/K axis.
         let q_norm_name = p("self_attn.q_norm.weight");
@@ -442,10 +420,7 @@ mod tests {
 
     fn unique_tmp_model_dir(name: &str) -> PathBuf {
         let mut dir = std::env::temp_dir();
-        dir.push(format!(
-            "tnsr-qwen3-load-{name}-{}",
-            std::process::id()
-        ));
+        dir.push(format!("tnsr-qwen3-load-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -472,10 +447,16 @@ mod tests {
 
     fn tiny_tensor_map() -> Vec<(String, F32FixtureTensor)> {
         vec![
-            ("model.embed_tokens.weight".into(), F32FixtureTensor::zeros(&[11, 16])),
+            (
+                "model.embed_tokens.weight".into(),
+                F32FixtureTensor::zeros(&[11, 16]),
+            ),
             ("model.norm.weight".into(), F32FixtureTensor::zeros(&[16])),
             ("lm_head.weight".into(), F32FixtureTensor::zeros(&[11, 16])),
-            ("model.layers.0.input_layernorm.weight".into(), F32FixtureTensor::zeros(&[16])),
+            (
+                "model.layers.0.input_layernorm.weight".into(),
+                F32FixtureTensor::zeros(&[16]),
+            ),
             (
                 "model.layers.0.post_attention_layernorm.weight".into(),
                 F32FixtureTensor::zeros(&[16]),

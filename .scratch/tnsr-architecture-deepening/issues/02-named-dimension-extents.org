@@ -1,0 +1,50 @@
+#+TITLE: Turn named dimensions into computational evidence
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY: 01-checked-shape-arithmetic
+#+PARENT: ../spec.org
+
+* Context
+
+Wave A types name axes, but typed implementations immediately recover extents
+through positional indexing. Add semantic extent views at the typed tensor
+seam.
+
+* Requirements
+
+- Add =AxisExtent<A>= with checked merge and named extent accessors for every
+  canonical transformer typed layout used by Qwen3 attention.
+- Preserve existing raw-=usize= typed reshape calls while allowing
+  =AxisExtent<QueryHead|KvHead|HeadDim>= evidence; typed Qwen3 uses the latter.
+- Convert typed reshape, norm, RoPE, projection-adjacent validation, and typed
+  Qwen3 execution to named fields.
+- Keep downstream custom Axis support and =named_shape= behavior.
+- Keep runtime numerical extent checks where model configuration supplies the
+  values.
+
+* Out of scope
+
+- Dynamic string lookup, Einstein notation, or Wave B const-generic extents.
+- Removing the untyped Tensor abstraction.
+- Git actions.
+
+* Verification
+
+- Red then green =typed_tensor_tests= named-extent behaviors.
+- =typed_tensor_compile_tests= includes paired legal evidence and a compile-fail
+  proof that =AxisExtent<KvHead>= cannot select =split_query_heads=.
+- Typed/legacy parity remains green.
+
+* Answer
+
+=AxisExtent<A>= now carries each dynamic extent together with its semantic
+axis, including checked merged query/KV widths. Every canonical Qwen3 typed
+layout exposes named accessors; typed projection, reshape, norm, RoPE, and both
+typed Qwen3 derivations consume them before erasing to the compatibility
+=Tensor= implementation. Existing raw-=usize= typed reshape calls remain
+available, while compile-fail contracts reject cross-category extent use.
+
+Typed handles also revalidate rank when borrowed for an operation or queried
+for shape evidence, catching rank mutation through a legacy alias. Allocation-
+free =Tensor::rank= and =Tensor::dim= support that invariant. Focused runtime,
+compile-time, typed/legacy parity, and fresh-mutation tests pass.

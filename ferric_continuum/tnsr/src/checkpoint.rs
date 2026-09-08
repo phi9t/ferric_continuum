@@ -109,7 +109,7 @@ impl CheckpointContext {
         t: &Tensor,
         site: SaveSite,
         decision: CheckpointDecision,
-        debug: &DebugRecorder,
+        debug: Option<&DebugRecorder>,
     ) -> SavedTensor {
         let ordinal = self.original_saves.len();
         let original_tensor_id = t.inner.borrow().id;
@@ -121,7 +121,9 @@ impl CheckpointContext {
             decision,
         });
 
-        debug.record_save_recomputable(&site, self.id, ordinal);
+        if let Some(debug) = debug {
+            debug.record_save_recomputable(&site, self.id, ordinal);
+        }
 
         SavedTensor::Recompute {
             handle: RecomputeHandle {
@@ -166,6 +168,109 @@ fn lookup_checkpoint(id: usize) -> Rc<RefCell<CheckpointContext>> {
             .cloned()
             .unwrap_or_else(|| panic!("checkpoint id {} not found in registry", id))
     })
+}
+
+fn remove_checkpoint_frame(expected: &Rc<RefCell<CheckpointContext>>) {
+    CHECKPOINT_STACK.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        if let Some(index) = stack.iter().rposition(|entry| Rc::ptr_eq(entry, expected)) {
+            stack.remove(index);
+        }
+    });
+}
+
+fn remove_registry_entry(id: usize, expected: &Rc<RefCell<CheckpointContext>>) {
+    CHECKPOINT_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        let owns_entry = registry
+            .get(&id)
+            .map(|entry| Rc::ptr_eq(entry, expected))
+            .unwrap_or(false);
+        if owns_entry {
+            registry.remove(&id);
+        }
+    });
+}
+
+struct CheckpointForwardGuard {
+    id: usize,
+    context: Rc<RefCell<CheckpointContext>>,
+    active: bool,
+    keep_registry_entry: bool,
+}
+
+impl CheckpointForwardGuard {
+    fn push(id: usize, context: Rc<RefCell<CheckpointContext>>) -> Self {
+        CHECKPOINT_STACK.with(|stack| stack.borrow_mut().push(context.clone()));
+        Self {
+            id,
+            context,
+            active: true,
+            keep_registry_entry: false,
+        }
+    }
+
+    fn complete(&mut self) {
+        remove_checkpoint_frame(&self.context);
+        self.active = false;
+        self.keep_registry_entry = true;
+    }
+}
+
+impl Drop for CheckpointForwardGuard {
+    fn drop(&mut self) {
+        if self.active {
+            remove_checkpoint_frame(&self.context);
+        }
+        if !self.keep_registry_entry {
+            remove_registry_entry(self.id, &self.context);
+        }
+    }
+}
+
+struct RecomputeGuard {
+    context: Rc<RefCell<CheckpointContext>>,
+    active: bool,
+}
+
+impl RecomputeGuard {
+    fn push(context: Rc<RefCell<CheckpointContext>>) -> Self {
+        {
+            let mut checkpoint = context.borrow_mut();
+            checkpoint.recompute_cache.clear();
+            checkpoint.recompute_cursor = 0;
+            checkpoint.is_recomputing = true;
+        }
+        CHECKPOINT_STACK.with(|stack| stack.borrow_mut().push(context.clone()));
+        Self {
+            context,
+            active: true,
+        }
+    }
+
+    fn complete(&mut self) -> usize {
+        remove_checkpoint_frame(&self.context);
+        let saved_count = {
+            let mut checkpoint = self.context.borrow_mut();
+            checkpoint.is_recomputing = false;
+            checkpoint.recompute_cache.len()
+        };
+        self.active = false;
+        saved_count
+    }
+}
+
+impl Drop for RecomputeGuard {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        remove_checkpoint_frame(&self.context);
+        let mut checkpoint = self.context.borrow_mut();
+        checkpoint.is_recomputing = false;
+        checkpoint.recompute_cache.clear();
+        checkpoint.recompute_cursor = 0;
+    }
 }
 
 pub fn is_recording_recompute_saves() -> bool {
@@ -213,32 +318,25 @@ where
         reg.borrow_mut().insert(id, ctx.clone());
     });
 
-    // Record enter event via global debug
-    crate::debug::record_op_call_global_checkpoint_enter(id, &name);
-
-    CHECKPOINT_STACK.with(|stack| {
-        stack.borrow_mut().push(ctx);
-    });
+    crate::debug::record_checkpoint_enter_current(id, &name);
+    let mut guard = CheckpointForwardGuard::push(id, ctx);
 
     let out = run(inputs.to_vec());
 
-    CHECKPOINT_STACK.with(|stack| {
-        stack.borrow_mut().pop();
-    });
-
-    crate::debug::record_op_call_global_checkpoint_exit(id);
+    guard.complete();
+    crate::debug::record_checkpoint_exit_current(id);
 
     out
 }
 
 pub fn save_tensor_through_current_policy(t: &Tensor, site: SaveSite) -> SavedTensor {
-    let debug = crate::debug::get_global_recorder();
+    let debug = crate::debug::current_recorder();
 
     CHECKPOINT_STACK.with(|stack| {
         let current = stack.borrow().last().cloned();
 
         match current {
-            None => default_save(t, site, &debug),
+            None => default_save(t, site, debug.as_ref()),
 
             Some(ctx_ref) => {
                 let is_recomputing = ctx_ref.borrow().is_recomputing;
@@ -255,22 +353,25 @@ pub fn save_tensor_through_current_policy(t: &Tensor, site: SaveSite) -> SavedTe
                     if should_record {
                         ctx_ref.borrow_mut().record_recomputed_save(t, site.clone());
                     }
-                    return default_save(t, site, &debug);
+                    return default_save(t, site, debug.as_ref());
                 }
 
                 let decision = ctx_ref.borrow().policy.decide(&site);
 
                 match decision {
                     CheckpointDecision::MustSave | CheckpointDecision::PreferSave => {
-                        default_save(t, site, &debug)
+                        default_save(t, site, debug.as_ref())
                     }
                     CheckpointDecision::PreferRecompute | CheckpointDecision::MustRecompute => {
                         if site.role == SaveRole::Parameter {
-                            default_save(t, site, &debug)
+                            default_save(t, site, debug.as_ref())
                         } else {
-                            ctx_ref
-                                .borrow_mut()
-                                .record_original_save(t, site, decision, &debug)
+                            ctx_ref.borrow_mut().record_original_save(
+                                t,
+                                site,
+                                decision,
+                                debug.as_ref(),
+                            )
                         }
                     }
                 }
@@ -302,10 +403,7 @@ pub fn recompute_and_get(handle: RecomputeHandle, debug: &DebugRecorder) -> Tens
 
 fn do_recompute(ctx_ref: Rc<RefCell<CheckpointContext>>, debug: &DebugRecorder) {
     let (id, name, input_values, run) = {
-        let mut ctx = ctx_ref.borrow_mut();
-        ctx.recompute_cache.clear();
-        ctx.recompute_cursor = 0;
-        ctx.is_recomputing = true;
+        let ctx = ctx_ref.borrow();
         (
             ctx.id,
             ctx.name.clone(),
@@ -313,6 +411,8 @@ fn do_recompute(ctx_ref: Rc<RefCell<CheckpointContext>>, debug: &DebugRecorder) 
             ctx.run.clone(),
         )
     };
+
+    let mut guard = RecomputeGuard::push(ctx_ref);
 
     debug.record_recompute_start(id, &name);
 
@@ -324,21 +424,9 @@ fn do_recompute(ctx_ref: Rc<RefCell<CheckpointContext>>, debug: &DebugRecorder) 
         .map(Tensor::from_value_no_grad)
         .collect();
 
-    CHECKPOINT_STACK.with(|stack| {
-        stack.borrow_mut().push(ctx_ref.clone());
-    });
-
     let _ = run(inputs);
 
-    CHECKPOINT_STACK.with(|stack| {
-        stack.borrow_mut().pop();
-    });
-
-    let saved_count = {
-        let mut ctx = ctx_ref.borrow_mut();
-        ctx.is_recomputing = false;
-        ctx.recompute_cache.len()
-    };
+    let saved_count = guard.complete();
 
     debug.record_recompute_end(id, saved_count);
 }

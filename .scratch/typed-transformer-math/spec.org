@@ -1,0 +1,436 @@
+#+TITLE: Typed transformer mathematics
+#+TYPE: spec
+#+STATUS: resolved
+
+* Outcome
+
+Keep the existing =Tensor= as the storage and autograd abstraction while making
+transformer axis roles, tensor rank, and operation compatibility visible in
+Rust types. Qwen3 attention should read as a direct sequence of named
+mathematical operations. Ordinary and context-parallel GQA remain distinct,
+explicit derivations.
+
+This specification has three waves. Wave A is authorized for implementation.
+Waves B and C are design specifications only.
+
+* Design principles
+
+- Axis types describe mathematical meaning, not provenance. Query and KV heads
+  differ; key and value tensors with identical axes do not.
+- Runtime extents remain runtime facts in Wave A.
+- Typed handles wrap an existing =Tensor= handle. They do not copy storage,
+  allocate a new tensor, or create an autograd/debug operation.
+- Erasure back to =Tensor= is explicit. Do not implement =Deref<Target=Tensor>=.
+- Operation-specific functions expose legal axis transformations. Do not add a
+  generic runtime operation-mode enum or strategy dispatcher.
+- Ordinary GQA and context-parallel GQA keep separate forward/backward code.
+  Duplication is acceptable when it keeps mathematical structure local.
+- Existing untyped public APIs remain available with identical valid-input
+  behavior, documented input-validation panics, operation kinds, and producer
+  topology. Arbitrary mutation of public model parameter fields is not a stable
+  malformed-input contract.
+
+* Wave A: semantic axes with runtime extents
+
+** Public type carrier
+
+Add a public =typed= module containing:
+
+#+begin_src rust
+pub trait Axis {
+    fn stable_id() -> String;
+    fn display_name() -> String;
+}
+
+pub trait Axes {
+    const RANK: usize;
+    fn names() -> Vec<String>;
+}
+
+pub struct Axes1<A>(/* private marker */);
+pub struct Axes2<A, B>(/* private marker */);
+pub struct Axes3<A, B, C>(/* private marker */);
+pub struct Axes4<A, B, C, D>(/* private marker */);
+
+pub struct Merged<A, B>(/* private marker */);
+
+pub enum Batch {}
+pub enum Full {}
+pub enum Shard {}
+pub struct Sequence<K>(/* private marker */);
+pub enum Hidden {}
+pub enum QueryHead {}
+pub enum KvHead {}
+pub enum HeadDim {}
+
+pub trait SequenceKind { /* sealed to Full and Shard */ }
+
+pub struct TypedTensor<A: Axes> {
+    /* exactly one existing Tensor handle plus a zero-sized marker */
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AxisError {
+    pub expected_rank: usize,
+    pub actual_rank: usize,
+}
+#+end_src
+
+=Axes= and =SequenceKind= are sealed. =Axis= may be implemented by downstream
+research code, while library operations continue to require their exact
+canonical aliases. =Sequence<K>= implements =Axis= only for a sealed
+=K: SequenceKind=, so a non-sequence kind is rejected when the expanded tensor
+type must satisfy =Axes=; do not put unenforced bounds on public type aliases.
+
+=FullSequence= and =ShardSequence= are public aliases for =Sequence<Full>= and
+=Sequence<Shard>=. They intentionally refine the mathematical sequence axis
+with ownership/layout meaning: a complete sequence versus one equal contiguous
+context shard.
+
+=Merged<A,B>= is one physical runtime axis whose semantic extent is =A × B=.
+It implements =Axis= when =A= and =B= do.
+
+=TypedTensor<A>= provides:
+
+#+begin_src rust
+pub fn from_tensor(tensor: Tensor) -> Result<Self, AxisError>;
+pub fn as_tensor(&self) -> &Tensor;
+pub fn into_tensor(self) -> Tensor;
+pub fn named_shape(&self) -> Vec<(String, usize)>;
+pub fn shape(&self) -> Shape;
+pub fn id(&self) -> TensorId;
+#+end_src
+
+It implements =Clone= manually without imposing =Clone= on marker types.
+Cloning clones only the current =Rc= tensor handle. A crate-private
+=from_proven_axes= constructor tags values whose axes were established by an
+existing operation or compatibility validator without inserting a second
+validation point.
+
+=from_tensor= validates rank. The caller's generic type declaration supplies
+the semantic axis assertion; runtime =Shape= alone cannot infer axis meaning.
+Documentation must say this directly.
+
+Public =AxisError= implements =Display= and =std::error::Error=. Canonical
+stable identifiers/display labels are =batch=, =sequence=, =local_sequence=,
+=hidden=, =query_head=, =kv_head=, and =head_dim=. =Merged<A,B>= has stable id
+=merged(A,B)= and display label =A*B= with no spaces.
+
+** Transformer type aliases
+
+#+begin_src rust
+pub type HiddenStates<S> =
+    TypedTensor<Axes3<Batch, Sequence<S>, Hidden>>;
+
+pub type ProjectedQueries<S> =
+    TypedTensor<Axes3<Batch, Sequence<S>, Merged<QueryHead, HeadDim>>>;
+pub type ProjectedKv<S> =
+    TypedTensor<Axes3<Batch, Sequence<S>, Merged<KvHead, HeadDim>>>;
+
+pub type QueryHeads<S> =
+    TypedTensor<Axes4<Batch, Sequence<S>, QueryHead, HeadDim>>;
+pub type KvHeads<S> =
+    TypedTensor<Axes4<Batch, Sequence<S>, KvHead, HeadDim>>;
+
+pub type QueryProjectionWeight =
+    TypedTensor<Axes2<Hidden, Merged<QueryHead, HeadDim>>>;
+pub type KvProjectionWeight =
+    TypedTensor<Axes2<Hidden, Merged<KvHead, HeadDim>>>;
+pub type OutputProjectionWeight =
+    TypedTensor<Axes2<Merged<QueryHead, HeadDim>, Hidden>>;
+pub type HeadScale = TypedTensor<Axes1<HeadDim>>;
+
+pub type FullSequence = Sequence<Full>;
+pub type ShardSequence = Sequence<Shard>;
+pub type FullHiddenStates = HiddenStates<Full>;
+pub type ShardHiddenStates = HiddenStates<Shard>;
+pub type FullQueryHeads = QueryHeads<Full>;
+pub type FullKvHeads = KvHeads<Full>;
+pub type ShardQueryHeads = QueryHeads<Shard>;
+pub type ShardKvHeads = KvHeads<Shard>;
+#+end_src
+
+Do not add =Key=, =Value=, =RopeOutput=, or layer-specific provenance markers.
+Variable and function names communicate those roles; the type system encodes
+axis compatibility.
+
+** Typed operation variants
+
+Add public typed variants beside the existing operations. Their implementations
+call the existing mathematical/autograd operation and tag its proven output;
+they do not add graph nodes or dispatch on modes.
+
+#+begin_src rust
+pub fn project_queries<S: SequenceKind>(
+    x: &HiddenStates<S>,
+    weight: &QueryProjectionWeight,
+    name: &str,
+) -> ProjectedQueries<S>;
+
+pub fn project_keys<S: SequenceKind>(
+    x: &HiddenStates<S>,
+    weight: &KvProjectionWeight,
+    name: &str,
+) -> ProjectedKv<S>;
+
+pub fn project_values<S: SequenceKind>(
+    x: &HiddenStates<S>,
+    weight: &KvProjectionWeight,
+    name: &str,
+) -> ProjectedKv<S>;
+
+pub fn split_query_heads<S: SequenceKind>(
+    x: &ProjectedQueries<S>,
+    query_heads: usize,
+    head_dim: usize,
+    name: &str,
+) -> QueryHeads<S>;
+
+pub fn split_kv_heads<S: SequenceKind>(
+    x: &ProjectedKv<S>,
+    kv_heads: usize,
+    head_dim: usize,
+    name: &str,
+) -> KvHeads<S>;
+
+pub fn merge_query_heads<S: SequenceKind>(
+    x: &QueryHeads<S>,
+    name: &str,
+) -> ProjectedQueries<S>;
+
+pub fn normalize_queries<S: SequenceKind>(
+    q: &QueryHeads<S>,
+    gamma: &HeadScale,
+    name: &str,
+) -> QueryHeads<S>;
+
+pub fn normalize_keys<S: SequenceKind>(
+    k: &KvHeads<S>,
+    gamma: &HeadScale,
+    name: &str,
+) -> KvHeads<S>;
+
+pub fn rotate_queries<S: SequenceKind>(
+    q: &QueryHeads<S>,
+    cfg: RopeConfig,
+    name: &str,
+) -> QueryHeads<S>;
+
+pub fn rotate_keys<S: SequenceKind>(
+    k: &KvHeads<S>,
+    cfg: RopeConfig,
+    name: &str,
+) -> KvHeads<S>;
+
+pub fn project_attention_output<S: SequenceKind>(
+    x: &ProjectedQueries<S>,
+    weight: &OutputProjectionWeight,
+    name: &str,
+) -> HiddenStates<S>;
+
+pub fn gqa_attention_typed(
+    q: &FullQueryHeads,
+    k: &FullKvHeads,
+    v: &FullKvHeads,
+    name: &str,
+) -> FullQueryHeads;
+
+pub fn context_parallel_gqa_attention_typed(
+    q: &[ShardQueryHeads],
+    k: &[ShardKvHeads],
+    v: &[ShardKvHeads],
+    name: &str,
+) -> Vec<ShardQueryHeads>;
+#+end_src
+
+The projection, reshape, norm, and RoPE pairs intentionally remain named
+functions even when their bodies overlap. At the Qwen3 call site, the operation
+being computed must be apparent without inspecting a runtime flag.
+
+** Qwen3 attention tracer path
+
+Add without removing existing methods:
+
+#+begin_src rust
+impl Qwen3Attention {
+    pub fn forward_typed(&self, x: &FullHiddenStates) -> FullHiddenStates;
+
+    pub fn forward_context_parallel_typed(
+        &self,
+        x_shards: &[ShardHiddenStates],
+    ) -> Vec<ShardHiddenStates>;
+}
+#+end_src
+
+The two methods are separate executable derivations. The ordinary method must
+read in this order: Q/K/V projections; split heads; Q/K normalization; Q/K
+RoPE; ordinary causal GQA; merge query heads; output projection. The CP method
+must spell out the same per-shard operations, rank-offset RoPE, one explicit CP
+GQA call, and per-shard output projection. Do not factor these methods into one
+mode-parametrized forward helper.
+
+Existing =forward= and =forward_context_parallel= remain independent legacy
+derivations in Wave A. This intentional duplication preserves documented panic
+ordering and gives the typed tracer a non-delegating compatibility reference.
+
+Before either new typed method tags the existing public =Tensor= parameter
+fields, a named parameter validator establishes all of these invariants in this
+order: nonzero KV heads and divisible Q/KV head counts; nonzero/even head
+dimension; =wq == [D,Hq*Dh]=; =wk == [D,Hkv*Dh]=; =wv == [D,Hkv*Dh]=;
+=wo == [Hq*Dh,D]=; and both norm scales equal =[Dh]=. Checked multiplication
+must report a typed-Qwen overflow panic rather than wrap. Only this validator,
+existing public validators, and operation-produced outputs may call the
+crate-private =from_proven_axes= constructor.
+
+The typed CP method treats slice index as logical rank by contract. It does not
+claim to infer or validate external ownership metadata. It derives rank =r='s
+offset as =base_start + r*local_t= with checked multiplication/addition and
+derives global length with checked multiplication. An explicit shard-layout
+descriptor is deferred with ragged/arbitrary layouts.
+
+** Runtime facts retained in Wave A
+
+Wave A does not claim to prove numerical extent equality. Continue checking:
+
+- projection inner/outer dimensions;
+- flattened head extent equals head count times head dimension;
+- RMSNorm scale extent and even RoPE head dimension;
+- Q/K/V batch, sequence, head-dimension, and K/V-shape equality;
+- =Hq % Hkv == 0=;
+- CP nonempty equal shard counts and equal local extents;
+- CP positive local length and equal local extents. Slice ordering defines
+  contiguous logical ranks; global length and RoPE offsets use checked
+  arithmetic.
+
+* Verification
+
+** Compile-time contracts
+
+Use the pinned =rules_rust= =rust_doc_test= rule. Add a dedicated
+=typed_tensor_compile_tests= target with paired legal and =compile_fail=
+examples. Each negative example has an adjacent positive example with the same
+imports/setup so a missing symbol cannot create a false success.
+
+Prove at least:
+
+- axis order is nominal and cannot be reassigned;
+- hidden states cannot be passed to RoPE;
+- query-head tensors cannot be supplied as K/V to typed GQA;
+- full-sequence tensors cannot be supplied to context-parallel GQA;
+- typed projection weights cannot be interchanged when their axes differ.
+
+Do not add =trybuild=, =ui_test=, host =rustc= shell tests, nested Bazel, or a
+custom Starlark compile-fail rule in Wave A.
+
+** Runtime and mathematical contracts
+
+- Rank declaration failure returns =AxisError= with expected and actual rank.
+- =named_shape= returns the declared semantic names paired with actual extents.
+- Wrapping, cloning, and erasing preserve =TensorId= and =Rc= identity and add
+  no producer.
+- Add an independent scalar ordinary-GQA forward oracle with asymmetric =B>1=,
+  =Hq/Hkv>1= data; ordinary future-K/future-V causality, batch isolation, and
+  operation-kind/name/topology tests; retain its finite-difference Q/K/V tests.
+- Typed context-parallel GQA retains the existing P=1/2/4, B=2, causality,
+  reconstruction, finite-difference, unused-output, and shared-producer proofs.
+- Strengthen Qwen3 CP verification from gradient finiteness to reconstructed
+  input-gradient and shared-parameter-gradient agreement with ordinary Qwen3.
+- Typed and independent legacy Qwen3 attention derivations agree in forward
+  results, input gradients, parameter gradients, and operation/debug topology.
+- Existing ordinary GQA, CP GQA, Qwen3, autograd, debug, distributed, scaling,
+  and library suites remain green.
+
+* Wave B future design constraints: optional static extents
+
+Wave B may add a refinement over =TypedTensor<A>= for selected fixed-shape
+programs. It must not replace the dynamic model/checkpoint path.
+
+The candidate is a second proof layer whose extent type mirrors the already
+proven semantic axes, using leaf dimensions such as =Dim<const N: usize>=.
+Because stable Rust 1.81 does not provide general generic-const arithmetic,
+Wave B must not promise arbitrary compile-time products or equality proofs.
+Flattened products are either supplied as explicit constants and checked at the
+promotion boundary, or generated for a specific model configuration.
+
+Target use cases are small fixed-shape verifier programs, teaching examples,
+and selected kernel-specialization experiments. Dynamic checkpoint loading,
+variable batch/sequence inference, ragged shards, and general model APIs remain
+Wave A/C concerns.
+
+Before implementation, Wave B requires a prototype comparing:
+
+1. =StaticTensor<Axes, Extents>= refining a Wave A handle;
+2. generated model-specific aliases with explicit constants; and
+3. a separate fixed-shape value family.
+
+The default recommendation is option 1 unless compiler ergonomics or required
+const expressions make it untenable. Promotion must perform one runtime extent
+check, preserve the same =TensorId=/autograd graph, and then carry the proof
+statically. No Wave B implementation is authorized by this spec.
+
+* Wave C future design constraints: runtime named-axis boundaries
+
+Wave C may add runtime named-axis metadata for boundaries where static Rust
+types are absent: checkpoint/model interchange, user-provided tensors, debug
+inspection, and distributed layout descriptions.
+
+Runtime names are not an execution-mode dispatcher and are not a second source
+of truth inside typed transformer code. The candidate boundary object contains
+an ordered stable axis identifier plus extent for each dimension. Promotion to
+Wave A checks the complete ordered identifier list and rank, then produces a
+=TypedTensor<A>= over the same tensor handle. Erasure may derive runtime names
+from =A= without storing duplicate metadata.
+
+Wave A's =Axis::stable_id= is the source for canonical and downstream axis IDs;
+=display_name= is explicitly non-serialized. Wave C must add registry/version
+rules and reject duplicate or unknown IDs at deserialization.
+
+The default Wave C design is an out-of-band =NamedTensorDescriptor= paired with
+a tensor handle. It does not add another mutable field to =TensorInner=.
+=TensorLayoutMeta= remains authoritative for physical distribution; the
+descriptor is authoritative only for semantic axis order. Promotion checks
+descriptor extents against =Tensor::shape= and, when layout metadata exists,
+checks its extents against =global_shape= without overwriting either object.
+Cloning the boundary object clones the current tensor handle and descriptor;
+serialization covers the versioned descriptor, not tensor storage. Any
+disagreement is an error, never precedence-based repair.
+
+Wave C must explain how optional Wave B extents refine the same Wave A value.
+No Wave C implementation is authorized by this spec.
+
+* Compatibility and exclusions
+
+- Existing ordinary and CP GQA raw/public interfaces remain unchanged.
+- Existing =Qwen3Attention= methods and public fields remain unchanged.
+- No new attention engine, strategy trait, runtime attention enum, or shared
+  semantic forward/backward core.
+- No CUDA/NCCL/ring attention, KV cache, ragged CP, arbitrary position IDs,
+  full-model context parallelism, dtype/device redesign, or autograd rewrite.
+- No performance claim beyond zero tensor-storage copies and zero extra graph
+  nodes for type tagging.
+
+* Authority
+
+Implementation, tests, documentation, isolated branches, and review are
+authorized. Commit, push, pull-request creation, and merge are not authorized;
+merge remains human-only.
+
+* Independent critique reconciliation
+
+- Narrowed compatibility to valid behavior and documented input panics; kept
+  legacy Qwen paths independent rather than tautologically delegating.
+- Added an explicit validator before tagging mutable public parameters.
+- Made CP slice order a contract and required checked offset/length arithmetic.
+- Added missing ordinary oracle/metamorphic/topology and Qwen3 gradient-parity
+  evidence to Wave A.
+- Made sequence ownership an intentional axis refinement through sealed
+  =Sequence<Full|Shard>= kinds.
+- Opened =Axis= for research extensions while sealing supported rank and
+  sequence constructors; exact operations still constrain compatible aliases.
+- Added stable axis IDs and an out-of-band Wave C boundary design; removed an
+  unnecessary public ABI commitment to =repr(transparent)=.
+
+Public type paths are =tnsr::typed::*=. Typed operations live beside their
+mathematical implementation at =tnsr::ops::linear=, =shape=, =norm=, =rope=,
+=gqa=, and =context_parallel_gqa=. Qwen3 typed methods remain at
+=tnsr::qwen3::Qwen3Attention=.

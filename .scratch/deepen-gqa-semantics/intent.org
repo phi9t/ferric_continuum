@@ -1,0 +1,113 @@
+#+TITLE: Deepen causal GQA semantics
+#+TYPE: grilling
+#+STATUS: resolved
+
+* Outcome
+
+Make ordinary and context-parallel grouped-query attention easier to read and
+reason about as executable derivations, while sharing only incidental mechanics
+that do not hide transformer mathematics.
+
+The design may deepen beyond GQA into typed transformer tensors when necessary:
+named dimensions should expose mathematical roles, and distinct operation
+variants should retain pristine implementations without runtime strategy
+branches.
+
+* Route
+
+Gated architectural path. The change moves an internal semantic seam and must
+preserve forward/backward and multi-output autograd invariants.
+
+* Accepted scope
+
+- Preserve the existing public ordinary GQA, raw context-parallel GQA, autograd,
+  and =Qwen3Attention= interfaces.
+- Preserve public =GqaShape= and =GqaShape::group_size=, public
+  =ContextParallelGqaShape=, raw context-parallel forward/backward functions,
+  saved-state shape, and named gradient result vectors.
+- Treat explicit mathematical structure as a first-order requirement. Some
+  duplication is acceptable when it keeps forward/backward equations, shapes,
+  causal visibility, or gradient ownership local and readable.
+- Preserve equal contiguous context shards, materialized batch-major global
+  K/V, saved probability blocks, f32 CPU execution, and current debug identity.
+- Keep ordinary and context-parallel numerical behavior and gradients equivalent
+  to the current implementation.
+
+* Out of scope
+
+- Ring or online-softmax execution.
+- CUDA or NCCL execution.
+- Ragged shards, explicit position IDs, KV cache, or full-model sharding.
+- Public interface or stable trace-schema changes.
+
+* Acceptance evidence
+
+- Visible red-green behavior slices at the approved public test seam.
+- Existing ordinary and context-parallel GQA parity and gradient tests pass.
+- Existing Qwen3, autograd, debug, distributed, scaling, and library tests pass.
+- Standards and Spec review have no unresolved blocking findings.
+- Independent branch defect review passes before human handoff.
+
+* Authority boundary
+
+The agent may design, create isolated implementation worktrees, edit code/tests
+and tracker artifacts, and run verification. Commit, push, pull-request creation,
+and merge require separate explicit human authorization; merge is always human.
+
+* Comments
+
+- 2026-09-07: User selected the architecture report's top recommendation and
+  approved an internal-only deepening with all existing public behavior fixed.
+- 2026-09-07: SUPERSEDED. The user initially selected a contiguous-query
+  semantic core, then made executable mathematical structure the first-order
+  priority. No shared semantic core will be introduced.
+- 2026-09-07: User selected behavioral compatibility rather than bitwise
+  compatibility. Preserve public shapes, causal behavior, gradients, panic
+  conditions and messages, operation kinds, producer topology, and existing
+  numerical tolerances.
+- 2026-09-07: User approved the existing public ordinary GQA,
+  context-parallel GQA, autograd, and Qwen3 operations as the durable test seam.
+  Private representation views may have focused coordinate tests but do not
+  become a new caller interface.
+- 2026-09-07: User made executable mathematical structure the first-order
+  architectural priority and explicitly allowed duplication in service of
+  readability. This supersedes the tentative goal of centralizing every GQA
+  equation in one semantic implementation.
+- 2026-09-07: The indexing seam is limited to private row-major views. It must
+  not own shard routing, causal visibility, head mapping, normalization, value
+  mixing, gradients, runtime modes, or execution strategies.
+- 2026-09-07: User required verifier tests for every implementation. Cross-path
+  parity is necessary but not sufficient; correctness evidence must include an
+  independent forward oracle, finite-difference backward checks, metamorphic
+  invariants, and model/autograd integration.
+- 2026-09-07: User approved the verifier matrix: independent scalar forward
+  oracle, Q/K/V finite differences, causal and batch metamorphic checks,
+  cross-degree reconstruction, autograd topology, and Qwen3 integration.
+- 2026-09-07: User rejected a low-level row view as the primary abstraction.
+  Keep the tensor abstraction, attach named dimensions to express transformer
+  roles, prefer distinct readable operation variants over runtime mode flags,
+  and move role/rank/operator compatibility checks to compile time where
+  runtime-loaded extents permit.
+- 2026-09-07: Independent design critique required separate immutable and
+  mutable slice-backed row views, construction only after public validation,
+  preservation of public types and panic ordering, independent test indexing,
+  nonuniform output gradients, gradient parity across P=1/2/4, stronger Qwen3
+  gradient parity, and pointer-identity proof that views do not copy rows.
+- 2026-09-07: SUPERSEDED. A private shared =causal_gqa= semantic module was
+  briefly considered, but the user subsequently prioritized pristine,
+  operation-specific executable derivations and accepted intentional
+  duplication where sharing would obscure the mathematics.
+- 2026-09-07: User selected Wave A: compile-time semantic axis roles, rank, and
+  operator compatibility with runtime extents. Fully static const-generic
+  extents (Wave B) and runtime named-axis metadata/interchange (Wave C) are
+  deferred; both need separate next-wave specifications.
+
+* Answer
+
+The completed implementation keeps ordinary and context-parallel GQA as
+separate explicit forward/backward derivations, adds named semantic axes and
+extent evidence over the existing tensor handle, and isolates only equal-
+contiguous ownership mechanics in a private layout module. Independent scalar,
+finite-difference, metamorphic, cross-degree, autograd, and Qwen3 verifiers all
+pass. Wave B/C static and interchange refinements and ring/CUDA/NCCL execution
+remain explicitly deferred.

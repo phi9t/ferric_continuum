@@ -1,8 +1,8 @@
 //! Qwen3 forward/train demo — end-to-end forward + loss + backward.
 //!
 //! Follows the structure/logging idiom of `src/main.rs`: build a tiny
-//! `qwen3::Qwen3Model`, create the autograd `Engine` (which installs the global
-//! recorder), run a forward to `logits[B,T,V]`, compute `cross_entropy` against
+//! `qwen3::Qwen3Model`, explicitly record a forward to `logits[B,T,V]`, compute
+//! `cross_entropy` against
 //! random targets, run `backward`, then print the op table and gradient stats
 //! for a couple of parameters. Weights are random/untrained — this exercises the
 //! training path end to end, not a converged model.
@@ -21,14 +21,18 @@ fn main() {
     let cfg = Qwen3Config::tiny();
     let model = Qwen3Model::new(cfg.clone());
 
-    // Engine::new() must be called BEFORE forward to capture op/save events.
     let mut engine = Engine::new();
 
     let b = 1usize;
     let t = 8usize;
     let ids: Vec<usize> = (0..t).map(|i| i % cfg.vocab_size).collect();
 
-    let logits = model.forward(&ids, b, t);
+    let targets: Vec<usize> = (0..b * t).map(|i| (i * 7 + 3) % cfg.vocab_size).collect();
+    let (logits, l) = engine.with_recording(|| {
+        let logits = model.forward(&ids, b, t);
+        let loss = loss::cross_entropy(&logits, &targets, "cross_entropy");
+        (logits, loss)
+    });
 
     // Report logits shape [B,T,V] and the first row of values.
     {
@@ -43,8 +47,6 @@ fn main() {
     }
 
     // Random next-token targets and the fused softmax cross-entropy loss.
-    let targets: Vec<usize> = (0..b * t).map(|i| (i * 7 + 3) % cfg.vocab_size).collect();
-    let l = loss::cross_entropy(&logits, &targets, "cross_entropy");
     {
         let lv = l.inner.borrow();
         info!(loss = %format!("{:.6}", lv.value.data[0]), "cross_entropy");

@@ -25,9 +25,11 @@ fn trace_json_exports_stable_forward_backward_schema() {
         true,
     );
 
-    let y = linear::linear(&x, &w, "proj");
-    let scaled = basic::scale(&y, 2.0, "double");
-    let loss = basic::sum(&scaled, "loss");
+    let loss = engine.with_recording(|| {
+        let y = linear::linear(&x, &w, "proj");
+        let scaled = basic::scale(&y, 2.0, "double");
+        basic::sum(&scaled, "loss")
+    });
 
     engine.backward(&loss);
 
@@ -60,12 +62,10 @@ fn trace_json_exports_stable_forward_backward_schema() {
             .len(),
         1
     );
-    assert!(
-        linear_op["display_label"]
-            .as_str()
-            .expect("display label")
-            .contains("Linear")
-    );
+    assert!(linear_op["display_label"]
+        .as_str()
+        .expect("display label")
+        .contains("Linear"));
 
     let saved_sites = linear_op["saved_sites"]
         .as_array()
@@ -83,21 +83,17 @@ fn trace_json_exports_stable_forward_backward_schema() {
     assert!(kinds.contains(&"grad_accum"));
     assert!(kinds.contains(&"grad_leaf_write"));
 
-    assert!(
-        trace["backward_ops"]
-            .as_array()
-            .expect("backward ops")
-            .iter()
-            .any(|event| event["op_kind"] == "Linear" && event["op_name"] == "proj")
-    );
-    assert!(
-        trace["grad_accumulations"]
-            .as_array()
-            .expect("grad accumulations")
-            .iter()
-            .any(|event| event["kind"] == "grad_accum"
-                && event["output"]["shape"] == serde_json::json!([2, 2]))
-    );
+    assert!(trace["backward_ops"]
+        .as_array()
+        .expect("backward ops")
+        .iter()
+        .any(|event| event["op_kind"] == "Linear" && event["op_name"] == "proj"));
+    assert!(trace["grad_accumulations"]
+        .as_array()
+        .expect("grad accumulations")
+        .iter()
+        .any(|event| event["kind"] == "grad_accum"
+            && event["output"]["shape"] == serde_json::json!([2, 2])));
 
     let pretty = engine.debug.trace_json_pretty();
     assert!(pretty.contains("\"schema\": \"tnsr.debug_trace\""));

@@ -1,28 +1,109 @@
 # Qwen3 context-parallel reference
 
-[Lesson 0002](../lessons/0002-context-parallel-qwen3.md) · [Repository map](0001-tnsr-repository-map.md)
+[Lesson 0002](../lessons/0002-context-parallel-qwen3.md) ·
+[Typed transformer math](../lessons/0003-typed-transformer-math.md) ·
+[Repository map](0001-tnsr-repository-map.md)
 
 ## Implementation status
 
-The correctness-first CPU implementation is now available:
+The correctness-first CPU implementation exposes these final interfaces:
 
 ```rust
-use tnsr::ops::context_parallel_gqa::{
-    context_parallel_gqa_attention,
-    raw_context_parallel_gqa_backward,
-    raw_context_parallel_gqa_forward,
-    ContextParallelGqaGrads,
-    ContextParallelGqaSaved,
-    ContextParallelGqaShape,
-};
+pub struct ContextParallelGqaShape {
+    pub b: usize,
+    pub cp: usize,
+    pub local_t: usize,
+    pub global_t: usize,
+    pub hq: usize,
+    pub hk: usize,
+    pub dh: usize,
+}
 
-let output_shards = attention.forward_context_parallel(&input_shards);
+pub struct ContextParallelGqaSaved {
+    pub shape: ContextParallelGqaShape,
+    // Saved probability blocks are private implementation state.
+}
+
+pub struct ContextParallelGqaGrads {
+    pub dq: Vec<TensorValue>,
+    pub dk: Vec<TensorValue>,
+    pub dv: Vec<TensorValue>,
+}
+
+pub fn raw_context_parallel_gqa_forward(
+    q_shards: &[TensorValue],
+    k_shards: &[TensorValue],
+    v_shards: &[TensorValue],
+) -> (Vec<TensorValue>, ContextParallelGqaSaved);
+
+pub fn raw_context_parallel_gqa_backward(
+    dout_shards: &[TensorValue],
+    q_shards: &[TensorValue],
+    k_shards: &[TensorValue],
+    v_shards: &[TensorValue],
+    saved: &ContextParallelGqaSaved,
+) -> ContextParallelGqaGrads;
+
+pub fn context_parallel_gqa_attention(
+    q_shards: &[Tensor],
+    k_shards: &[Tensor],
+    v_shards: &[Tensor],
+    name: &str,
+) -> Vec<Tensor>;
+
+pub fn context_parallel_gqa_attention_typed(
+    q_shards: &[ShardQueryHeads],
+    k_shards: &[ShardKvHeads],
+    v_shards: &[ShardKvHeads],
+    name: &str,
+) -> Vec<ShardQueryHeads>;
+
+impl Qwen3Attention {
+    pub fn forward_context_parallel(&self, x_shards: &[Tensor]) -> Vec<Tensor>;
+
+    pub fn forward_typed(&self, x: &FullHiddenStates) -> FullHiddenStates;
+
+    pub fn forward_context_parallel_typed(
+        &self,
+        x_shards: &[ShardHiddenStates],
+    ) -> Vec<ShardHiddenStates>;
+}
 ```
 
 It accepts equal, contiguous, nonempty logical-rank shards; materializes global
 batch-major K/V; saves one `[B,Hq,S,T]` probability block per rank; accumulates
 global `dK/dV`; and scatters those gradients back to their sequence owners. It
 is a single-process f32 simulation, not a CUDA/NCCL runtime.
+
+The typed entry points are also implemented:
+
+```rust
+Qwen3Attention::forward_typed(
+    &FullHiddenStates,
+) -> FullHiddenStates
+
+Qwen3Attention::forward_context_parallel_typed(
+    &[ShardHiddenStates],
+) -> Vec<ShardHiddenStates>
+```
+
+Inputs and gradient edges use the fixed order `Q[0..P], K[0..P], V[0..P]`.
+Every shard is nonempty and shaped `[B,S,H,Dh]`; shard count and local extent
+must agree, and `Hq` must be divisible by `Hkv`.
+
+The typed methods make full-sequence versus shard ownership, query heads versus
+KV heads, head split/merge transformations, and dynamic extent meaning visible
+in Rust types. Axis attachment and erasure add no additional tensor copy or
+autograd node; the mathematical operations still create their ordinary graph
+nodes. Independently executed legacy and typed derivations have distinct raw
+tensors, while their canonical graph observations agree.
+
+Each typed Qwen3 call creates one ephemeral validated state from the current
+public scalars and parameter handles. It is not cached. Cloning handles rather
+than values is coherent under the current single-threaded, callback-free
+execution model. Equal-contiguous sequence ownership is concentrated in a
+crate-internal layout module, while ordinary and context-parallel attention
+retain separate explicit equations.
 
 ## Definitions
 
@@ -37,7 +118,10 @@ is a single-process f32 simulation, not a CUDA/NCCL runtime.
 | `Dh` | head dimension | 128 |
 | `S` | local sequence length, `T/P` | workload-dependent |
 
-## Sharded block contract
+## Target full-block contract
+
+Only `Qwen3Attention` has a context-parallel executable path in the current
+milestone. The following is the target contract for later full-model sharding:
 
 ```text
 input X_r  [B,S,D]
@@ -46,7 +130,7 @@ input X_r  [B,S,D]
   │    Q_r [B,S,Hq,Dh]
   │    K_r [B,S,Hkv,Dh]
   │    V_r [B,S,Hkv,Dh]
-  ├─ global-position Q/K norm + RoPE
+  ├─ token-local Q/K RMSNorm + global-position RoPE
   ├─ context-parallel GQA(Q_r, exchanged K/V)
   │    O_r [B,S,Hq,Dh]
   ├─ token-local output projection + residual
@@ -61,7 +145,11 @@ Only GQA communicates across the CP group during forward.
 ```text
 for rank r:
     positions_r = global positions owned by r
-    Q_r, K_r, V_r = project_and_rope(X_r, positions_r)
+    Q_r = project_q(X_r)
+    K_r = project_k(X_r)
+    V_r = project_v(X_r)
+    Q_r = rope(normalize_q(Q_r), positions_r)
+    K_r = rope(normalize_k(K_r), positions_r)
     K = all_gather(K_r, cp_group)
     V = all_gather(V_r, cp_group)
     O_r = causal_gqa(Q_r, K, V,
@@ -115,11 +203,11 @@ Contiguous shards are correct but imbalanced: later query shards attend to more 
 
 ## Backward ownership
 
-| Gradient | Ownership |
-|---|---|
-| `dQ_r` | Remains with query owner `r` |
-| `dK_j`, `dV_j` | Receive contributions from every query block that attended to KV block `j`; reduce-scatter/ring-route them back to owner `j` |
-| Weight gradients | Weights are CP-replicated, so aggregate across CP ranks, often through the data-parallel gradient group |
+| Gradient | Current single-process implementation | Future distributed execution |
+|---|---|---|
+| `dQ_r` | Written directly to query shard `r` | Remains with query owner `r` |
+| `dK_j`, `dV_j` | All query contributions accumulate in global buffers, then scatter to shard `j` | Reduce-scatter or ring-route contributions back to owner `j` |
+| Weight gradients | Every local branch references the same Tensor handle, so `Engine` accumulation sums them | Reduce across every group that physically replicates the weight |
 
 ## Prefill versus decode
 
@@ -133,10 +221,12 @@ DECODE
 Q has one new query token
 rank r owns a shard of historical KV cache
 rank r computes local (m_r, l_r, o_r)
-all ranks merge states into the exact global softmax output
+all ranks merge states into the mathematically equivalent global softmax output
 ```
 
-Decode requires a real KV cache. The repository currently only estimates cache size and recomputes the entire prefix.
+Decode requires a real per-layer GQA KV cache. The generic inference module has
+a small `KvCache`, but `qwen3_infer` does not yet integrate one and recomputes
+the complete prefix.
 
 ## Qwen3-specific byte formulas
 
@@ -155,14 +245,26 @@ Qwen3-aware KV cache = 2 × 36 × 32768 × 1024 × 4
                      = 9 GiB
 ```
 
-## Proposed `tnsr` change map
+## Implementation roadmap
 
 | Stage | Status | Location / change |
 |---|---|---|
+| Checked Shape arithmetic | Implemented | Checked element/byte products with deterministic overflow failures |
 | Explicit all-gather forward | Implemented | `ops/context_parallel_gqa.rs`: local queries against materialized global K/V |
 | Explicit backward | Implemented | Local `dQ`, global accumulation and owner-scatter for `dK/dV` |
 | Multi-output autograd | Implemented | One operation node for `Q[0..P], K[0..P], V[0..P] → O[0..P]` |
 | Qwen3 attention integration | Implemented | `Qwen3Attention::forward_context_parallel`; rank-offset RoPE and local projections |
+| Typed tensor interface | Implemented | Zero-copy `TypedTensor<A>` plus distinct typed ordinary/CP Qwen3 methods |
+| Named extent evidence | Implemented | `AxisExtent<A>`, checked merged widths, and canonical layout accessors |
+| Equal-contiguous layout | Implemented | Checked Query blocks plus batch-major `TensorValue` gather/scatter |
+| Scoped recording | Implemented | Explicit `Engine::with_recording`; backward owns unpack/recompute events |
+| Checkpoint unwind safety | Implemented | Exact frame/registry cleanup and clean retry after recomputation panic |
+| Graph observation | Implemented | Canonical ID-independent operations, roots, shapes, and producer lookup |
+| Independent verifiers | Implemented | Scalar ordinary-GQA oracle, causal/batch/graph checks, compile-fail contracts, finite differences, and Qwen3 gradient parity |
+| Coherent Qwen call state | Implemented | Fresh validated scalar/handle snapshot for every typed call; no cache |
+| Optional static extents | Specified, not implemented | Wave B refinement over semantic axes; prototype required first |
+| Runtime named-axis seam | Specified, not implemented | Wave C out-of-band, versioned descriptor; registry prototype required first |
+| Long-offset RoPE precision | Future | Preserve current f32 numerics here; any higher-precision change needs its own compatibility decision |
 | GQA-aware cost model | Future | Add CP traffic/activation estimates and correct GQA KV-cache width |
 | Ring simulator | Future | Block rotation and online-softmax state merge |
 | Load-balanced positions | Future | Ragged/non-contiguous partitions with explicit position IDs |
@@ -174,13 +276,17 @@ Qwen3-aware KV cache = 2 × 36 × 32768 × 1024 × 4
 
 1. `P=1` equals existing unsharded GQA.
 2. Concatenated `P=2` and `P=4` outputs match unsharded causal GQA.
-3. A query just after a shard boundary attends to earlier-rank keys.
+3. A query just after a shard transition attends to earlier-rank keys.
 4. No query attends to a future-rank key.
 5. Global-position RoPE matches the unsharded result.
 6. GQA mapping remains correct for `Hq=4,Hkv=2` and `Hq=32,Hkv=8`.
-7. Ragged `T % P != 0` partitions are either supported or rejected explicitly.
-8. Ring online softmax agrees with all-gather attention within a documented tolerance.
-9. Backward gradients match the unsharded reference for Q, K, V, and weights.
+7. Empty, unequal, or otherwise ragged shard sets are rejected explicitly.
+8. Backward gradients match the unsharded reference for Q, K, V, and weights.
+9. Typed and legacy full/CP derivations agree in values, gradients, and
+   canonical graph topology.
+
+Ring online-softmax agreement becomes an additional invariant when the future
+ring simulator is implemented.
 
 ## Primary sources
 

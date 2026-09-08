@@ -1,0 +1,33 @@
+#+TITLE: Select the Wave A migration slices
+#+TYPE: grilling
+#+STATUS: resolved
+#+BLOCKED_BY: 03-design-autograd-and-dynamic-boundary, 04-prove-compile-time-verifier-path
+#+PARENT: ../map.org
+
+* Question
+
+What expand-contract sequence introduces Wave A with continuously passing
+behavior, compile-time, and mathematical verifiers while keeping each change
+small enough to review?
+
+* Decisions required
+
+- Choose the first tracer path, expected to be Qwen3 attention.
+- Decide when ordinary GQA and context-parallel GQA become typed.
+- Decide how long existing untyped public functions remain available.
+- Define a verifier matrix for each slice: compile-pass, compile-fail,
+  independent numerical oracle, finite differences, metamorphic invariants,
+  autograd topology, and Qwen3 integration.
+- Identify the contraction point for obsolete runtime rank/role assertions.
+
+* Out of scope
+
+- Producing implementation tickets before the sequence is approved.
+
+* Answer
+
+Use Qwen3 attention as one vertical tracer: carrier and compile verifier, typed
+operation transforms, typed ordinary/CP Qwen3 forwards, then Markdown guidance.
+Keep all untyped public functions as adapters throughout Wave A. Contract only
+after the tracer has complete compile-time, numerical, autograd, and topology
+evidence; no contraction is included in this delivery.

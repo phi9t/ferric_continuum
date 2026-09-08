@@ -7,6 +7,10 @@
 
 use crate::autograd::{BackwardCtx, BackwardRecipe, GradEdge, GradTarget, OpKind};
 use crate::tensor::{Shape, Tensor, TensorValue};
+use crate::typed::{
+    AxisExtent, HeadDim, KvHead, KvHeads, ProjectedKv, ProjectedQueries, QueryHead, QueryHeads,
+    SequenceKind, TypedTensor,
+};
 
 fn raw_reshape(x: &TensorValue, new_shape: Shape) -> TensorValue {
     assert_eq!(
@@ -59,6 +63,84 @@ pub fn reshape(x: &Tensor, new_shape: &[usize], name: &str) -> Tensor {
     crate::ops::finish_op(OpKind::Reshape, name, &[x], out_value, recipe, vec![])
 }
 
+/// `[B,S,Hq*Dh] -> [B,S,Hq,Dh]`.
+pub fn split_query_heads<S: SequenceKind>(
+    x: &ProjectedQueries<S>,
+    query_heads: impl Into<AxisExtent<QueryHead>>,
+    head_dim: impl Into<AxisExtent<HeadDim>>,
+    name: &str,
+) -> QueryHeads<S> {
+    let query_heads = query_heads.into();
+    let head_dim = head_dim.into();
+    let split_extent = query_heads
+        .checked_merge(head_dim)
+        .expect("split_query_heads: head extent overflow");
+    assert_eq!(
+        x.flattened_query_extent(),
+        split_extent,
+        "split_query_heads: flattened head extent mismatch"
+    );
+    let output = reshape(
+        x.as_tensor(),
+        &[
+            x.batch_extent().get(),
+            x.sequence_extent().get(),
+            query_heads.get(),
+            head_dim.get(),
+        ],
+        name,
+    );
+    TypedTensor::from_proven_axes(output)
+}
+
+/// `[B,S,Hkv*Dh] -> [B,S,Hkv,Dh]`.
+pub fn split_kv_heads<S: SequenceKind>(
+    x: &ProjectedKv<S>,
+    kv_heads: impl Into<AxisExtent<KvHead>>,
+    head_dim: impl Into<AxisExtent<HeadDim>>,
+    name: &str,
+) -> KvHeads<S> {
+    let kv_heads = kv_heads.into();
+    let head_dim = head_dim.into();
+    let split_extent = kv_heads
+        .checked_merge(head_dim)
+        .expect("split_kv_heads: head extent overflow");
+    assert_eq!(
+        x.flattened_kv_extent(),
+        split_extent,
+        "split_kv_heads: flattened head extent mismatch"
+    );
+    let output = reshape(
+        x.as_tensor(),
+        &[
+            x.batch_extent().get(),
+            x.sequence_extent().get(),
+            kv_heads.get(),
+            head_dim.get(),
+        ],
+        name,
+    );
+    TypedTensor::from_proven_axes(output)
+}
+
+/// `[B,S,Hq,Dh] -> [B,S,Hq*Dh]`.
+pub fn merge_query_heads<S: SequenceKind>(x: &QueryHeads<S>, name: &str) -> ProjectedQueries<S> {
+    let merged_heads = x
+        .query_heads_extent()
+        .checked_merge(x.head_dim_extent())
+        .expect("merge_query_heads: head extent overflow");
+    let output = reshape(
+        x.as_tensor(),
+        &[
+            x.batch_extent().get(),
+            x.sequence_extent().get(),
+            merged_heads.get(),
+        ],
+        name,
+    );
+    TypedTensor::from_proven_axes(output)
+}
+
 // ---------------------------------------------------------------------------
 // split3 — the canonical MULTI-OUTPUT op
 // ---------------------------------------------------------------------------
@@ -88,8 +170,7 @@ fn raw_split3(x: &TensorValue) -> [TensorValue; 3] {
     let out_shape = Shape(out_shape);
 
     let src = x.data.as_ref();
-    let mut parts: Vec<Vec<f32>> =
-        (0..3).map(|_| Vec::with_capacity(rows * chunk)).collect();
+    let mut parts: Vec<Vec<f32>> = (0..3).map(|_| Vec::with_capacity(rows * chunk)).collect();
     for r in 0..rows {
         let base = r * last;
         for (p, part) in parts.iter_mut().enumerate() {

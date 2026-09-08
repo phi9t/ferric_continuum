@@ -23,6 +23,7 @@
 
 use crate::autograd::{BackwardCtx, BackwardRecipe, GradEdge, GradTarget, OpKind};
 use crate::tensor::{Tensor, TensorValue};
+use crate::typed::{KvHeads, QueryHeads, SequenceKind, TypedTensor};
 
 #[derive(Clone, Copy, Debug)]
 pub struct RopeConfig {
@@ -40,13 +41,23 @@ impl Default for RopeConfig {
 }
 
 fn cos_sin_table(seq: usize, head_dim: usize, cfg: RopeConfig) -> (Vec<f32>, Vec<f32>) {
+    assert!(head_dim > 0, "rope: head_dim must be positive");
     assert!(head_dim % 2 == 0, "rope: head_dim must be even");
+    if seq > 0 {
+        cfg.start_pos
+            .checked_add(seq - 1)
+            .expect("rope: position overflow");
+    }
     let half = head_dim / 2;
-    let mut cos = vec![0.0f32; seq * half];
-    let mut sin = vec![0.0f32; seq * half];
+    let table_len = seq.checked_mul(half).expect("rope: table size overflow");
+    let mut cos = vec![0.0f32; table_len];
+    let mut sin = vec![0.0f32; table_len];
     let inv = |i: usize| -> f32 { cfg.base.powf(-(2.0 * i as f32) / head_dim as f32) };
     for t in 0..seq {
-        let pos = (cfg.start_pos + t) as f32;
+        let pos = cfg
+            .start_pos
+            .checked_add(t)
+            .expect("rope: position overflow") as f32;
         for i in 0..half {
             let theta = pos * inv(i);
             cos[t * half + i] = theta.cos();
@@ -150,4 +161,42 @@ pub fn rope(x: &Tensor, cfg: RopeConfig, name: &str) -> Tensor {
         };
 
     crate::ops::finish_op(OpKind::Rope, name, &[x], out_value, recipe, vec![])
+}
+
+/// Apply RoPE to `Q[B,S,Hq,Dh]` without changing its axes.
+pub fn rotate_queries<S: SequenceKind>(
+    queries: &QueryHeads<S>,
+    cfg: RopeConfig,
+    name: &str,
+) -> QueryHeads<S> {
+    let sequence = queries.sequence_extent().get();
+    let head_dim = queries.head_dim_extent().get();
+    assert!(head_dim > 0, "rotate_queries: HeadDim must be positive");
+    assert!(head_dim % 2 == 0, "rotate_queries: HeadDim must be even");
+    if sequence > 0 {
+        cfg.start_pos
+            .checked_add(sequence - 1)
+            .expect("rotate_queries: position overflow");
+    }
+    sequence
+        .checked_mul(head_dim / 2)
+        .expect("rotate_queries: table size overflow");
+    TypedTensor::from_proven_axes(rope(queries.as_tensor(), cfg, name))
+}
+
+/// Apply RoPE to `K[B,S,Hkv,Dh]` without changing its axes.
+pub fn rotate_keys<S: SequenceKind>(keys: &KvHeads<S>, cfg: RopeConfig, name: &str) -> KvHeads<S> {
+    let sequence = keys.sequence_extent().get();
+    let head_dim = keys.head_dim_extent().get();
+    assert!(head_dim > 0, "rotate_keys: HeadDim must be positive");
+    assert!(head_dim % 2 == 0, "rotate_keys: HeadDim must be even");
+    if sequence > 0 {
+        cfg.start_pos
+            .checked_add(sequence - 1)
+            .expect("rotate_keys: position overflow");
+    }
+    sequence
+        .checked_mul(head_dim / 2)
+        .expect("rotate_keys: table size overflow");
+    TypedTensor::from_proven_axes(rope(keys.as_tensor(), cfg, name))
 }

@@ -1,0 +1,48 @@
+#+TITLE: Deepen equal-contiguous Attention layout
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY: 02-named-dimension-extents
+#+PARENT: ../spec.org
+
+* Context
+
+Context-parallel ownership mechanics are repeated across CP GQA and Qwen3.
+Concentrate only those mechanics while leaving Causal GQA semantics explicit.
+
+* Requirements
+
+- Add crate-internal =EqualContiguousAttentionLayout= and =QueryBlock=. The
+  fallible constructor reports zero shards, zero local sequence, and global
+  sequence overflow; Query blocks report rank and local-position errors.
+- Move batch-major =[B,S,H,Dh]= =TensorValue= gather/scatter behind this
+  interface. They infer =B/H/Dh= from already validated values rather than
+  receiving those coordinates again.
+- Use Query blocks for CP-GQA global query positions and Qwen3 CP RoPE offsets.
+- Preserve every existing CP validation panic, output shape, gradient route,
+  operation name/kind, and shared producer.
+- Keep verifier split/join math independent.
+
+* Out of scope
+
+- A generic layout strategy, DTensor unification, ragged layout, or real
+  communication.
+- Sharing ordinary and CP GQA equations.
+- Git actions.
+
+* Verification
+
+- Red then green layout tests cover constructor/rank/local-position failures,
+  overflow, all Query blocks, and an asymmetric =B>1= gather/scatter round trip.
+- P=1/2/4, B=2, causality, finite-difference, topology, and Qwen3 CP suites.
+
+* Answer
+
+The crate-private =EqualContiguousAttentionLayout= now owns checked global
+sequence construction, rank-local =QueryBlock= derivation, and batch-major
+=TensorValue= gather/scatter. Context-parallel GQA keeps its forward and
+backward equations local and delegates only sequence-ownership mechanics;
+Qwen3's two CP derivations use Query blocks for RoPE starts.
+
+Layout error, asymmetric =B>1= round-trip, P=1/2/4 forward, bidirectional
+causality, finite-difference, shared-producer, Qwen3 parity, and nonuniform
+upstream-gradient parity against independent unsharded GQA tests pass.
