@@ -1,0 +1,29 @@
+#+TITLE: Specify Wave B static extents
+#+TYPE: grilling
+#+STATUS: resolved
+#+BLOCKED_BY: 01-select-wave-a-type-carrier, 02-define-axis-language-and-contracts
+#+PARENT: ../map.org
+
+* Question
+
+For which programs would const-generic numerical extents provide enough value
+to justify a Wave B refinement, and how would that refinement compose with
+runtime-configured Wave A tensors?
+
+* Decisions required
+
+- Define target use cases and explicit non-goals.
+- Decide whether Wave B is a separate family, a refinement wrapper, or generated
+  code for selected model configurations.
+- Identify extent equalities/arithmetic Rust can express ergonomically on the
+  repository toolchain.
+- Specify dynamic-to-static proof/check boundaries and failure behavior.
+- Produce a decision-ready design spec only; do not authorize implementation.
+
+* Answer
+
+Wave B is an optional proof refinement over Wave A for fixed-shape teaching,
+verification, and specialization experiments. Prototype a
+=StaticTensor<Axes,Extents>= first; compare generated model aliases and a
+separate value family. Do not depend on unstable generic-const arithmetic or
+replace dynamic loading. See =../spec.org=.

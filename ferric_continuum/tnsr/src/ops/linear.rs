@@ -12,6 +12,10 @@
 use crate::autograd::{BackwardCtx, BackwardRecipe, GradEdge, GradTarget, OpKind};
 use crate::saved::{SaveRole, SaveSite, SavedTensor};
 use crate::tensor::{Shape, Tensor, TensorValue};
+use crate::typed::{
+    HiddenStates, KvProjectionWeight, OutputProjectionWeight, ProjectedKv, ProjectedQueries,
+    QueryProjectionWeight, SequenceKind, TypedTensor,
+};
 
 // ---------------------------------------------------------------------------
 // Raw matmul helpers: x [B,T,Din] @ w [Din,Dout] -> out [B,T,Dout]
@@ -73,8 +77,7 @@ pub fn raw_linear_forward(x: &TensorValue, w: &TensorValue) -> TensorValue {
 
     // Optional GPU forward via cuda_kernels (host in / host out). Backward stays CPU.
     if crate::cuda_ffi::use_cuda() {
-        match crate::cuda_ffi::gemm_f32(batch, dout, din, x.data.as_ref(), w.data.as_ref())
-        {
+        match crate::cuda_ffi::gemm_f32(batch, dout, din, x.data.as_ref(), w.data.as_ref()) {
             Some(out_data) => {
                 return TensorValue::from_vec(Shape(out_shape), out_data);
             }
@@ -217,4 +220,60 @@ pub fn linear(x: &Tensor, w: &Tensor, name: &str) -> Tensor {
         recipe,
         debug_saved,
     )
+}
+
+/// `X[B,S,D] · Wq[D,Hq*Dh] -> Q[B,S,Hq*Dh]`.
+pub fn project_queries<S: SequenceKind>(
+    x: &HiddenStates<S>,
+    weight: &QueryProjectionWeight,
+    name: &str,
+) -> ProjectedQueries<S> {
+    assert_eq!(
+        x.hidden_extent(),
+        weight.hidden_extent(),
+        "project_queries: Hidden extent must match weight input"
+    );
+    TypedTensor::from_proven_axes(linear(x.as_tensor(), weight.as_tensor(), name))
+}
+
+/// `X[B,S,D] · Wk[D,Hkv*Dh] -> K[B,S,Hkv*Dh]`.
+pub fn project_keys<S: SequenceKind>(
+    x: &HiddenStates<S>,
+    weight: &KvProjectionWeight,
+    name: &str,
+) -> ProjectedKv<S> {
+    assert_eq!(
+        x.hidden_extent(),
+        weight.hidden_extent(),
+        "project_keys: Hidden extent must match weight input"
+    );
+    TypedTensor::from_proven_axes(linear(x.as_tensor(), weight.as_tensor(), name))
+}
+
+/// `X[B,S,D] · Wv[D,Hkv*Dh] -> V[B,S,Hkv*Dh]`.
+pub fn project_values<S: SequenceKind>(
+    x: &HiddenStates<S>,
+    weight: &KvProjectionWeight,
+    name: &str,
+) -> ProjectedKv<S> {
+    assert_eq!(
+        x.hidden_extent(),
+        weight.hidden_extent(),
+        "project_values: Hidden extent must match weight input"
+    );
+    TypedTensor::from_proven_axes(linear(x.as_tensor(), weight.as_tensor(), name))
+}
+
+/// `O[B,S,Hq*Dh] · Wo[Hq*Dh,D] -> Y[B,S,D]`.
+pub fn project_attention_output<S: SequenceKind>(
+    x: &ProjectedQueries<S>,
+    weight: &OutputProjectionWeight,
+    name: &str,
+) -> HiddenStates<S> {
+    assert_eq!(
+        x.flattened_query_extent(),
+        weight.flattened_query_extent(),
+        "project_attention_output: QueryHead*HeadDim extent must match weight input"
+    );
+    TypedTensor::from_proven_axes(linear(x.as_tensor(), weight.as_tensor(), name))
 }

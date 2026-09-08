@@ -5,7 +5,7 @@ use tnsr::{
     autograd::Engine,
     ops::{basic, gqa, rope, shape},
     qwen3::{Qwen3Attention, Qwen3Block, Qwen3Config, Qwen3MLP, Qwen3Model},
-    tensor::{Tensor, TensorValue},
+    tensor::{Shape, Tensor, TensorValue},
 };
 
 fn approx_eq(a: f32, b: f32, tol: f32) -> bool {
@@ -136,6 +136,66 @@ fn rope_backward() {
         1e-3,
         2e-3,
     );
+}
+
+#[test]
+#[should_panic(expected = "rope: position overflow")]
+fn rope_rejects_position_overflow() {
+    let x = Tensor::zeros(&[1, 2, 1, 2]);
+
+    let _ = rope::rope(
+        &x,
+        rope::RopeConfig {
+            base: 10_000.0,
+            start_pos: usize::MAX,
+        },
+        "overflowing_rope",
+    );
+}
+
+#[test]
+fn rope_preserves_legacy_f32_numerics_for_exact_integer_positions() {
+    let base = 10_000.0f32;
+    let head_dim = 4;
+    for start_pos in 0..128 {
+        let x = Tensor::from_value_no_grad(TensorValue::from_vec(
+            Shape(vec![1, 1, 1, head_dim]),
+            vec![1.0, 0.0, 1.0, 0.0],
+        ));
+        let y = rope::rope(
+            &x,
+            rope::RopeConfig { base, start_pos },
+            "legacy_precision_rope",
+        );
+        let output = y.inner.borrow().value.data.clone();
+
+        for pair in 0..head_dim / 2 {
+            let inverse_frequency = base.powf(-(2.0 * pair as f32) / head_dim as f32);
+            let theta = start_pos as f32 * inverse_frequency;
+            assert_eq!(output[2 * pair].to_bits(), theta.cos().to_bits());
+            assert_eq!(output[2 * pair + 1].to_bits(), theta.sin().to_bits());
+        }
+    }
+}
+
+#[test]
+#[should_panic(expected = "rope: table size overflow")]
+fn rope_rejects_table_size_overflow_even_for_empty_batch() {
+    let sequence = usize::MAX / 2 + 1;
+    let x = Tensor::from_value_no_grad(TensorValue::from_vec(
+        Shape(vec![0, sequence, 1, 4]),
+        Vec::new(),
+    ));
+
+    let _ = rope::rope(&x, rope::RopeConfig::default(), "oversized_rope_table");
+}
+
+#[test]
+#[should_panic(expected = "rope: head_dim must be positive")]
+fn rope_rejects_zero_head_dimension() {
+    let x = Tensor::zeros(&[1, 1, 1, 0]);
+
+    let _ = rope::rope(&x, rope::RopeConfig::default(), "zero_width_rope");
 }
 
 // ---------------------------------------------------------------------------

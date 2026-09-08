@@ -174,7 +174,10 @@ impl KvCache {
 
     fn validate_chunk(&self, shape: &Shape, name: &str) {
         assert_eq!(shape.0.len(), 2, "{name} chunk must be [T,D]");
-        assert!(shape.0[0] > 0, "{name} chunk must contain at least one token");
+        assert!(
+            shape.0[0] > 0,
+            "{name} chunk must contain at least one token"
+        );
         assert_eq!(
             shape.0[1], self.head_dim,
             "{name} dim must match cache head_dim"

@@ -89,6 +89,322 @@ pub struct OpCallId(pub usize);
 
 pub type OpCallRef = Rc<OpCall>;
 
+/// Tensor identity normalized within one [`GraphObservation`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GraphTensorId(pub usize);
+
+/// Index of an operation in producer-before-consumer observation order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GraphOpIndex(pub usize);
+
+/// One normalized tensor edge together with its observed runtime shape.
+///
+/// Keeping identity and shape in one value prevents graph consumers from
+/// accidentally pairing entries from separate parallel arrays.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphTensor {
+    /// Tensor identity normalized within this observation.
+    pub id: GraphTensorId,
+    /// Runtime shape captured when the graph was observed.
+    pub shape: Shape,
+}
+
+/// Stable, recipe-free view of one differentiable operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphOp {
+    /// Mathematical operation category.
+    pub kind: OpKind,
+    /// Caller-supplied operation name.
+    pub name: String,
+    /// Declared input edges in equation order.
+    pub inputs: Vec<GraphTensor>,
+    /// Produced output edges in output-index order.
+    pub outputs: Vec<GraphTensor>,
+}
+
+/// One caller-selected or recorder-inferred graph output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphRoot {
+    /// Normalized identity of the selected output tensor.
+    pub tensor: GraphTensorId,
+    /// Runtime shape captured when the root was observed.
+    pub shape: Shape,
+}
+
+/// A live tensor does not belong to this observation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GraphObservationError {
+    /// The queried live tensor was not reachable from the observation roots.
+    UnobservedTensor,
+}
+
+impl std::fmt::Display for GraphObservationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnobservedTensor => write!(f, "tensor is not part of this graph observation"),
+        }
+    }
+}
+
+impl std::error::Error for GraphObservationError {}
+
+/// Canonical, recipe-free observation of a differentiable tensor graph.
+///
+/// Tensor identities are normalized per observation, allowing independently
+/// built but structurally equal graphs to compare equal.
+#[derive(Clone)]
+pub struct GraphObservation {
+    operations: Vec<GraphOp>,
+    roots: Vec<GraphRoot>,
+    raw_tensors: HashMap<TensorId, GraphTensorId>,
+    raw_producers: HashMap<TensorId, GraphOpIndex>,
+}
+
+impl std::fmt::Debug for GraphObservation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GraphObservation")
+            .field("operations", &self.operations)
+            .field("roots", &self.roots)
+            .finish()
+    }
+}
+
+impl PartialEq for GraphObservation {
+    fn eq(&self, other: &Self) -> bool {
+        self.operations == other.operations && self.roots == other.roots
+    }
+}
+
+impl Eq for GraphObservation {}
+
+struct RawGraphOp {
+    kind: OpKind,
+    name: String,
+    inputs: Vec<RawGraphTensor>,
+    outputs: Vec<RawGraphTensor>,
+}
+
+struct RawGraphTensor {
+    id: TensorId,
+    shape: Shape,
+}
+
+struct RawGraphRoot {
+    tensor: TensorId,
+    shape: Shape,
+}
+
+impl GraphObservation {
+    /// Observe the differentiable DAG reachable from `outputs`.
+    ///
+    /// Roots are visited in caller order. Each operation's input producers are
+    /// visited in declared input order with post-order DFS, yielding a stable
+    /// producer-before-consumer sequence.
+    pub fn from_outputs(outputs: &[&Tensor]) -> Self {
+        let mut calls = Vec::new();
+        let mut seen = HashSet::new();
+        for output in outputs {
+            if let Some(producer) = output.inner.borrow().autograd.producer.clone() {
+                Self::observe_call(&producer, &mut seen, &mut calls);
+            }
+        }
+
+        let raw_operations = calls
+            .into_iter()
+            .map(|call| {
+                assert_eq!(
+                    call.outputs.len(),
+                    call.output_shapes.len(),
+                    "graph observation: operation output identities and shapes must have equal counts"
+                );
+                RawGraphOp {
+                    kind: call.kind,
+                    name: call.name.clone(),
+                    inputs: call
+                    .inputs
+                    .iter()
+                    .map(|input| RawGraphTensor {
+                        id: input.id,
+                        shape: input.shape.clone(),
+                    })
+                    .collect(),
+                    outputs: call
+                        .outputs
+                        .iter()
+                        .copied()
+                        .zip(call.output_shapes.iter().cloned())
+                        .map(|(id, shape)| RawGraphTensor { id, shape })
+                        .collect(),
+                }
+            })
+            .collect();
+        let raw_roots = outputs
+            .iter()
+            .map(|output| RawGraphRoot {
+                tensor: output.id(),
+                shape: output.shape(),
+            })
+            .collect();
+        Self::normalize(raw_operations, raw_roots)
+    }
+
+    /// Return operations in stable producer-before-consumer order.
+    pub fn operations(&self) -> &[GraphOp] {
+        &self.operations
+    }
+
+    /// Resolve an observation-local operation index.
+    pub fn operation(&self, index: GraphOpIndex) -> Option<&GraphOp> {
+        self.operations.get(index.0)
+    }
+
+    /// Return selected or inferred graph roots in caller or recorder order.
+    pub fn roots(&self) -> &[GraphRoot] {
+        &self.roots
+    }
+
+    /// Whether this observation contains no differentiable operations.
+    pub fn is_empty(&self) -> bool {
+        self.operations.is_empty()
+    }
+
+    /// Locate a live tensor's producer within this observation.
+    pub fn producer_of(
+        &self,
+        tensor: &Tensor,
+    ) -> Result<Option<GraphOpIndex>, GraphObservationError> {
+        let raw_id = tensor.id();
+        if !self.raw_tensors.contains_key(&raw_id) {
+            return Err(GraphObservationError::UnobservedTensor);
+        }
+        Ok(self.raw_producers.get(&raw_id).copied())
+    }
+
+    pub(crate) fn from_recorded_ops(records: &[crate::debug::OpCallRecord]) -> Self {
+        let consumed: HashSet<TensorId> = records
+            .iter()
+            .flat_map(|record| record.input_tensor_ids.iter().copied())
+            .collect();
+        let raw_roots = records
+            .iter()
+            .flat_map(|record| {
+                record
+                    .output_tensor_ids
+                    .iter()
+                    .copied()
+                    .zip(record.output_shapes.iter().cloned())
+            })
+            .filter(|(tensor, _)| !consumed.contains(tensor))
+            .map(|(tensor, shape)| RawGraphRoot { tensor, shape })
+            .collect();
+        let raw_operations = records
+            .iter()
+            .map(|record| {
+                assert_eq!(
+                    record.input_tensor_ids.len(),
+                    record.input_shapes.len(),
+                    "graph observation: recorded input identities and shapes must have equal counts"
+                );
+                assert_eq!(
+                    record.output_tensor_ids.len(),
+                    record.output_shapes.len(),
+                    "graph observation: recorded output identities and shapes must have equal counts"
+                );
+                RawGraphOp {
+                    kind: record.kind,
+                    name: record.name.clone(),
+                    inputs: record
+                        .input_tensor_ids
+                        .iter()
+                        .copied()
+                        .zip(record.input_shapes.iter().cloned())
+                        .map(|(id, shape)| RawGraphTensor { id, shape })
+                        .collect(),
+                    outputs: record
+                        .output_tensor_ids
+                        .iter()
+                        .copied()
+                        .zip(record.output_shapes.iter().cloned())
+                        .map(|(id, shape)| RawGraphTensor { id, shape })
+                        .collect(),
+                }
+            })
+            .collect();
+        Self::normalize(raw_operations, raw_roots)
+    }
+
+    fn observe_call(
+        call: &OpCallRef,
+        seen: &mut HashSet<OpCallId>,
+        operations: &mut Vec<OpCallRef>,
+    ) {
+        if !seen.insert(call.id) {
+            return;
+        }
+        for input in &call.inputs {
+            if let Some(producer) = &input.producer {
+                Self::observe_call(producer, seen, operations);
+            }
+        }
+        operations.push(call.clone());
+    }
+
+    fn normalize(raw_operations: Vec<RawGraphOp>, raw_roots: Vec<RawGraphRoot>) -> Self {
+        fn tensor_id(raw: TensorId, ids: &mut HashMap<TensorId, GraphTensorId>) -> GraphTensorId {
+            if let Some(id) = ids.get(&raw) {
+                return *id;
+            }
+            let id = GraphTensorId(ids.len());
+            ids.insert(raw, id);
+            id
+        }
+
+        let mut raw_tensors = HashMap::new();
+        let mut raw_producers = HashMap::new();
+        let mut operations = Vec::with_capacity(raw_operations.len());
+        for (operation_index, raw) in raw_operations.into_iter().enumerate() {
+            let inputs = raw
+                .inputs
+                .into_iter()
+                .map(|input| GraphTensor {
+                    id: tensor_id(input.id, &mut raw_tensors),
+                    shape: input.shape,
+                })
+                .collect();
+            for output in &raw.outputs {
+                raw_producers.insert(output.id, GraphOpIndex(operation_index));
+            }
+            let outputs = raw
+                .outputs
+                .into_iter()
+                .map(|output| GraphTensor {
+                    id: tensor_id(output.id, &mut raw_tensors),
+                    shape: output.shape,
+                })
+                .collect();
+            operations.push(GraphOp {
+                kind: raw.kind,
+                name: raw.name,
+                inputs,
+                outputs,
+            });
+        }
+        let roots = raw_roots
+            .into_iter()
+            .map(|root| GraphRoot {
+                tensor: tensor_id(root.tensor, &mut raw_tensors),
+                shape: root.shape,
+            })
+            .collect();
+        Self {
+            operations,
+            roots,
+            raw_tensors,
+            raw_producers,
+        }
+    }
+}
+
 /// One node in the autograd DAG: a single forward op that ran while grad mode
 /// was enabled. `OpCall`s are heap-allocated behind an `Rc` ([`OpCallRef`]) so
 /// that both the produced tensor (via its `producer` link) and the topo-sort
@@ -194,11 +510,12 @@ impl Default for Engine {
 }
 
 impl Engine {
-    /// Create an engine and install its recorder as the process-global one, so
-    /// ops built afterwards register their `OpCall`s and saved tensors into it.
+    /// Create an engine with an initially empty recorder.
+    ///
+    /// Forward observation is explicit: use [`Self::with_recording`] around
+    /// the execution whose operations belong to this engine's trace.
     pub fn new() -> Self {
         let debug = DebugRecorder::new();
-        crate::debug::set_global_recorder(debug.clone());
         Self {
             grads: HashMap::new(),
             debug,
@@ -206,11 +523,24 @@ impl Engine {
         }
     }
 
+    /// Observe operations and save events produced during `f`.
+    ///
+    /// Scopes may nest across engines. The previous recorder is restored on
+    /// normal return and during panic unwinding.
+    pub fn with_recording<R>(&self, f: impl FnOnce() -> R) -> R {
+        crate::debug::with_recorder(&self.debug, f)
+    }
+
     /// Compute gradients of `loss` w.r.t. every leaf tensor that required grad.
     ///
     /// After this returns, each such leaf's `.grad()` holds `∂loss/∂leaf`.
     /// The pass has three steps: seed → topo-sort → reverse walk.
     pub fn backward(&mut self, loss: &Tensor) {
+        let recorder = self.debug.clone();
+        crate::debug::with_recorder(&recorder, || self.backward_impl(loss));
+    }
+
+    fn backward_impl(&mut self, loss: &Tensor) {
         // ── Step 1: seed the recursion ──────────────────────────────────────
         // The chain rule needs a starting gradient. `∂loss/∂loss = 1`. Backprop
         // only makes sense from a scalar objective, hence the numel==1 assert.

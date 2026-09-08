@@ -20,11 +20,16 @@
 //! Reference: HF `Qwen3Attention.forward` —
 //! <https://github.com/huggingface/transformers/blob/main/src/transformers/models/qwen3/modeling_qwen3.py>
 
+use crate::attention_layout::{AttentionLayoutError, EqualContiguousAttentionLayout};
 use crate::ops::{
     activations, basic, context_parallel_gqa, embedding, gqa, linear, norm, rope,
     shape as shape_ops,
 };
 use crate::tensor::{Shape, Tensor, TensorValue};
+use crate::typed::{
+    AxisExtent, FullHiddenStates, HeadDim, HeadScale, Hidden, KvHead, KvProjectionWeight, Merged,
+    OutputProjectionWeight, QueryHead, QueryProjectionWeight, ShardHiddenStates,
+};
 
 /// Hyperparameters for a Qwen3 dense model.
 ///
@@ -131,6 +136,32 @@ pub struct Qwen3Attention {
     pub k_norm: Tensor, // [Dh]
 }
 
+/// Named runtime geometry used by one typed attention call.
+struct AttentionGeometry {
+    hidden: AxisExtent<Hidden>,
+    query_heads: AxisExtent<QueryHead>,
+    kv_heads: AxisExtent<KvHead>,
+    head_dim: AxisExtent<HeadDim>,
+    query_width: AxisExtent<Merged<QueryHead, HeadDim>>,
+    kv_width: AxisExtent<Merged<KvHead, HeadDim>>,
+}
+
+/// One coherent snapshot of Qwen attention's mutable public state.
+///
+/// Scalars are copied and tensor handles are cloned only for the duration of a
+/// call. Parameter values are not copied. This is coherent because tnsr's
+/// execution is single-threaded and callback-free.
+struct ValidatedAttentionState {
+    geometry: AttentionGeometry,
+    rope_cfg: rope::RopeConfig,
+    wq: QueryProjectionWeight,
+    wk: KvProjectionWeight,
+    wv: KvProjectionWeight,
+    wo: OutputProjectionWeight,
+    q_norm: HeadScale,
+    k_norm: HeadScale,
+}
+
 impl Qwen3Attention {
     pub fn new(cfg: &Qwen3Config) -> Self {
         let d = cfg.hidden_size;
@@ -161,6 +192,366 @@ impl Qwen3Attention {
             &self.q_norm,
             &self.k_norm,
         ]
+    }
+
+    fn validated_attention_state(&self) -> ValidatedAttentionState {
+        // Snapshot every mutable public field before validation. There is no
+        // cached second representation: a later call snapshots again.
+        let query_heads = AxisExtent::<QueryHead>::new(self.n_q_heads);
+        let kv_heads = AxisExtent::<KvHead>::new(self.n_kv_heads);
+        let head_dim = AxisExtent::<HeadDim>::new(self.head_dim);
+        let rope_cfg = self.rope_cfg;
+        let wq_tensor = self.wq.clone();
+        let wk_tensor = self.wk.clone();
+        let wv_tensor = self.wv.clone();
+        let wo_tensor = self.wo.clone();
+        let q_norm_tensor = self.q_norm.clone();
+        let k_norm_tensor = self.k_norm.clone();
+
+        assert!(
+            kv_heads.get() > 0,
+            "Qwen3Attention typed: n_kv_heads must be positive"
+        );
+        assert!(
+            query_heads.get() > 0,
+            "Qwen3Attention typed: n_q_heads must be positive"
+        );
+        assert!(
+            query_heads.get() % kv_heads.get() == 0,
+            "Qwen3Attention typed: n_q_heads must be divisible by n_kv_heads"
+        );
+        assert!(
+            head_dim.get() > 0 && head_dim.get() % 2 == 0,
+            "Qwen3Attention typed: head_dim must be positive and even"
+        );
+
+        let query_width = query_heads
+            .checked_merge(head_dim)
+            .expect("Qwen3Attention typed: query head extent overflow");
+        let kv_width = kv_heads
+            .checked_merge(head_dim)
+            .expect("Qwen3Attention typed: KV head extent overflow");
+
+        let wq_shape = wq_tensor.shape().0;
+        assert_eq!(
+            wq_shape.len(),
+            2,
+            "Qwen3Attention typed: wq must have shape [D,Hq*Dh]"
+        );
+        let hidden = AxisExtent::<Hidden>::new(wq_shape[0]);
+        assert_eq!(
+            wk_tensor.shape().0.len(),
+            2,
+            "Qwen3Attention typed: wk must have shape [D,Hkv*Dh]"
+        );
+        assert_eq!(
+            wv_tensor.shape().0.len(),
+            2,
+            "Qwen3Attention typed: wv must have shape [D,Hkv*Dh]"
+        );
+        assert_eq!(
+            wo_tensor.shape().0.len(),
+            2,
+            "Qwen3Attention typed: wo must have shape [Hq*Dh,D]"
+        );
+        assert_eq!(
+            q_norm_tensor.shape().0.len(),
+            1,
+            "Qwen3Attention typed: q_norm must have shape [Dh]"
+        );
+        assert_eq!(
+            k_norm_tensor.shape().0.len(),
+            1,
+            "Qwen3Attention typed: k_norm must have shape [Dh]"
+        );
+
+        let wq = QueryProjectionWeight::from_proven_axes(wq_tensor);
+        let wk = KvProjectionWeight::from_proven_axes(wk_tensor);
+        let wv = KvProjectionWeight::from_proven_axes(wv_tensor);
+        let wo = OutputProjectionWeight::from_proven_axes(wo_tensor);
+        let q_norm = HeadScale::from_proven_axes(q_norm_tensor);
+        let k_norm = HeadScale::from_proven_axes(k_norm_tensor);
+        assert_eq!(
+            wq.flattened_query_extent(),
+            query_width,
+            "Qwen3Attention typed: wq must have shape [D,Hq*Dh]"
+        );
+        assert_eq!(
+            wk.hidden_extent(),
+            hidden,
+            "Qwen3Attention typed: wk must have shape [D,Hkv*Dh]"
+        );
+        assert_eq!(
+            wk.flattened_kv_extent(),
+            kv_width,
+            "Qwen3Attention typed: wk must have shape [D,Hkv*Dh]"
+        );
+        assert_eq!(
+            wv.hidden_extent(),
+            hidden,
+            "Qwen3Attention typed: wv must have shape [D,Hkv*Dh]"
+        );
+        assert_eq!(
+            wv.flattened_kv_extent(),
+            kv_width,
+            "Qwen3Attention typed: wv must have shape [D,Hkv*Dh]"
+        );
+        assert_eq!(
+            wo.flattened_query_extent(),
+            query_width,
+            "Qwen3Attention typed: wo must have shape [Hq*Dh,D]"
+        );
+        assert_eq!(
+            wo.hidden_extent(),
+            hidden,
+            "Qwen3Attention typed: wo must have shape [Hq*Dh,D]"
+        );
+        assert_eq!(
+            q_norm.head_dim_extent(),
+            head_dim,
+            "Qwen3Attention typed: q_norm must have shape [Dh]"
+        );
+        assert_eq!(
+            k_norm.head_dim_extent(),
+            head_dim,
+            "Qwen3Attention typed: k_norm must have shape [Dh]"
+        );
+
+        ValidatedAttentionState {
+            geometry: AttentionGeometry {
+                hidden,
+                query_heads,
+                kv_heads,
+                head_dim,
+                query_width,
+                kv_width,
+            },
+            rope_cfg,
+            wq,
+            wk,
+            wv,
+            wo,
+            q_norm,
+            k_norm,
+        }
+    }
+
+    /// Typed ordinary Qwen3 attention over one complete sequence.
+    ///
+    /// The type signatures expose each mathematical axis transformation while
+    /// the concrete operations below intentionally mirror the independent
+    /// legacy derivation in [`Self::forward`].
+    pub fn forward_typed(&self, x: &FullHiddenStates) -> FullHiddenStates {
+        let state = self.validated_attention_state();
+        assert_eq!(
+            x.hidden_extent(),
+            state.geometry.hidden,
+            "Qwen3Attention typed: hidden dimension mismatch"
+        );
+        let sequence = x.sequence_extent().get();
+        if sequence > 0 {
+            state
+                .rope_cfg
+                .start_pos
+                .checked_add(sequence - 1)
+                .expect("Qwen3Attention typed: RoPE position overflow");
+        }
+
+        // 1. X[B,T,D] is projected into the three distinct head spaces.
+        let projected_queries = linear::project_queries(x, &state.wq, "q_proj");
+        let projected_keys = linear::project_keys(x, &state.wk, "k_proj");
+        let projected_values = linear::project_values(x, &state.wv, "v_proj");
+        debug_assert_eq!(
+            projected_queries.flattened_query_extent(),
+            state.geometry.query_width
+        );
+        debug_assert_eq!(
+            projected_keys.flattened_kv_extent(),
+            state.geometry.kv_width
+        );
+        debug_assert_eq!(
+            projected_values.flattened_kv_extent(),
+            state.geometry.kv_width
+        );
+
+        // 2. The merged head coordinates become explicit tensor axes.
+        let queries = shape_ops::split_query_heads(
+            &projected_queries,
+            state.geometry.query_heads,
+            state.geometry.head_dim,
+            "q_reshape",
+        );
+        let keys = shape_ops::split_kv_heads(
+            &projected_keys,
+            state.geometry.kv_heads,
+            state.geometry.head_dim,
+            "k_reshape",
+        );
+        let values = shape_ops::split_kv_heads(
+            &projected_values,
+            state.geometry.kv_heads,
+            state.geometry.head_dim,
+            "v_reshape",
+        );
+
+        // 3. Qwen3 normalizes each Q/K head before encoding position.
+        let queries = norm::normalize_queries(&queries, &state.q_norm, "q_norm");
+        let keys = norm::normalize_keys(&keys, &state.k_norm, "k_norm");
+
+        // 4. Q and K receive the same complete-sequence position system.
+        let queries = rope::rotate_queries(&queries, state.rope_cfg, "q_rope");
+        let keys = rope::rotate_keys(&keys, state.rope_cfg, "k_rope");
+
+        // 5. Causal grouped-query attention maps Q heads back to Q heads.
+        let attended = gqa::gqa_attention_typed(&queries, &keys, &values, "gqa");
+
+        // 6. Merge heads and return to model hidden space.
+        let attended = shape_ops::merge_query_heads(&attended, "attn_reshape");
+        linear::project_attention_output(&attended, &state.wo, "o_proj")
+    }
+
+    /// Typed context-parallel Qwen3 attention over equal contiguous shards.
+    ///
+    /// Slice order is the logical rank order. Local projections stay local;
+    /// only the single typed CP-GQA operation observes all K/V shards.
+    pub fn forward_context_parallel_typed(
+        &self,
+        x_shards: &[ShardHiddenStates],
+    ) -> Vec<ShardHiddenStates> {
+        assert!(
+            !x_shards.is_empty(),
+            "Qwen3Attention typed context parallel: at least one input shard is required"
+        );
+        let state = self.validated_attention_state();
+        let batch = x_shards[0].batch_extent();
+        let local_sequence = x_shards[0].sequence_extent();
+        let hidden = x_shards[0].hidden_extent();
+        assert!(
+            local_sequence.get() > 0,
+            "Qwen3Attention typed context parallel: local sequence length must be positive"
+        );
+        assert_eq!(
+            hidden, state.geometry.hidden,
+            "Qwen3Attention typed context parallel: hidden dimension mismatch"
+        );
+        for shard in x_shards {
+            assert_eq!(
+                (
+                    shard.batch_extent(),
+                    shard.sequence_extent(),
+                    shard.hidden_extent(),
+                ),
+                (batch, local_sequence, hidden),
+                "Qwen3Attention typed context parallel: every input shard must have the same shape"
+            );
+        }
+        let layout = EqualContiguousAttentionLayout::new(x_shards.len(), local_sequence.get())
+            .unwrap_or_else(|error| match error {
+                AttentionLayoutError::GlobalSequenceOverflow { .. } => {
+                    panic!("Qwen3Attention typed context parallel: global sequence length overflow")
+                }
+                _ => unreachable!("shard count and local sequence were validated"),
+            });
+        state
+            .rope_cfg
+            .start_pos
+            .checked_add(layout.global_sequence() - 1)
+            .expect("Qwen3Attention typed context parallel: RoPE start position overflow");
+
+        let mut query_shards = Vec::with_capacity(x_shards.len());
+        let mut key_shards = Vec::with_capacity(x_shards.len());
+        let mut value_shards = Vec::with_capacity(x_shards.len());
+
+        for (rank, hidden_states) in x_shards.iter().enumerate() {
+            let prefix = format!("cp{rank}");
+
+            // 1. Each rank projects only the hidden states it owns.
+            let projected_queries =
+                linear::project_queries(hidden_states, &state.wq, &format!("{prefix}.q_proj"));
+            let projected_keys =
+                linear::project_keys(hidden_states, &state.wk, &format!("{prefix}.k_proj"));
+            let projected_values =
+                linear::project_values(hidden_states, &state.wv, &format!("{prefix}.v_proj"));
+            debug_assert_eq!(
+                projected_queries.flattened_query_extent(),
+                state.geometry.query_width
+            );
+            debug_assert_eq!(
+                projected_keys.flattened_kv_extent(),
+                state.geometry.kv_width
+            );
+            debug_assert_eq!(
+                projected_values.flattened_kv_extent(),
+                state.geometry.kv_width
+            );
+
+            // 2. Head axes and per-head Q/K normalization remain local.
+            let queries = shape_ops::split_query_heads(
+                &projected_queries,
+                state.geometry.query_heads,
+                state.geometry.head_dim,
+                &format!("{prefix}.q_reshape"),
+            );
+            let keys = shape_ops::split_kv_heads(
+                &projected_keys,
+                state.geometry.kv_heads,
+                state.geometry.head_dim,
+                &format!("{prefix}.k_reshape"),
+            );
+            let values = shape_ops::split_kv_heads(
+                &projected_values,
+                state.geometry.kv_heads,
+                state.geometry.head_dim,
+                &format!("{prefix}.v_reshape"),
+            );
+            let queries =
+                norm::normalize_queries(&queries, &state.q_norm, &format!("{prefix}.q_norm"));
+            let keys = norm::normalize_keys(&keys, &state.k_norm, &format!("{prefix}.k_norm"));
+
+            // 3. Local position i on rank r represents global r*S + i.
+            let query_block = layout
+                .query_block(rank)
+                .expect("validated context-parallel rank");
+            let start_pos = state
+                .rope_cfg
+                .start_pos
+                .checked_add(query_block.start())
+                .expect("Qwen3Attention typed context parallel: RoPE start position overflow");
+            let rank_rope = rope::RopeConfig {
+                base: state.rope_cfg.base,
+                start_pos,
+            };
+            query_shards.push(rope::rotate_queries(
+                &queries,
+                rank_rope,
+                &format!("{prefix}.q_rope"),
+            ));
+            key_shards.push(rope::rotate_keys(
+                &keys,
+                rank_rope,
+                &format!("{prefix}.k_rope"),
+            ));
+            value_shards.push(values);
+        }
+
+        // 4. This is the one operation that crosses logical rank boundaries.
+        let attended_shards = context_parallel_gqa::context_parallel_gqa_attention_typed(
+            &query_shards,
+            &key_shards,
+            &value_shards,
+            "context_parallel_gqa",
+        );
+
+        // 5. Every rank independently returns its result to hidden space.
+        attended_shards
+            .iter()
+            .enumerate()
+            .map(|(rank, attended)| {
+                let merged =
+                    shape_ops::merge_query_heads(attended, &format!("cp{rank}.attn_reshape"));
+                linear::project_attention_output(&merged, &state.wo, &format!("cp{rank}.o_proj"))
+            })
+            .collect()
     }
 
     /// `x`: `[B, T, D]` → output `[B, T, D]`.
@@ -238,6 +629,16 @@ impl Qwen3Attention {
             );
         }
 
+        let layout =
+            EqualContiguousAttentionLayout::new(x_shards.len(), local_t).unwrap_or_else(|error| {
+                match error {
+                    AttentionLayoutError::GlobalSequenceOverflow { .. } => {
+                        panic!("Qwen3Attention context parallel: global sequence length overflow")
+                    }
+                    _ => unreachable!("shard count and local sequence were validated"),
+                }
+            });
+
         let hq = self.n_q_heads;
         let hk = self.n_kv_heads;
         let dh = self.head_dim;
@@ -268,9 +669,16 @@ impl Qwen3Attention {
             );
             let q4n = norm::rms_norm(&q4, &self.q_norm, &format!("{prefix}.q_norm"));
             let k4n = norm::rms_norm(&k4, &self.k_norm, &format!("{prefix}.k_norm"));
+            let query_block = layout
+                .query_block(rank)
+                .expect("validated context-parallel rank");
             let rank_rope = rope::RopeConfig {
                 base: self.rope_cfg.base,
-                start_pos: self.rope_cfg.start_pos + rank * local_t,
+                start_pos: self
+                    .rope_cfg
+                    .start_pos
+                    .checked_add(query_block.start())
+                    .expect("Qwen3Attention context parallel: RoPE start position overflow"),
             };
             q_shards.push(rope::rope(&q4n, rank_rope, &format!("{prefix}.q_rope")));
             k_shards.push(rope::rope(&k4n, rank_rope, &format!("{prefix}.k_rope")));

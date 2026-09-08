@@ -49,14 +49,16 @@ fn run_demo(options: DemoOptions) -> Result<(), String> {
 
     // -----------------------------------------------------------------------
     // 1. Baseline: no checkpointing
-    // Engine::new() must be called BEFORE forward to capture save events.
+    // Recording is scoped explicitly to the forward execution.
     // -----------------------------------------------------------------------
     info!("[1] No checkpoint");
     {
         let mut engine = Engine::new();
         let x = Tensor::randn(&[4, 7, 29]).requires_grad();
-        let y = block.forward(&x);
-        let loss = basic::sum(&y, "loss");
+        let loss = engine.with_recording(|| {
+            let y = block.forward(&x);
+            basic::sum(&y, "loss")
+        });
         engine.backward(&loss);
 
         engine.print_op_table();
@@ -84,12 +86,13 @@ fn run_demo(options: DemoOptions) -> Result<(), String> {
         let x = Tensor::randn(&[4, 7, 29]).requires_grad();
         let policy = Rc::new(WholeBlockCheckpoint);
 
-        let y = checkpoint("block0", policy, std::slice::from_ref(&x), {
-            let block2 = block2.clone();
-            move |xs| block2.forward(&xs[0])
+        let loss = engine.with_recording(|| {
+            let y = checkpoint("block0", policy, std::slice::from_ref(&x), {
+                let block2 = block2.clone();
+                move |xs| block2.forward(&xs[0])
+            });
+            basic::sum(&y, "loss")
         });
-
-        let loss = basic::sum(&y, "loss");
         engine.backward(&loss);
 
         engine.print_checkpoint_report();
@@ -121,12 +124,13 @@ fn run_demo(options: DemoOptions) -> Result<(), String> {
             recompute_activation_over_bytes: 8192,
         });
 
-        let y = checkpoint("block0_selective", policy, std::slice::from_ref(&x), {
-            let block3 = block3.clone();
-            move |xs| block3.forward(&xs[0])
+        let loss = engine.with_recording(|| {
+            let y = checkpoint("block0_selective", policy, std::slice::from_ref(&x), {
+                let block3 = block3.clone();
+                move |xs| block3.forward(&xs[0])
+            });
+            basic::sum(&y, "loss")
         });
-
-        let loss = basic::sum(&y, "loss");
         engine.backward(&loss);
 
         engine.print_checkpoint_report();
@@ -152,8 +156,10 @@ fn run_demo(options: DemoOptions) -> Result<(), String> {
         let block4 = Rc::new(TransformerBlock::new(cfg4));
         let mut engine = Engine::new();
         let x = Tensor::randn(&[4, 7, 29]).requires_grad();
-        let y = block4.forward(&x);
-        let loss = basic::sum(&y, "loss");
+        let loss = engine.with_recording(|| {
+            let y = block4.forward(&x);
+            basic::sum(&y, "loss")
+        });
         engine.backward(&loss);
         for output in &options.outputs {
             match output {

@@ -3,7 +3,9 @@
 **Time:** 12 minutes
 **Tangible win:** Design a context-parallel Qwen3 block and state exactly what must communicate, what remains local, and why decode needs a different plan.
 
-[Previous lesson](0001-three-layers-of-tnsr.md) · [Reference sheet](../reference/0002-context-parallel-qwen3.md)
+[Previous lesson](0001-three-layers-of-tnsr.md) ·
+[Reference sheet](../reference/0002-context-parallel-qwen3.md) ·
+[Next lesson](0003-typed-transformer-math.md)
 
 ## Start with the axis
 
@@ -85,17 +87,19 @@ The current `gqa_attention` compares local indices with `si <= ti`. That becomes
 
 ### RoPE example
 
-`rope.rs` already provides `RopeConfig.start_pos`, but `Qwen3Attention` fixes it to zero. For contiguous sharding, rank `r` needs:
+`rope.rs` provides `RopeConfig.start_pos`. The implemented context-parallel
+Qwen3 paths derive the following value for each contiguous shard:
 
 ```text
-start_pos = r × (T/P)
+start_pos = model_start_pos + query_block(r).start
+          = model_start_pos + r × (T/P)
 ```
 
 Otherwise every rank rotates its first local token as position zero. A later load-balanced, non-contiguous partition needs explicit position IDs rather than one `start_pos`.
 
-## Why the current GQA operation must change
+## Why context parallelism has its own GQA operation
 
-`ops/gqa.rs` currently assumes:
+Ordinary `ops/gqa.rs` intentionally assumes:
 
 ```text
 Q: [B,T,Hq,Dh]
@@ -117,7 +121,16 @@ K_seen:  [B,T,Hkv,Dh]
 V_seen:  [B,T,Hkv,Dh]
 ```
 
-So this is not merely a wrapper around `gqa_attention`. The operation contract, causal indexing, saved backward state, and attention implementation all need redesign.
+So context parallelism is not merely a wrapper around `gqa_attention`. The
+repository implements it as a separate explicit operation in
+`ops/context_parallel_gqa.rs`, with its own causal indexing, saved backward
+state, global `dK/dV` accumulation, and owner-shard scatter.
+
+The crate-internal `EqualContiguousAttentionLayout` owns only the repeated
+ownership mechanics: checked global length, rank Query blocks, and batch-major
+K/V gather or gradient scatter. Ordinary and context-parallel GQA keep separate
+forward and backward equations so a reader does not have to reconstruct the
+chosen attention variant from runtime branches.
 
 ## Communication for Qwen3-8B
 
@@ -159,7 +172,11 @@ l: sum of exp(score - m)
 o: weighted value numerator
 ```
 
-When the next score block arrives, rescale the old state to the new maximum before adding the new block. This is the numerical step that makes blockwise attention exactly equal to unsharded softmax without materializing `[T/P,T]` probabilities.
+When the next score block arrives, rescale the old state to the new maximum
+before adding the new block. This makes blockwise attention mathematically
+equivalent to unsharded softmax without materializing `[T/P,T]`
+probabilities; finite-precision implementations are compared within a stated
+tolerance.
 
 ## Training and inference diverge
 
@@ -182,16 +199,24 @@ Simply context-sharding the current generation loop would teach the forward deco
 
 ## The `tnsr` research ladder
 
-Implement in this order:
+The first correctness milestones are implemented; the remaining ladder is:
 
-1. **Cost model:** Add Qwen3-aware CP memory and communication formulas. Use `Hkv × Dh`, not full `D`, for KV bytes.
-2. **All-gather simulation:** Split Q/K/V vectors by context in one process, gather K/V, compute local causal outputs, concatenate, and compare with unsharded GQA.
-3. **Ring simulation:** Replace global K/V with rotating blocks and online-softmax merging; prove agreement with the same reference.
-4. **Model integration:** Pass global positions through RoPE and GQA while keeping every non-attention operation sequence-local.
-5. **Inference split:** Add KV-cache-backed prefill and decode paths.
-6. **Real runtime:** Only then add persistent device tensors, a rank/process abstraction, NCCL communication, CUDA attention kernels, and stream overlap.
+1. **Implemented — all-gather simulation:** split Q/K/V by context, gather K/V,
+   compute local causal outputs, and prove forward/backward parity.
+2. **Implemented — attention integration:** pass rank-offset positions through
+   RoPE while every non-attention operation stays sequence-local.
+3. **Implemented — readable proof interfaces:** semantic axes and named
+   extents describe the tensor equations; independent scalar, gradient,
+   causality, graph, and shard-layout tests verify them.
+4. **Cost model:** add Qwen3-aware CP memory and communication formulas. Use
+   `Hkv × Dh`, not full `D`, for KV bytes.
+5. **Ring simulation:** replace global K/V with rotating blocks and
+   online-softmax merging; prove agreement with the same reference.
+6. **Inference split:** add KV-cache-backed prefill and decode paths.
+7. **Real runtime:** only then add persistent device tensors, a rank/process
+   abstraction, NCCL communication, CUDA attention kernels, and stream overlap.
 
-The current host-buffer CUDA bridge is not a viable final substrate for step 6: every operation returns to host memory and there is no device or communicator ownership model.
+The current host-buffer CUDA bridge is not a viable final substrate for step 7: every operation returns to host memory and there is no device or communicator ownership model.
 
 ## Retrieval practice
 
@@ -218,9 +243,18 @@ The new query has no useful sequence dimension to split. The long object is the 
 
 </details>
 
-## Primary source
+## Local reading exercise
 
-Read NVIDIA's [Context Parallel Package](https://docs.nvidia.com/megatron-core/developer-guide/latest/user-guide/features/context_parallel.html). While reading, map its “all modules except attention work as usual” statement onto `Qwen3Block::forward` line by line.
+This lesson is complete without network access. Read these local files in
+order and map every shape in this lesson onto the corresponding loop or typed
+operation:
+
+1. `ferric_continuum/tnsr/src/qwen3.rs`
+2. `ferric_continuum/tnsr/src/ops/gqa.rs`
+3. `ferric_continuum/tnsr/src/ops/context_parallel_gqa.rs`
+
+For optional background when network access is available, see NVIDIA's
+[Context Parallel Package](https://docs.nvidia.com/megatron-core/developer-guide/latest/user-guide/features/context_parallel.html).
 
 ## Before the next lesson
 

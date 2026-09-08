@@ -1,0 +1,32 @@
+#+TITLE: Define the axis language and contracts
+#+TYPE: grilling
+#+STATUS: resolved
+#+BLOCKED_BY:
+#+PARENT: ../map.org
+
+* Question
+
+What is the minimum ubiquitous type-level axis vocabulary and set of legal
+transformations needed to make Qwen3 attention, MLP, residual, embedding, and
+loss equations readable without turning the API into generic type machinery?
+
+* Decisions required
+
+- Name canonical axes and distinguish semantically different equal-sized axes.
+- Decide how local/global sequence ownership is represented.
+- Define the input/output axis contracts for projection, reshape/split/merge,
+  RMSNorm, RoPE, ordinary GQA, context-parallel GQA, residual addition,
+  embedding, and cross entropy.
+- State which relationships remain runtime extent checks in Wave A.
+
+* Out of scope
+
+- Concrete Rust carrier syntax; that belongs to the type-carrier prototype.
+- Static extent arithmetic.
+
+* Answer
+
+Use =Batch=, =FullSequence=, =ShardSequence=, =Hidden=, =QueryHead=, =KvHead=,
+and =HeadDim= plus =Merged<A,B>= and rank constructors =Axes1..Axes4=. Encode
+the transformations listed in =../spec.org= through operation-specific typed
+functions. Numerical extents remain runtime checks.

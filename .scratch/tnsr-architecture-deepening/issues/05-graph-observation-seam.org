@@ -1,0 +1,56 @@
+#+TITLE: Make graph observability the verifier seam
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY: 04-scoped-autograd-recording
+#+PARENT: ../spec.org
+
+* Context
+
+Verifier files reconstruct normalized topology and inspect Rc/RefCell producer
+internals. Give callers one canonical behavior-oriented graph view.
+
+* Requirements
+
+- Add canonical graph/tensor/operation observation types,
+  =GraphObservation::from_outputs=, and =DebugRecorder::graph_observation=.
+- Reachable graphs use root-order, input-order post-order DFS; recorder prefixes
+  use insertion order and infer roots as outputs never consumed in the prefix.
+  Both assign tensor IDs by first input/output occurrence. Equality excludes
+  all raw-ID lookup state and compares canonical operations plus roots.
+- Producer lookup distinguishes =Ok(None)= for an observed leaf,
+  =Ok(Some(op))= for an observed produced tensor, and =UnobservedTensor= for a
+  foreign tensor. Support multi-output producer proof.
+- Add immutable =Tensor= observation for value snapshot, same-handle, and
+  producer identity.
+- Migrate transformer/GQA verifier topology and identity assertions off
+  =Tensor.inner= and local normalization code.
+- Preserve trace JSON schema version 1 exactly.
+
+* Out of scope
+
+- Hiding =Tensor.inner= with a source-breaking visibility change.
+- A graph rewrite/serialization system.
+- Git actions.
+
+* Verification
+
+- Red then green canonical graph tests cover independent-ID equality,
+  deterministic branch/root order, inferred recorder sinks, observed leaves,
+  foreign tensors, and multi-output producers. Equality is deterministic
+  structural equality, not general graph isomorphism.
+- Typed/legacy trace parity, GQA topology, CP shared-producer, and debug JSON
+  tests remain green.
+
+* Answer
+
+=GraphObservation= now provides canonical reachable-DAG and recorded-prefix
+views with deterministic order and normalized identities. Each operation edge
+is one atomic =GraphTensor { id, shape }= value, roots retain their captured
+shape, =producer_of= distinguishes leaves/producers/foreign tensors, and
+=operation= safely resolves an observation-local index. =Tensor= exposes only
+the value, storage-identity, and producer observations needed by verifiers.
+
+Ordinary GQA, context-parallel multi-output, typed/legacy Qwen3, autograd, and
+debug tests now use this seam. Independent-ID equality, branch/root order,
+recorder sink inference, leaf/foreign lookup, atomic edge shapes, and shared
+producer behavior pass while trace JSON remains schema version 1.

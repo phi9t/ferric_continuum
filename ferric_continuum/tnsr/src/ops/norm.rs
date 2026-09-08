@@ -10,6 +10,7 @@
 use crate::autograd::{BackwardCtx, BackwardRecipe, GradEdge, GradTarget, OpKind};
 use crate::saved::{SaveRole, SaveSite, SavedTensor};
 use crate::tensor::{Shape, Tensor, TensorValue};
+use crate::typed::{HeadScale, KvHeads, QueryHeads, SequenceKind, TypedTensor};
 
 const EPS: f32 = 1e-6;
 
@@ -373,4 +374,32 @@ pub fn rms_norm(x: &Tensor, gamma: &Tensor, name: &str) -> Tensor {
         recipe,
         debug_saved,
     )
+}
+
+/// Per-query-head RMS normalization over `Dh`.
+pub fn normalize_queries<S: SequenceKind>(
+    queries: &QueryHeads<S>,
+    gamma: &HeadScale,
+    name: &str,
+) -> QueryHeads<S> {
+    assert_eq!(
+        gamma.head_dim_extent(),
+        queries.head_dim_extent(),
+        "normalize_queries: HeadScale extent must equal Dh"
+    );
+    TypedTensor::from_proven_axes(rms_norm(queries.as_tensor(), gamma.as_tensor(), name))
+}
+
+/// Per-key-head RMS normalization over `Dh`.
+pub fn normalize_keys<S: SequenceKind>(
+    keys: &KvHeads<S>,
+    gamma: &HeadScale,
+    name: &str,
+) -> KvHeads<S> {
+    assert_eq!(
+        gamma.head_dim_extent(),
+        keys.head_dim_extent(),
+        "normalize_keys: HeadScale extent must equal Dh"
+    );
+    TypedTensor::from_proven_axes(rms_norm(keys.as_tensor(), gamma.as_tensor(), name))
 }

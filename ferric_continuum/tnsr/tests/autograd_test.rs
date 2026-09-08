@@ -1,6 +1,6 @@
-use std::rc::Rc;
+use std::{cell::Cell, rc::Rc};
 use tnsr::{
-    autograd::Engine,
+    autograd::{Engine, GraphObservation, GraphObservationError, GraphOpIndex},
     checkpoint::{checkpoint, TransformerSelectivePolicy, WholeBlockCheckpoint},
     ops::{activations, attention, basic, embedding, linear, loss, norm, shape},
     tensor::{Shape, Tensor, TensorValue},
@@ -332,6 +332,272 @@ fn test_transformer_forward_backward() {
 // Checkpointing correctness
 // ---------------------------------------------------------------------------
 
+#[test]
+fn recording_scope_is_explicit_nested_and_restored_after_unwind() {
+    let outer = Engine::new();
+    let inner = Engine::new();
+    let x = Tensor::randn(&[2]).requires_grad();
+
+    outer.with_recording(|| {
+        let before = basic::scale(&x, 2.0, "outer.before");
+        inner.with_recording(|| {
+            let _ = basic::scale(&before, 3.0, "inner.only");
+        });
+        let _ = basic::scale(&before, 4.0, "outer.after");
+    });
+
+    assert_eq!(
+        outer
+            .debug
+            .op_call_records()
+            .iter()
+            .map(|record| record.name.as_str())
+            .collect::<Vec<_>>(),
+        ["outer.before", "outer.after"]
+    );
+    assert_eq!(
+        inner
+            .debug
+            .op_call_records()
+            .iter()
+            .map(|record| record.name.as_str())
+            .collect::<Vec<_>>(),
+        ["inner.only"]
+    );
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        outer.with_recording(|| panic!("recording scope panic"));
+    }));
+    assert!(result.is_err());
+    let _ = basic::scale(&x, 5.0, "outside.scope");
+    outer.with_recording(|| {
+        let _ = basic::scale(&x, 6.0, "outer.recovered");
+    });
+    assert_eq!(
+        outer.debug.op_call_records().last().unwrap().name,
+        "outer.recovered"
+    );
+    assert!(!outer
+        .debug
+        .op_call_records()
+        .iter()
+        .any(|record| record.name == "outside.scope"));
+}
+
+#[test]
+fn engine_new_does_not_capture_operations_without_a_scope() {
+    let engine = Engine::new();
+    let x = Tensor::randn(&[2]).requires_grad();
+    let _ = basic::scale(&x, 2.0, "unscoped");
+
+    assert!(engine.debug.op_call_records().is_empty());
+}
+
+#[test]
+fn graph_observation_is_canonical_across_independent_tensor_ids() {
+    let make_graph = || {
+        let x = Tensor::randn(&[2]).requires_grad();
+        let scaled = basic::scale(&x, 2.0, "canonical.scale");
+        basic::sum(&scaled, "canonical.sum")
+    };
+    let first = make_graph();
+    let second = make_graph();
+
+    assert_eq!(
+        GraphObservation::from_outputs(&[&first]),
+        GraphObservation::from_outputs(&[&second])
+    );
+}
+
+#[test]
+fn graph_observation_respects_root_and_declared_input_order() {
+    let x = Tensor::randn(&[2]).requires_grad();
+    let y = Tensor::randn(&[2]).requires_grad();
+    let left = basic::scale(&x, 2.0, "branch.left");
+    let right = basic::add(&x, &y, "branch.right");
+
+    let right_then_left = GraphObservation::from_outputs(&[&right, &left]);
+    assert_eq!(
+        right_then_left
+            .operations()
+            .iter()
+            .map(|operation| operation.name.as_str())
+            .collect::<Vec<_>>(),
+        ["branch.right", "branch.left"]
+    );
+    assert_ne!(
+        right_then_left,
+        GraphObservation::from_outputs(&[&left, &right])
+    );
+    assert_eq!(right_then_left.operations()[0].inputs.len(), 2);
+}
+
+#[test]
+fn graph_producer_lookup_distinguishes_leaf_produced_and_unobserved_tensors() {
+    let leaf = Tensor::randn(&[2]).requires_grad();
+    let produced = basic::scale(&leaf, 2.0, "lookup.scale");
+    let foreign = Tensor::randn(&[2]).requires_grad();
+    let graph = GraphObservation::from_outputs(&[&produced]);
+
+    assert_eq!(graph.producer_of(&leaf), Ok(None));
+    assert_eq!(graph.producer_of(&produced), Ok(Some(GraphOpIndex(0))));
+    assert_eq!(
+        graph
+            .operation(GraphOpIndex(0))
+            .map(|operation| operation.name.as_str()),
+        Some("lookup.scale")
+    );
+    assert_eq!(graph.operation(GraphOpIndex(1)), None);
+    assert_eq!(
+        graph.producer_of(&foreign),
+        Err(GraphObservationError::UnobservedTensor)
+    );
+}
+
+#[test]
+fn recorder_graph_observation_infers_terminal_outputs_in_insertion_order() {
+    let engine = Engine::new();
+    let x = Tensor::randn(&[2]).requires_grad();
+    let (intermediate, first_root, second_root) = engine.with_recording(|| {
+        let intermediate = basic::scale(&x, 2.0, "recorded.intermediate");
+        let first_root = basic::scale(&intermediate, 3.0, "recorded.first_root");
+        let second_root = basic::scale(&x, 4.0, "recorded.second_root");
+        (intermediate, first_root, second_root)
+    });
+    let graph = engine.debug.graph_observation();
+
+    assert_eq!(graph.operations().len(), 3);
+    assert_eq!(graph.roots().len(), 2);
+    assert_eq!(graph.producer_of(&intermediate), Ok(Some(GraphOpIndex(0))));
+    assert_eq!(graph.producer_of(&first_root), Ok(Some(GraphOpIndex(1))));
+    assert_eq!(graph.producer_of(&second_root), Ok(Some(GraphOpIndex(2))));
+    assert_eq!(graph.roots()[0].tensor, graph.operations()[1].outputs[0].id);
+    assert_eq!(graph.roots()[1].tensor, graph.operations()[2].outputs[0].id);
+}
+
+#[test]
+fn the_engine_invoking_backward_owns_recompute_observation() {
+    let forward_engine = Engine::new();
+    let x = Tensor::from_value(TensorValue::from_vec(Shape(vec![2]), vec![1.0, 2.0]), true);
+    let loss = forward_engine.with_recording(|| {
+        let output = checkpoint(
+            "ownership",
+            Rc::new(WholeBlockCheckpoint),
+            std::slice::from_ref(&x),
+            |inputs| basic::mul(&inputs[0], &inputs[0], "ownership.square"),
+        );
+        basic::sum(&output, "ownership.loss")
+    });
+
+    let mut backward_engine = Engine::new();
+    backward_engine.backward(&loss);
+
+    assert!(forward_engine.debug.backward_apply_kinds().is_empty());
+    assert!(!backward_engine.debug.backward_apply_kinds().is_empty());
+    let forward_checkpoints = forward_engine.debug.trace_json()["checkpoints"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let backward_checkpoints = backward_engine.debug.trace_json()["checkpoints"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert!(forward_checkpoints
+        .iter()
+        .any(|event| event["detail"] == "enter"));
+    assert!(!forward_checkpoints
+        .iter()
+        .any(|event| event["detail"] == "recompute_start"));
+    assert!(backward_checkpoints
+        .iter()
+        .any(|event| event["detail"] == "recompute_start"));
+    assert!(backward_checkpoints
+        .iter()
+        .any(|event| event["detail"] == "recompute_end"));
+}
+
+struct DropSignal(Rc<Cell<bool>>);
+
+impl Drop for DropSignal {
+    fn drop(&mut self) {
+        self.0.set(true);
+    }
+}
+
+#[test]
+fn checkpoint_forward_panic_restores_scope_and_releases_registry_entry() {
+    let dropped = Rc::new(Cell::new(false));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe({
+        let dropped = dropped.clone();
+        move || {
+            let captured = DropSignal(dropped);
+            let x = Tensor::randn(&[1]).requires_grad();
+            let _ = checkpoint(
+                "panic.forward",
+                Rc::new(WholeBlockCheckpoint),
+                std::slice::from_ref(&x),
+                move |_inputs| {
+                    let _keep_alive = &captured;
+                    panic!("checkpoint forward panic")
+                },
+            );
+        }
+    }));
+
+    assert!(result.is_err());
+    assert!(
+        dropped.get(),
+        "failed checkpoint must not retain its closure"
+    );
+    assert!(!tnsr::checkpoint::is_recording_recompute_saves());
+}
+
+#[test]
+fn recompute_panic_clears_partial_cache_and_retries_the_complete_body() {
+    let invocations = Rc::new(Cell::new(0usize));
+    let x = Tensor::from_value(TensorValue::from_vec(Shape(vec![2]), vec![1.0, 2.0]), true);
+    let forward_engine = Engine::new();
+    let loss = forward_engine.with_recording({
+        let invocations = invocations.clone();
+        let x = x.clone();
+        move || {
+            let output = checkpoint(
+                "panic.once",
+                Rc::new(WholeBlockCheckpoint),
+                std::slice::from_ref(&x),
+                move |inputs| {
+                    let invocation = invocations.get() + 1;
+                    invocations.set(invocation);
+                    let output = basic::mul(&inputs[0], &inputs[0], "panic.once.square");
+                    if invocation == 2 {
+                        panic!("first recomputation fails");
+                    }
+                    output
+                },
+            );
+            basic::sum(&output, "panic.once.loss")
+        }
+    });
+    assert_eq!(invocations.get(), 1);
+
+    let mut failed_engine = Engine::new();
+    let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        failed_engine.backward(&loss)
+    }));
+    assert!(failed.is_err());
+    assert_eq!(invocations.get(), 2);
+    assert!(!tnsr::checkpoint::is_recording_recompute_saves());
+
+    let mut retry_engine = Engine::new();
+    retry_engine.backward(&loss);
+    assert_eq!(
+        invocations.get(),
+        3,
+        "retry must replay the whole checkpoint instead of using partial cache"
+    );
+    assert_eq!(x.grad().unwrap().data.as_ref(), &[2.0, 4.0]);
+}
+
 /// Verify that whole-block checkpoint produces the same gradients as no-checkpoint.
 #[test]
 fn test_whole_block_checkpoint_gradient_equivalence() {
@@ -489,7 +755,7 @@ fn test_no_grad_mode() {
         let x = Tensor::randn(&[3, 3]).requires_grad();
         let y = basic::sum(&x, "loss");
         // No OpCall created under no-grad
-        assert!(y.inner.borrow().autograd.producer.is_none());
+        assert!(GraphObservation::from_outputs(&[&y]).is_empty());
     }
     assert!(is_enabled()); // restored on drop
 }
@@ -497,6 +763,35 @@ fn test_no_grad_mode() {
 // ---------------------------------------------------------------------------
 // Shape / panic invariants
 // ---------------------------------------------------------------------------
+
+#[test]
+fn shape_checked_counts_report_representable_values_and_zero_extents() {
+    assert_eq!(Shape(vec![]).checked_numel(), Some(1));
+    assert_eq!(Shape(vec![2, 3, 4]).checked_numel(), Some(24));
+    assert_eq!(Shape(vec![usize::MAX, 0, 2]).checked_numel(), Some(0));
+    assert_eq!(Shape(vec![2, 3, 4]).checked_bytes_f32(), Some(96));
+}
+
+#[test]
+fn shape_checked_counts_report_overflow_without_panicking() {
+    assert_eq!(Shape(vec![usize::MAX, 2]).checked_numel(), None);
+    assert_eq!(
+        Shape(vec![usize::MAX / std::mem::size_of::<f32>() + 1]).checked_bytes_f32(),
+        None
+    );
+}
+
+#[test]
+#[should_panic(expected = "shape: element count overflow")]
+fn shape_numel_panics_deterministically_on_overflow() {
+    let _ = Shape(vec![usize::MAX, 2]).numel();
+}
+
+#[test]
+#[should_panic(expected = "shape: f32 byte size overflow")]
+fn shape_f32_bytes_panics_deterministically_on_overflow() {
+    let _ = Shape(vec![usize::MAX / std::mem::size_of::<f32>() + 1]).bytes_f32();
+}
 
 #[test]
 #[should_panic(expected = "add shape mismatch")]
@@ -540,9 +835,18 @@ fn test_split3_forward_is_slicing() {
     assert_eq!(v.shape().0, vec![2, 2]);
 
     // Row 0 of x is [0,1,2,3,4,5] -> q=[0,1], k=[2,3], v=[4,5]
-    assert_eq!(q.inner.borrow().value.data.as_ref(), &vec![0.0, 1.0, 6.0, 7.0]);
-    assert_eq!(k.inner.borrow().value.data.as_ref(), &vec![2.0, 3.0, 8.0, 9.0]);
-    assert_eq!(v.inner.borrow().value.data.as_ref(), &vec![4.0, 5.0, 10.0, 11.0]);
+    assert_eq!(
+        q.inner.borrow().value.data.as_ref(),
+        &vec![0.0, 1.0, 6.0, 7.0]
+    );
+    assert_eq!(
+        k.inner.borrow().value.data.as_ref(),
+        &vec![2.0, 3.0, 8.0, 9.0]
+    );
+    assert_eq!(
+        v.inner.borrow().value.data.as_ref(),
+        &vec![4.0, 5.0, 10.0, 11.0]
+    );
 }
 
 #[test]
@@ -574,18 +878,14 @@ fn test_split3_shared_producer() {
     let x = Tensor::randn(&[4, 9]).requires_grad();
     let (q, k, v) = shape::split3(&x, "qkv");
 
-    let q_prod = q.inner.borrow().autograd.producer.clone();
-    let k_prod = k.inner.borrow().autograd.producer.clone();
-    let v_prod = v.inner.borrow().autograd.producer.clone();
-    assert!(q_prod.is_some());
-    assert!(Rc::ptr_eq(
-        q_prod.as_ref().unwrap(),
-        k_prod.as_ref().unwrap()
-    ));
-    assert!(Rc::ptr_eq(
-        q_prod.as_ref().unwrap(),
-        v_prod.as_ref().unwrap()
-    ));
+    let graph = GraphObservation::from_outputs(&[&q, &k, &v]);
+    assert_eq!(graph.operations().len(), 1);
+    assert_eq!(graph.operations()[0].name, "qkv");
+    assert_eq!(graph.operations()[0].outputs.len(), 3);
+    let producer = graph.producer_of(&q).unwrap();
+    assert_eq!(producer, Some(GraphOpIndex(0)));
+    assert_eq!(graph.producer_of(&k).unwrap(), producer);
+    assert_eq!(graph.producer_of(&v).unwrap(), producer);
 
     // Only k participates in the loss: q and v get zero-gradient outputs, and
     // the engine's zero-fallback for unused outputs must still produce a valid

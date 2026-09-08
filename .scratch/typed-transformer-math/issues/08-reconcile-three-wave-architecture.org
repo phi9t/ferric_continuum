@@ -1,0 +1,30 @@
+#+TITLE: Reconcile the three-wave architecture
+#+TYPE: grilling
+#+STATUS: resolved
+#+BLOCKED_BY: 05-select-wave-a-migration-slices, 06-spec-wave-b-static-extents, 07-spec-wave-c-runtime-named-axes
+#+PARENT: ../map.org
+
+* Question
+
+Do the Wave A, B, and C designs form one coherent tensor architecture with a
+single source of semantic truth, clear conversion boundaries, and no competing
+operation APIs?
+
+* Decisions required
+
+- Resolve any overlap or contradiction among the three waves.
+- State which guarantees belong to types, runtime extents, and observational
+  metadata.
+- Confirm only Wave A proceeds to implementation tickets.
+- Define review and exit evidence for all three specs.
+
+* Out of scope
+
+- Implementing Wave B or Wave C.
+
+* Answer
+
+Wave A is the sole semantic source of truth. Wave B optionally refines its
+runtime extents into static proofs; Wave C describes/checks dynamic boundary
+metadata and promotes into Wave A. Neither adds competing operation APIs. Only
+Wave A proceeds to =09-implement-wave-a-attention-tracer.org=.

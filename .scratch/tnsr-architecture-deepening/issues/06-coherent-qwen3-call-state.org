@@ -1,0 +1,55 @@
+#+TITLE: Make Qwen3 typed call state coherent
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY: 02-named-dimension-extents, 03-equal-contiguous-attention-layout, 05-graph-observation-seam
+#+PARENT: ../spec.org
+
+* Context
+
+Qwen3's public mutable fields cannot safely coexist with cached/stored validated
+state. Make each typed call consume one fresh coherent snapshot instead.
+
+* Requirements
+
+- Replace the loose typed parameter snapshot with one
+  =ValidatedAttentionState= containing named geometry and typed views of the
+  current live parameter tensors.
+- Snapshot =n_q_heads=, =n_kv_heads=, =head_dim=, derived typed widths,
+  =rope_cfg=, and clones of the current tensor handles (not parameter values).
+- Construct it only after model/parameter checks succeed. Input/layout/RoPE
+  validation then uses the state and completes before the first graph operation.
+- After construction, both typed executable derivations read no
+  =Qwen3Attention= fields; they use the snapshot throughout.
+- Preserve public fields, loader mutation, tensor IDs/handles, gradients,
+  validation atomicity, and debug topology.
+- Document why the state is ephemeral and why four derivations remain separate.
+
+* Out of scope
+
+- Private fields, setters, cached validation, a stored parameter bundle, or
+  routing legacy code through typed code.
+- Git actions.
+
+* Verification
+
+- Existing typed/legacy full and CP forward/gradient/topology parity.
+- Mutation/invalid-state preflight tests remain green.
+- A valid between-call scalar/handle replacement test proves state is rebuilt,
+  not cached; structural review proves no post-construction self-field reads.
+- Full focused and broad tnsr verification matrix plus rustfmt.
+
+* Answer
+
+Every typed attention call now constructs one ephemeral
+=ValidatedAttentionState= after validating the current public geometry and all
+six live parameter handles. The state owns named head geometry, checked merged
+widths, RoPE configuration, and typed views of those same handles. Both typed
+full and typed context-parallel derivations read only that state after
+construction; neither caches it or delegates to a legacy derivation.
+
+A valid between-call mutation test replaces geometry, RoPE, and every
+parameter with different head width, proves typed/legacy output parity, proves
+fresh RoPE use, checks reshaped graph-edge shapes, and routes gradients only to
+replacement handles. The full 14-target CPU matrix, all requested binaries and
+Rustdoc, and the scoped 11-target rustfmt aspect pass. Structural search finds
+no post-snapshot =self= field reads in either typed derivation.

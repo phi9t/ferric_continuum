@@ -1,0 +1,41 @@
+#+TITLE: Deepen checked Shape arithmetic
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY:
+#+PARENT: ../spec.org
+
+* Context
+
+Unchecked extent products currently live at the base of tensor allocation and
+debug accounting. Make Shape the single in-process owner of checked element and
+f32 byte counts.
+
+* Requirements
+
+- Add =checked_product=, =checked_numel=, and =checked_bytes_f32=; a zero
+  factor makes the checked product zero regardless of factor order.
+- Make existing =numel= and =bytes_f32= panic deterministically on overflow.
+- Preserve zero-dimensional scalar and zero-extent behavior.
+- Use behavioral overflow and ordinary-value tests, not source-text checks.
+
+* Out of scope
+
+- A symbolic shape algebra or static extents.
+- Rewriting explicit transformer indexing loops.
+- Git actions.
+
+* Verification
+
+- Red then green focused =tnsr_tests=.
+- Existing tnsr tests remain green.
+
+* Comments
+
+- 2026-09-08: Red compile evidence showed =checked_numel= and
+  =checked_bytes_f32= were absent.
+
+* Answer
+
+=Shape= now owns checked product, element-count, and f32-byte-count arithmetic.
+Zero factors short-circuit to a valid empty shape and the panicking convenience
+methods have deterministic overflow messages. Focused =tnsr_tests= passed.

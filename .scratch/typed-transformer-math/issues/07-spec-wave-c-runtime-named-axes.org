@@ -1,0 +1,29 @@
+#+TITLE: Specify Wave C runtime named axes
+#+TYPE: grilling
+#+STATUS: resolved
+#+BLOCKED_BY: 01-select-wave-a-type-carrier, 02-define-axis-language-and-contracts
+#+PARENT: ../map.org
+
+* Question
+
+Which dynamic boundaries need runtime named-axis metadata, and should that
+metadata be observational or participate in checked conversion to Wave A
+semantic tensors?
+
+* Decisions required
+
+- Define target boundaries such as checkpoint loading, debug output, user data,
+  distributed layouts, and model interchange.
+- Decide axis identity, serialization, validation, and error-reporting rules.
+- Prevent runtime names from becoming a second source of truth for statically
+  typed transformer code.
+- Explain how Wave C composes with optional Wave B static extents.
+- Produce a decision-ready design spec only; do not authorize implementation.
+
+* Answer
+
+Wave C targets dynamic boundaries only. Runtime ordered axis identifiers may be
+observed or checked during promotion to Wave A, but must not dispatch execution
+or compete with static axes inside transformer code. Stable serialization,
+display labels, versioning, and =TensorLayoutMeta= reconciliation require a
+prototype before implementation. See =../spec.org=.

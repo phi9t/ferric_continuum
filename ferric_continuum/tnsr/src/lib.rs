@@ -18,6 +18,7 @@
 //! tensor and pipeline parallelism — as symbolic cost estimates plus runnable
 //! single-process simulations over `Vec<f32>`.
 
+pub(crate) mod attention_layout;
 pub mod autograd;
 pub mod bpe;
 pub mod checkpoint;
@@ -34,3 +35,4 @@ pub mod saved;
 pub mod scaling;
 pub mod tensor;
 pub mod transformer;
+pub mod typed;

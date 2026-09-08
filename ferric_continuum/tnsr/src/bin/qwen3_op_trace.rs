@@ -8,7 +8,7 @@
 //! (`autograd::Engine` + `debug::DebugRecorder`) and reports:
 //!
 //! - the **forward closure**: distinct `OpKind`s + per-kind call counts, taken
-//!   from `Engine::topo` (the topologically-sorted forward DAG),
+//!   from `GraphObservation` (the topologically-sorted forward DAG),
 //! - the **forward+backward closure**: the forward set plus the `OpKind`s
 //!   applied during the reverse walk (`DebugRecorder::backward_apply_kinds`),
 //! - **per-component attribution**: each forward `OpCallRecord` bucketed by the
@@ -22,7 +22,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use tnsr::{
-    autograd::{Engine, OpKind},
+    autograd::{Engine, GraphObservation, OpKind},
     ops::loss,
     qwen3::{Qwen3Config, Qwen3Model},
 };
@@ -53,7 +53,10 @@ fn component_of(name: &str) -> &'static str {
 /// Print a "kind : count" table sorted by descending count, then name.
 fn print_kind_counts(counts: &HashMap<OpKind, usize>) {
     let mut rows: Vec<(OpKind, usize)> = counts.iter().map(|(k, c)| (*k, *c)).collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| format!("{:?}", a.0).cmp(&format!("{:?}", b.0))));
+    rows.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then_with(|| format!("{:?}", a.0).cmp(&format!("{:?}", b.0)))
+    });
     for (kind, count) in rows {
         info!("  {:>5}  {:?}", count, kind);
     }
@@ -76,8 +79,8 @@ fn main() {
     );
     let model = Qwen3Model::new(cfg.clone());
 
-    // Engine::new() installs the global recorder; do it BEFORE forward so every
-    // op registers its OpCall + saved tensors into the recorder.
+    // Recording belongs to the execution scope, so nested or interleaved
+    // engines cannot steal this trace.
     let mut engine = Engine::new();
 
     // A short token sequence, one batch row.
@@ -85,18 +88,20 @@ fn main() {
     let t = 8usize;
     let ids: Vec<usize> = (0..t).map(|i| i % cfg.vocab_size).collect();
 
-    let logits = model.forward(&ids, b, t);
-
     // Next-token style targets (arbitrary — we only trace ops, not train).
     let targets: Vec<usize> = (0..b * t).map(|i| (i + 1) % cfg.vocab_size).collect();
-    let loss = loss::cross_entropy(&logits, &targets, "cross_entropy");
+    let loss = engine.with_recording(|| {
+        let logits = model.forward(&ids, b, t);
+        loss::cross_entropy(&logits, &targets, "cross_entropy")
+    });
+    let forward_graph = GraphObservation::from_outputs(&[&loss]);
 
     engine.backward(&loss);
 
     // ── Forward closure: count OpKind over the topo-sorted forward DAG ───────
     let mut fwd_counts: HashMap<OpKind, usize> = HashMap::new();
-    for call in &engine.topo {
-        *fwd_counts.entry(call.kind).or_default() += 1;
+    for operation in forward_graph.operations() {
+        *fwd_counts.entry(operation.kind).or_default() += 1;
     }
     let fwd_total: usize = fwd_counts.values().sum();
 
@@ -138,11 +143,14 @@ fn main() {
     );
 
     // ── Per-component attribution (analog of PyTorch's per-nn.Module table) ──
-    let records = engine.debug.op_call_records();
     let mut by_component: BTreeMap<&'static str, HashMap<OpKind, usize>> = BTreeMap::new();
-    for rec in &records {
-        let comp = component_of(&rec.name);
-        *by_component.entry(comp).or_default().entry(rec.kind).or_default() += 1;
+    for operation in forward_graph.operations() {
+        let comp = component_of(&operation.name);
+        *by_component
+            .entry(comp)
+            .or_default()
+            .entry(operation.kind)
+            .or_default() += 1;
     }
 
     info!("");

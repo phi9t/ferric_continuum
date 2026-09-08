@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_doc", "rust_library", "rust_test")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_doc", "rust_doc_test", "rust_library", "rust_test")
 
 # Matches `--config=cuda` / `@rules_cuda//cuda:enable=True`.
 config_setting(
@@ -8,6 +8,7 @@ config_setting(
 
 _TNSR_SRCS = [
     "src/lib.rs",
+    "src/attention_layout.rs",
     "src/autograd.rs",
     "src/checkpoint.rs",
     "src/cuda_ffi.rs",
@@ -27,6 +28,7 @@ _TNSR_SRCS = [
     "src/inference.rs",
     "src/saved.rs",
     "src/tensor.rs",
+    "src/typed.rs",
     "src/transformer.rs",
     "src/qwen3.rs",
     "src/qwen3_load.rs",
@@ -163,6 +165,33 @@ rust_test(
     crate_name = "autograd_test",
     edition = "2021",
     deps = [":tnsr"],
+)
+
+# Semantic-axis tensor contracts: rank declaration, named dimensions, and
+# preservation of the underlying tensor/autograd identity.
+rust_test(
+    name = "typed_tensor_tests",
+    srcs = ["tests/typed_tensor_test.rs"],
+    crate_name = "typed_tensor_test",
+    edition = "2021",
+    deps = [":tnsr"],
+)
+
+# Independent scalar, causal, batch-isolation, and graph-topology proofs for
+# the explicit fused ordinary GQA derivation.
+rust_test(
+    name = "gqa_verifier_tests",
+    srcs = ["tests/gqa_verifier_test.rs"],
+    crate_name = "gqa_verifier_test",
+    edition = "2021",
+    deps = [":tnsr"],
+)
+
+# Compiler-enforced transformer axis/rank/operator contracts. The paired legal
+# examples ensure a missing import cannot make a compile-fail example pass.
+rust_doc_test(
+    name = "typed_tensor_compile_tests",
+    crate = ":tnsr",
 )
 
 # Stable JSON schema tests for DebugRecorder trace exports.
