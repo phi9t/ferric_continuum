@@ -1,0 +1,116 @@
+#+TITLE: DeepSeek V4.1 checkpoint loader
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 05-text-model-skeleton-and-forward
+#+PARENT: ../spec.org
+
+* Context
+
+The DeepSeek V4.1 loader is not a Qwen3 rename. The release has converted-style
+checkpoint names, tensor-parallel sharding rules, FP8/FP4 scale tensors, Engram
+tables, vision tensors, and MTP tensors. This ticket loads the text-only subset
+needed for logits while making unsupported surfaces explicit.
+
+Read first:
+
+- =../spec.org=
+- =../research/upstream-architecture.md=
+- =../upstream/model.safetensors.index.json=
+- =../upstream/inference/convert.py=
+- =../upstream/inference/model.py= classes =Linear=, =ParallelEmbedding=,
+  =ParallelHead=, =ParallelEngramEmbedding=.
+- =ferric_continuum/tnsr/src/qwen3_load.rs=
+
+* Requirements
+
+- Create =ferric_continuum/tnsr/src/deepseek_v41/load.rs=.
+- Add =load_text_model(model_dir: &Path) -> Result<DeepSeekV41TextModel, String>=.
+- Add =load_text_model_from_converted_tp(model_dir: &Path, mp_rank: usize, mp_world: usize) -> Result<DeepSeekV41TextModel, String>= if converted TP files are present.
+- Support reading:
+  - nested HF =config.json= plus index JSON
+  - flat =config.json= in converted DeepSeek runtime directories
+  - =model.safetensors= when a tiny fixture checkpoint is single-file
+  - =model{rank}-mp{world}.safetensors= for converted runtime shards
+- Map checkpoint names to Rust fields for:
+  - =embed.weight=
+  - =head.weight=
+  - =norm.weight=
+  - =layers.N.attn.wq_a.*=
+  - =layers.N.attn.q_norm.weight=
+  - =layers.N.attn.wq_b.*=
+  - =layers.N.attn.wkv.*=
+  - =layers.N.attn.kv_norm.weight=
+  - =layers.N.attn.wo_a.*=
+  - =layers.N.attn.wo_b.*=
+  - =layers.N.attn.attn_sink=
+  - compressor/indexer tensors on source layers
+  - =layers.N.ffn.gate.weight= and correction bias
+  - routed experts =layers.N.ffn.experts.I.w1/w2/w3=
+  - =layers.N.ffn.shared_experts.w1/w2/w3=
+  - HC tensors =hc_attn_fn/base/scale= and =hc_ffn_fn/base/scale=
+  - Engram tensors for layers 1 and 14
+- Implement shape checking at every loaded tensor boundary.
+- Implement dequantizing load paths:
+  - BF16/F16/F32 to f32 like =qwen3_load.rs=.
+  - FP8 E4M3 tensor plus scale tensor to f32 for Wave 1 CPU math.
+  - FP4 E2M1 packed expert tensor plus scale tensor to f32 for Wave 1 CPU math.
+- Preserve enough quantization metadata in structs to make later native-kernel
+  tickets possible, even when Wave 1 dequantizes for execution.
+- Reject unsupported surfaces clearly:
+  - vision tensors are ignored only if text-only mode is explicit
+  - DSpark/MTP tensors are ignored only if text-only mode is explicit
+  - missing Engram tensors for required Engram layers is an error in text mode
+- Add loader fixture tests using tiny safetensors files generated inside tests,
+  following the style in =qwen3_load.rs=.
+
+* Out of scope
+
+- No real 510GB checkpoint download.
+- No native FP8/FP4 matmul kernels.
+- No image or DSpark execution.
+- No distributed all-reduce.
+
+* Verification
+
+- Run:
+  =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_model_tests=
+- Required test cases:
+  - tiny converted-style checkpoint loads.
+  - wrong shape returns =Err= naming the offending tensor.
+  - missing required text tensor returns =Err=.
+  - Qwen-style tensor names are not accepted as DeepSeek names.
+  - FP8 and FP4 tiny dequantization fixtures match known f32 values.
+  - text-only mode explicitly ignores representative =vision.= and =mtp.= names
+    while recording that those surfaces are deferred.
+
+* Comments
+
+- Keep this separate from =qwen3_load.rs=. Shared helper extraction is allowed
+  only after both call sites stay simpler.
+- Linear checkpoint weights are PyTorch-style =[out,in]= unless a specific
+  converted tensor has a documented grouped layout. Rust =tnsr= linear math
+  should store ordinary linears as =[in,out]= after transpose.
+
+* Resolution
+
+Implemented =src/deepseek_v41/load.rs= (public API
+=load_text_model=, =load_text_model_from_converted_tp=,
+=forward_with_token_seed=, =QuantKind=) plus in-crate tests included from
+=load_test.rs=. Loader reads nested-HF and flat converted =config.json=, the
+=model.safetensors.index.json=, single-file =model.safetensors=, and
+=model{rank}-mp{world}.safetensors= shards; maps confirmed upstream tensor
+names into the existing attention/MoE/block/model structs; transposes PyTorch
+=[out,in]= linears to tnsr =[in,out]= while keeping the =wo_a= grouped layout;
+dequantizes BF16/F16/F32, FP8 E4M3 (+.scale, E8M0), and FP4 E2M1 packed
+(+.scale) with block size 32; ignores =vision.*=/=aligner.*=/=mtp.*= in
+text-only mode; errors on missing required Engram tensors on engram layers; and
+rejects Qwen-style names.
+
+Evidence (pinned Bazel 9.2.0):
+- =bazel test //ferric_continuum/tnsr:lib_tests= -> PASS (20 loader unit tests:
+  e4m3/e8m0 decode, fp8/fp4 dequant, tiny load + forward, wrong-shape err,
+  missing-tensor err, qwen-name rejection, vision/mtp ignored, engram-missing
+  error, converted-TP shard load, wo_a grouped-layout transpose).
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests
+  deepseek_v41_math_tests deepseek_v41_model_tests= -> all PASS.
+- rustfmt clean on =load.rs= and =load_test.rs=.

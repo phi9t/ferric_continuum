@@ -1,0 +1,31 @@
+{
+  "absolute_tolerance": 1e-05,
+  "expected": {
+    "output": [
+      -0.0,
+      99.99546051,
+      -0.06692851,
+      -5.71544504
+    ]
+  },
+  "input": {
+    "gate": [
+      0.0,
+      11.0,
+      -5.0,
+      3.0
+    ],
+    "swiglu_limit": 10.0,
+    "up": [
+      -20.0,
+      20.0,
+      2.0,
+      -2.0
+    ]
+  },
+  "line_hint": "Expert.forward around lines 830-851",
+  "source_file": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py",
+  "upstream_call_status": "called-upstream:Expert.forward",
+  "upstream_function": "Expert.forward",
+  "upstream_import_status": "path-import-ok"
+}

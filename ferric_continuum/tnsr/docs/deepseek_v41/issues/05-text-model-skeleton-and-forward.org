@@ -1,0 +1,127 @@
+#+TITLE: Text model skeleton, layers, blocks, and forward path
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY: 04-moe-hyper-and-engram-fixtures
+#+PARENT: ../spec.org
+
+* Context
+
+This ticket materializes the text-only DeepSeek V4.1 architecture in Rust after
+the lower-level math verifiers exist. It must add model/layer/block unit
+verifiers before any full-model logits claim is accepted.
+
+Read first:
+
+- =../spec.org=
+- =../research/upstream-architecture.md=
+- =../upstream/inference/model.py= classes =Attention=, =Compressor=,
+  =Indexer=, =MoE=, =Block=, =Transformer=.
+- Existing local style:
+  - =ferric_continuum/tnsr/src/qwen3.rs=
+  - =ferric_continuum/tnsr/tests/qwen3_test.rs=
+
+* Requirements
+
+- Create =ferric_continuum/tnsr/src/deepseek_v41/attention.rs=.
+- Create =ferric_continuum/tnsr/src/deepseek_v41/model.rs=.
+- Define parameter-owning structs:
+  - =DeepSeekV41Attention=
+  - =DeepSeekV41Compressor=
+  - =DeepSeekV41Indexer=
+  - =DeepSeekV41Gate=
+  - =DeepSeekV41Expert=
+  - =DeepSeekV41MoE=
+  - =DeepSeekV41Engram=
+  - =DeepSeekV41Block=
+  - =DeepSeekV41TextModel=
+  - =SharedAttentionState=
+- Keep fields named close to upstream names: =wq_a=, =q_norm=, =wq_b=, =wkv=,
+  =kv_norm=, =wo_a=, =wo_b=, =attn_sink=, =ffn.gate=,
+  =ffn.experts=, =ffn.shared_experts=, =hc_attn_fn=, =hc_ffn_fn=.
+- Implement text-only =DeepSeekV41TextModel::forward_token_ids(&self, ids: &[usize], b: usize, s: usize) -> Tensor=.
+- Implement =DeepSeekV41Block::forward(...)= with upstream sequencing:
+  - optional Engram update before block attention
+  - compute attention HC mixes
+  - HC pre with previous =pre_mix=
+  - attention norm
+  - attention forward
+  - HC post for attention
+  - compute FFN HC mixes
+  - HC pre with attention-produced pre-mix
+  - FFN norm
+  - MoE forward
+  - HC post for FFN
+  - return updated state and next =pre_mix=
+- Implement attention modes:
+  - sliding-window only when =compress_ratio= 0
+  - compressed KV source layer
+  - index-source layer
+  - reuse layer consuming shared top-k indices
+- Text-only model may initially run full prefill for small fixtures. Decode cache
+  behavior must be represented in APIs and covered by lower-level tests, but
+  performance-optimized incremental decode can be a later improvement.
+- Add =ferric_continuum/tnsr/tests/deepseek_v41_model_test.rs=.
+- Add Bazel target =//ferric_continuum/tnsr:deepseek_v41_model_tests=.
+
+Block/unit verifier requirements:
+
+- Layer verifier for =DeepSeekV41Attention= checks q path, KV path, sparse index
+  consumption, grouped =wo_a= projection, and output shape against fixture data.
+- Layer verifier for =DeepSeekV41MoE= checks selected expert indices, routed
+  weighted sum, shared expert addition, and output dtype/shape.
+- Layer verifier for =DeepSeekV41Engram= checks text-token update and masked
+  token no-op behavior.
+- Block verifier checks one complete block for each representative mode:
+  - =compress_ratio= 0 sliding-window only
+  - KV source layer
+  - index source layer
+  - reuse layer
+  - Engram layer
+- Model verifier checks a tiny multi-block text model emits logits shaped
+  =[B,S,V]= and rejects unsupported image-token inputs with a clear error.
+
+* Out of scope
+
+- No real checkpoint loader.
+- No tokenizer or prompt rendering.
+- No vision/image execution.
+- No DSpark speculative decoding.
+- No production optimized sparse attention kernel.
+
+* Verification
+
+- Regenerate model fixtures:
+  =python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family layer,block,tiny-model=
+- Run:
+  =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_model_tests=
+- Also run:
+  =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_math_tests=
+- Expected: op, layer, block, and tiny-model tests pass.
+
+* Comments
+
+- This ticket satisfies the user's explicit request for unit verifiers across
+  model layers and blocks.
+- Full-model parity is not a substitute for the layer/block tests in this
+  ticket.
+
+* Answer
+
+Resolved in two implementation slices:
+
+- 05A added parameter-owning attention, MoE, and Engram layer seams plus layer
+  fixtures.
+- 05B added =DeepSeekV41Block=, =DeepSeekV41TextModel=, five representative
+  block-mode fixtures, and the tiny text-model logits fixture.
+
+Fresh evidence:
+
+- =python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family block,tiny-model= passed.
+- =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --nocache_test_results //ferric_continuum/tnsr:deepseek_v41_model_tests= passed.
+- =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --nocache_test_results //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests= passed.
+- =git diff --check= on scoped 05B files passed.
+
+The block/model fixtures intentionally use fixture-seam provenance. They verify
+local Rust block sequencing and model wiring against independent small reference
+math and upstream function/class names. Real-checkpoint logits parity remains
+for the later loader/parity tickets.

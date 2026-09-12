@@ -1,0 +1,159 @@
+#+TITLE: Text compatibility closure and review
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 08-text-logits-parity-harness
+#+PARENT: ../spec.org
+
+* Context
+
+This ticket closes Wave 1 by proving that the text-only implementation matches
+the spec, has enough verifier coverage, and records any remaining asset-related
+blockers honestly.
+
+Read first:
+
+- =../spec.org=
+- All prior Wave 0 and Wave 1 tickets.
+- =docs/agents/skill-orchestration.md= for the review and completion gates.
+
+* Requirements
+
+- Inspect the final diff for unintended scope.
+- Confirm text-only implementation rejects unsupported multimodal and DSpark
+  surfaces.
+- Confirm every verifier level has evidence:
+  - Level 1 source/paper claims
+  - Level 2 config/index metadata
+  - Level 3 op unit fixtures
+  - Level 4 layer and block fixtures
+  - Level 5 tokenizer/prompt fixtures
+  - Level 6 tiny logits parity
+  - Level 6 real checkpoint parity or explicit SKIP with missing-asset reason
+- Run a Standards review:
+  - code follows existing =tnsr= style
+  - modules are small and inspectable
+  - Qwen3 code remains behaviorally unchanged unless intentionally shared
+  - Bazel targets use pinned Bazel 9.2.0
+  - CUDA targets remain opt-in
+- Run a Spec review:
+  - every Wave 1 requirement in =../spec.org= is either implemented, tested, or
+    explicitly documented as blocked on missing local assets
+  - multimodal and DSpark remain TODOs, not silent behavior changes
+- Update =ferric_continuum/tnsr/CONTEXT.md= only if new durable vocabulary is
+  needed for DeepSeek V4.1 text implementation.
+- Append a resolution note to this ticket with exact command evidence.
+
+* Out of scope
+
+- No commit unless separately authorized.
+- No push or merge.
+- No expansion into multimodal or DSpark implementation.
+
+* Verification
+
+Run:
+
+=/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_config_tests //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests=
+
+Run:
+
+=ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh=
+
+If local real assets exist, run:
+
+=DEEPSEEK_V41_MODEL_DIR=/path/to/local/assets ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh=
+
+Expected:
+
+- Focused Bazel tests pass.
+- No-weight verifier ladder passes through tiny logits parity.
+- Real checkpoint parity passes or is recorded as skipped due to absent local
+  assets/dependencies.
+- Standards and Spec reviews have no unresolved blocking findings.
+
+* Comments
+
+- This ticket is the handoff point before any human-authorized commit or branch
+  finish.
+
+* Resolution
+
+Closure completed in worktree =deepseek-v41-text-impl= (branch
+=deepseek-v41-text-impl=). No commit/push/merge (not authorized).
+
+** Diff scope
+
+Tracked changes: only =ferric_continuum/tnsr/BUILD.bazel= (+94 lines: the
+=deepseek_v41_infer= rust_binary, three =deepseek_v41_*_tests= targets, and the
+=deepseek_v41/*.rs= entries in =_TNSR_SRCS=) and =ferric_continuum/tnsr/src/lib.rs=
+(+1 line, module wiring). Everything else is new, self-contained
+=deepseek_v41=-namespaced files (src/deepseek_v41/*, src/bin/deepseek_v41_infer.rs,
+tests/deepseek_v41_*_test.rs, tools/deepseek_v41_*, testdata/deepseek_v41/*) plus
+the =ferric_continuum/tnsr/docs/deepseek_v41/= tracker. No unintended scope.
+
+** Text-only rejection (multimodal + DSpark)
+
+- CLI =src/bin/deepseek_v41_infer.rs=: =REJECTED_FLAGS= = =--image, --image-file,
+  --images, --vision, --dspark, --speculative, --mtp=; rejects the
+  =image_token_id= in the id stream and out-of-vocab ids with clear errors.
+- Loader =src/deepseek_v41/load.rs=: ignores vision/aligner/mtp tensors (recorded
+  as deferred), errors on missing required Engram tensors on Engram layers, and
+  rejects Qwen-style tensor names so a Qwen3 checkpoint cannot be mistaken for
+  DeepSeek V4.1.
+
+** Verifier-level evidence
+
+- L1 sources: =verify_deepseek_v41_sources.sh= PASS.
+- L2 config/index: =deepseek_v41_config_tests= PASS.
+- L3 op fixtures: =deepseek_v41_math_tests= PASS.
+- L4 layer/block/model: =deepseek_v41_model_tests= PASS.
+- L5 tokenizer/prompt: prompt_{plain,chat,thinking,dsml} fixtures + tiny-model
+  test carried inside =deepseek_v41_model_tests= PASS.
+- L6 tiny logits parity: PASS (=cosine 1.00000000=, =max_abs_diff 3.95895e-07=,
+  top1 3/3, top5 5/5).
+- L6 real-checkpoint parity: SKIP with missing-asset reason (no
+  =DEEPSEEK_V41_MODEL_DIR=/=MODEL_DIR=; no faithful CPU reference on this host).
+  The verifier reports =PASS-WITH-SKIPS=, never presenting SKIP as PASS.
+
+** Standards review — no blocking findings
+
+- tnsr style followed; =deepseek_v41= modules are small and split by concern
+  (config/attention/sparse/rope/moe/hyper/engram/model/load).
+- Qwen3 code behaviorally unchanged (no =git= diff touches qwen3 files); loader
+  is kept separate from =qwen3_load.rs= and does NOT copy the Qwen3 half-split
+  permute.
+- Bazel targets built/tested with pinned =bazel-9.2.0=.
+- CUDA remains opt-in; the new =deepseek_v41_infer= binary and test targets carry
+  no CUDA deps.
+
+** Spec review against ../spec.org — no blocking findings
+
+- Wave 1 requirements implemented/tested: config+index parse, op/layer/block/
+  tiny-model fixtures, checkpoint loader (single-file + converted TP shard, BF16/
+  F16/F32 + FP8 E4M3 + FP4 E2M1 dequant), text-only CLI with =--token-ids=
+  isolation and =--dump-logits=, prompt fixtures, and tiny logits parity.
+- Vision (Wave 2), DSpark/MTP (Wave 3), device/perf (Wave 4) remain explicit
+  TODOs (tickets 10, 11) — not silent behavior changes.
+- Real-checkpoint parity documented as blocked on absent local 510GB assets and
+  GPU-only kernels; recorded as SKIP, matching spec Wave-1 completion criteria.
+
+** CONTEXT.md
+
+Left unchanged: the DeepSeek V4.1 text path reuses existing tnsr vocabulary
+(executable derivation, named dimension, operation variant) and introduced no
+new durable cross-context term requiring a glossary entry.
+
+** Commands (from worktree root)
+
+- =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test
+  //ferric_continuum/tnsr:deepseek_v41_config_tests
+  //ferric_continuum/tnsr:deepseek_v41_math_tests
+  //ferric_continuum/tnsr:deepseek_v41_model_tests= -> 3 tests pass.
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh= ->
+  L1..L4 PASS, L6-tiny-parity PASS, L6-real-parity SKIP, =RESULT: PASS-WITH-SKIPS=,
+  exit 0.
+- =bazel build -c opt
+  --@rules_rust//rust/settings:extra_rustc_flags=-Copt-level=3
+  //ferric_continuum/tnsr:deepseek_v41_infer= -> OK.
+- =rustfmt --check= clean on all new/changed Rust; =python3 -m py_compile= clean
+  on new tools; =bash -n= clean on the verifier.

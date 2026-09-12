@@ -1,0 +1,103 @@
+#+TITLE: RoPE, sparse attention, and compressor op verifiers
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 02-config-and-index-verifiers
+#+PARENT: ../spec.org
+
+* Context
+
+This ticket builds the first op-level unit verifiers for DeepSeek V4.1 text
+attention. These tests must compare Rust outputs against deterministic fixtures
+generated from the mirrored upstream Python code.
+
+Read first:
+
+- =../spec.org=
+- =../research/upstream-architecture.md=
+- =../upstream/inference/model.py= functions =precompute_freqs_cis=,
+  =apply_rotary_emb=, =get_window_topk_idxs=, =Compressor.forward=, and
+  =select_candidate_blocks=.
+- =ferric_continuum/tnsr/src/ops/rope.rs=
+- =ferric_continuum/tnsr/tests/qwen3_test.rs=
+
+* Requirements
+
+- Create =ferric_continuum/tnsr/src/deepseek_v41/rope.rs=.
+- Create =ferric_continuum/tnsr/src/deepseek_v41/sparse.rs=.
+- Create =ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py=.
+- Create fixture JSON files under =ferric_continuum/tnsr/testdata/deepseek_v41/=:
+  - =rope_yarn_fixture.json=
+  - =window_topk_fixture.json=
+  - =candidate_blocks_fixture.json=
+  - =compressor_fixture.json=
+- Create =ferric_continuum/tnsr/tests/deepseek_v41_math_test.rs=.
+- Add Bazel target =//ferric_continuum/tnsr:deepseek_v41_math_tests=.
+
+Required Rust APIs:
+
+- =YarnRopeConfig { rope_head_dim, max_seq_len, original_seq_len, rope_theta, rope_factor, beta_fast, beta_slow }=
+- =precompute_freqs(config: &YarnRopeConfig, seqlen: usize) -> Vec<[f32; 2]>= or an equivalent typed representation that preserves cos/sin pairs per position and pair index.
+- =apply_rotary_adjacent_pairs(data: &mut [f32], shape: RopeShape, freqs: &[...], inverse: bool)= where =RopeShape= supports both =[B,S,D]= and =[B,S,H,D]=.
+- =window_topk_indices(window_size: usize, batch: usize, seqlen: usize, start_pos: usize) -> Vec<i32>= matching upstream =-1= sentinel behavior.
+- =select_candidate_blocks(logits: &[f32], shape: CandidateShape, compress_lens: CandidateLens, topk_blocks: usize, block_size: usize) -> Vec<bool>=.
+- =compress_ratio_one(kv: &[f32], norm_weight: &[f32], eps: f32) -> Vec<f32>= for the ratio-1 compressor path.
+- =compress_ratio_n(kv: &[f32], score: &[f32], ratio: usize, norm_weight: &[f32], eps: f32) -> Vec<f32>= for prefill groups with ratio > 1.
+
+Fixture generator requirements:
+
+- Import the mirrored upstream Python files by path from =ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference=.
+- Generate deterministic tensors with fixed small shapes and integer-ish values
+  so fixture diffs remain reviewable.
+- For each fixture, include:
+  - upstream function name
+  - input values
+  - expected output values
+  - absolute tolerance
+  - source file path and line-hint string
+- Do not require released model weights.
+
+Unit verifier requirements:
+
+- Op verifier for YaRN frequencies checks selected cos/sin values at positions
+  0, 1, 7, and a position greater than =original_seq_len= in a small config.
+- Op verifier for adjacent-pair RoPE checks forward and inverse rotation.
+- Op verifier for window top-k checks prefill and decode cases, including
+  =-1= padding.
+- Op verifier for candidate block selection checks forced inclusion of the
+  newest block and exclusion of unreachable =-inf= blocks.
+- Op verifier for compressor checks:
+  - ratio 1 path applies =wkv= output normalization with no softmax pooling.
+  - ratio > 1 prefill path pools complete groups and carries no trailing group
+    in the fixture case.
+
+* Out of scope
+
+- No full attention output.
+- No model block implementation.
+- No cache mutation beyond pure fixture functions.
+- No FP8/FP4 quantized kernel implementation.
+
+* Verification
+
+- Regenerate fixtures:
+  =python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family rope,sparse,compressor=
+- Run:
+  =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_math_tests=
+- Expected: all op verifier tests pass against generated fixtures.
+
+* Comments
+
+- This is Level 3 / op verifier coverage for attention support.
+- Keep functions deterministic and side-effect free where possible; cache mutation belongs to later layer/block tickets.
+
+* Resolution
+
+Delivered RoPE/YaRN, sparse-index, and compressor ops in
+=ferric_continuum/tnsr/src/deepseek_v41/{rope.rs,sparse.rs,attention.rs}=, driven
+by generated fixtures (=rope_yarn_fixture.json=, =window_topk_fixture.json=,
+=candidate_blocks_fixture.json=, =compressor_fixture.json=) via
+=tests/deepseek_v41_math_test.rs=.
+
+Evidence: =bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_math_tests=
+-> PASSED. This is Level 3 op verifier coverage, re-run green during Wave 1
+closure.

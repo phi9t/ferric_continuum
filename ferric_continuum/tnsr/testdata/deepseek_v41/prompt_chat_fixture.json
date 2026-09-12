@@ -1,0 +1,31 @@
+{
+  "expected": {
+    "prompt": "<\uff5cbegin\u2581of\u2581sentence\uff5c><\uff5cUser\uff5c>Hello.<\uff5cAssistant\uff5c></think>Hi there!<\uff5cend\u2581of\u2581sentence\uff5c><\uff5cUser\uff5c>And now?<\uff5cAssistant\uff5c></think>",
+    "token_ids": null
+  },
+  "input": {
+    "contains_thinking_end_token": true,
+    "messages": [
+      {
+        "content": "Hello.",
+        "role": "user"
+      },
+      {
+        "content": "Hi there!",
+        "reasoning_content": "The user greeted me; respond politely.",
+        "role": "assistant"
+      },
+      {
+        "content": "And now?",
+        "role": "user"
+      }
+    ],
+    "reasoning_effort": null,
+    "thinking_mode": "chat"
+  },
+  "mode": "chat",
+  "source_file": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/encoding/encoding.py",
+  "tokenizer_status": "skipped-no-tokenizer-json",
+  "upstream_function": "encode_messages",
+  "upstream_import_status": "path-import-ok"
+}

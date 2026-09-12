@@ -1,0 +1,88 @@
+{
+  "absolute_tolerance": 1e-05,
+  "expected": {
+    "indices": [
+      0,
+      3,
+      1,
+      4,
+      2,
+      1
+    ],
+    "scores": [
+      1.68466552,
+      0.83255461,
+      0.35395269,
+      1.48347049,
+      0.63642193,
+      0.53345289,
+      1.0044994,
+      0.81180518,
+      0.63642193,
+      1.13711507
+    ],
+    "weights": [
+      0.63164051,
+      0.5562054,
+      0.31215408,
+      0.57752464,
+      0.41230435,
+      0.51017101
+    ]
+  },
+  "input": {
+    "correction_bias": [
+      0.0,
+      0.0,
+      0.2,
+      -0.1,
+      0.05
+    ],
+    "gate_temp": 1.2,
+    "gate_weight": [
+      -1.25,
+      -1.0,
+      -0.75,
+      -0.5,
+      -0.25,
+      0.0,
+      0.25,
+      0.5,
+      0.75,
+      1.0,
+      1.25,
+      -1.25,
+      -1.0,
+      -0.75,
+      -0.5,
+      -0.25,
+      0.0,
+      0.25,
+      0.5,
+      0.75
+    ],
+    "norm_topk_prob": true,
+    "route_scale": 1.5,
+    "shape": {
+      "dim": 4,
+      "experts": 5,
+      "tokens": 2
+    },
+    "topk": 3,
+    "x": [
+      -1.33333333,
+      -1.0,
+      -0.66666667,
+      -0.33333333,
+      0.0,
+      0.33333333,
+      0.66666667,
+      1.0
+    ]
+  },
+  "line_hint": "Gate.forward around lines 792-827",
+  "source_file": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py",
+  "upstream_call_status": "fallback:Gate.forward:RuntimeError:mat1 and mat2 shapes cannot be multiplied (1x8 and 4x5)",
+  "upstream_function": "Gate.forward",
+  "upstream_import_status": "path-import-ok"
+}

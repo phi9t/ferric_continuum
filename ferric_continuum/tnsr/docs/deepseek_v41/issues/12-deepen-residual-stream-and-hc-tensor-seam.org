@@ -1,0 +1,166 @@
+#+TITLE: Deepen the hyper-connection residual stream and Tensor<->flat seam
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 09-text-compatibility-closure
+#+PARENT: ../spec.org
+
+* Context
+
+Architecture review (=/improve-codebase-architecture=) of =src/deepseek_v41/=
+surfaced one cross-cutting friction: every seam trades in raw =Vec<f32>= plus a
+hand-passed =HcShape=, so layout / ordering invariants live in the *caller*, not
+the module. The two strongest deepening candidates:
+
+- *Candidate 2* — the Tensor<->flat conversion boilerplate
+  (=tensor_data=/=tensor3=/=tensor4=/=expand_hc= plus ~8 ad-hoc
+  =inner.borrow().value.data.as_ref().clone()= sites) is duplicated across
+  =model.rs=, =attention.rs=, =moe.rs=, =engram.rs= with no axis assertion and an
+  untested layout contract.
+- *Candidate 1* — the hyper-connection residual stream has no owning type;
+  =DeepSeekV41Block::forward= bounces between =hyper.rs= and raw =Vec<f32>=, and
+  the "pre-mix of layer N feeds layer N+1" contract is an implicit tuple return
+  threaded across ~100 lines of =model.rs=.
+
+This ticket deepens both, Candidate 2 first as the foundation Candidate 1 sits on.
+
+Read first:
+
+- =ferric_continuum/tnsr/src/deepseek_v41/model.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/hyper.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/{attention,moe,engram}.rs=
+- =ferric_continuum/tnsr/tests/deepseek_v41_math_test.rs= (hc fixtures)
+- =ferric_continuum/tnsr/CONTEXT.md= (executable derivation, named dimension)
+
+* Design decisions (grilled + user-approved)
+
+- *Bit-identical.* This is a pure structural refactor. Tiny-model logits parity
+  must not move: =max_abs_diff= stays ~3.96e-07, =cosine= 1.0, top-1 match. Keep
+  exact op order and =f32= rounding.
+- *Keep =hc_mixes=/=hc_pre=/=hc_post= public*; the new types wrap them
+  internally. The Level-3 fixtures remain the bit-identical guarantee; demote to
+  private only in a later pass once the new type's own tests cover the vectors.
+- =ResidualStream= *owns a flat =Vec<f32>= + =HcShape= + the carried pre-mix*,
+  not an autograd =Tensor= (the inter-block stream is never differentiated here).
+- New file =hc_tensor.rs=; =HcShape= *moves there* and is re-exported from
+  =hyper.rs= for existing importers.
+- =Block::forward= takes =&mut ResidualStream= and mutates in place; the pre-mix
+  carry becomes a field, replacing the tuple-return threading.
+
+* Deliverable A — Candidate 2: hc_tensor conversion seam
+
+- Create =ferric_continuum/tnsr/src/deepseek_v41/hc_tensor.rs= exposing:
+  - =pub struct HcShape { batch, seqlen, hc_mult, dim }= (moved from =hyper.rs=;
+    =hyper.rs= re-exports it).
+  - =pub fn to_flat(&Tensor) -> Vec<f32>= — the single
+    =inner.borrow().value.data.as_ref().clone()= site.
+  - =pub fn shape_of(&Tensor) -> HcShape= — replaces =model.rs::shape4=; asserts
+    4D =[B,S,HC,D]=.
+  - =pub fn from_flat_bsd(HcShape, Vec<f32>) -> Tensor= — =[B,S,D]=; asserts
+    =numel == batch*seqlen*dim=.
+  - =pub fn from_flat_bshcd(HcShape, Vec<f32>) -> Tensor= — =[B,S,HC,D]=; asserts
+    =numel == batch*seqlen*hc_mult*dim=.
+  - =pub fn expand_hc(&Tensor, hc_mult) -> Tensor= — =[B,S,D]= -> =[B,S,HC,D]=,
+    replicating each token's =[D]= slice contiguously (the current untested
+    =model.rs::expand_hc= logic, now unit-tested).
+- Fold *all* ad-hoc raw-borrow sites into =to_flat=: =model.rs= (5),
+  =attention.rs= (4), =moe.rs=, =engram.rs=. Replace =tensor3=/=tensor4= with
+  =from_flat_bsd=/=from_flat_bshcd=.
+- Unit tests in =hc_tensor.rs= (=#[cfg(test)]=): round-trip =to_flat= o
+  =from_flat_*= is identity; =expand_hc= replicates the =[D]= slice; numel/axis
+  assertions fire on mismatch; =shape_of= rejects non-4D.
+
+* Deliverable B — Candidate 1: ResidualStream type
+
+- Introduce =ResidualStream= (in =model.rs= or a new =residual.rs= — keep small)
+  owning flat =Vec<f32>= (=[B,S,HC,D]=) + =HcShape= + carried =pre_mix=.
+  - =from_embedding(embed: &Tensor, hc_mult) -> Self= — =expand_hc= +
+    =identity_pre_mix=.
+  - =attn_step(&mut self, hc_weights, |sublayer_in: Tensor| -> Tensor)= and
+    =ffn_step(...)= running =hc_mixes= -> =hc_pre= -> sublayer -> =hc_post=
+    internally, updating the buffer and pre-mix carry in place.
+  - =collapse(&self) -> Tensor= — final =hc_pre= to =[B,S,D]=.
+- =DeepSeekV41Block::forward(&mut ResidualStream, &mut SharedAttentionState,
+  token_mask)= replaces the tuple-return signature; engram lookup still runs
+  first.
+- =try_forward_token_ids= loop becomes:
+  =from_embedding= -> per-layer =block.forward(&mut stream, ...)= ->
+  =stream.collapse()= -> final norm -> lm_head.
+- =identity_pre_mix= becomes a private constructor detail (or stays a =pub= fn
+  called by =from_embedding=); =expand_hc= is now =hc_tensor::expand_hc=.
+
+* Out of scope
+
+- No numeric/behavior change (bit-identical gate).
+- Candidates 3-6 (weight-layout newtypes, SparseIndexPlan, config split, engram
+  shape) are separate tickets.
+- No demotion of =hc_mixes=/=hc_pre=/=hc_post= to private in this pass.
+- No commit/push/merge.
+
+* Verification
+
+Run after Deliverable A, then again after Deliverable B, with pinned Bazel
+=/data02/home/philip.yang/.local/bin/bazel-9.2.0=:
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests
+  //ferric_continuum/tnsr:deepseek_v41_math_tests
+  //ferric_continuum/tnsr:deepseek_v41_model_tests= -> all PASS.
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh= ->
+  L6-tiny-parity PASS with =max_abs_diff= ~3.96e-07 (bit-identical gate).
+- =rustfmt --check= clean on all changed Rust.
+
+* Comments
+
+- Deepening rationale in =/codebase-design= terms: leverage (one =to_flat= seam,
+  N call sites), locality (HC layout + residual-stream carry in one module),
+  interface shrinks while the implementation absorbs the wrappers.
+- Deletion test: today deleting =hyper.rs= would scatter layout math into
+  =model.rs=; =ResidualStream= earns its keep by absorbing the in-caller
+  invariants.
+
+* Resolution (2026-09-12)
+
+Both deliverables landed in worktree =.worktrees/deepseek-v41-text-impl=
+(branch =deepseek-v41-text-impl=). Bit-identical gate held: tiny-model logits
+parity unchanged (=max_abs_diff= 3.95895e-07, cosine 1.0, top-1 = 3/3).
+
+** Deliverable A — hc_tensor conversion seam (DONE)
+
+- New =src/deepseek_v41/hc_tensor.rs= (228 lines) with =HcShape= (moved from
+  =hyper.rs=, re-exported there), =to_flat=, =shape_of=, =from_flat_bsd=,
+  =from_flat_bshcd=, =expand_hc=, plus 6 =#[cfg(test)]= unit tests.
+- Folded ad-hoc =inner.borrow().value.data.as_ref().clone()= sites into
+  =to_flat=: =model.rs= (all block/model sites), =attention.rs= (compressor
+  norm/kv, kv_data, compressed_kv, q_flat). =moe.rs=/=engram.rs= use generic
+  2D/=xv.shape.0= shapes (=flatten_tokens=), so their wrap sites were left as-is
+  per the grilled decision not to force =from_flat_*= where the shape isn't
+  strict =[B,S,HC,D]=.
+- Deleted =model.rs::{expand_hc, tensor_data, tensor3, tensor4, shape4}=.
+
+** Deliverable B — ResidualStream type (DONE)
+
+- New =src/deepseek_v41/residual.rs= (196 lines): =ResidualStream= owns flat
+  =Vec<f32>= + =HcShape= + carried =pre_mix=; =HcStepWeights<'a>= groups the six
+  per-step HC vectors. API: =from_embedding=, =from_hc_tensor= (fixtures),
+  =replace_buffer= (engram), =step(weights, sublayer_closure)=, =collapse=,
+  =collapse_hc=, plus =identity_pre_mix= (moved from =model.rs=). 4 unit tests.
+- =DeepSeekV41Block::forward= now takes =&mut ResidualStream= and returns
+  =()=, mutating in place across two =stream.step(...)= calls (attn, ffn);
+  engram lookup still runs first via =collapse_hc= / =replace_buffer=.
+- =try_forward_token_ids= loop is now =from_embedding= -> per-layer
+  =block.forward(&mut stream, ...)= -> =stream.collapse()= -> final norm ->
+  lm_head. Removed =model.rs::clone_tensor_no_grad=.
+- Updated =tests/deepseek_v41_model_test.rs= block fixture harness to drive the
+  new =&mut ResidualStream= signature (=from_hc_tensor= + =collapse_hc= +
+  =pre_mix()=).
+- BUILD: added =hc_tensor.rs= and =residual.rs= to =_TNSR_SRCS=.
+
+** Verification evidence
+
+- =bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_config_tests
+  deepseek_v41_math_tests deepseek_v41_model_tests lib_tests= -> 4 tests pass
+  (lib_tests now covers the 6 hc_tensor + 4 residual + 3 identity unit tests).
+- =verify_deepseek_v41_text_compat.sh= -> L1..L4 + L6-tiny PASS
+  (=max_abs_diff= 3.95895e-07), L6-real SKIP, =RESULT: PASS-WITH-SKIPS=.
+- =bazel-9.2.0 build -c opt ... //ferric_continuum/tnsr:deepseek_v41_infer= ->
+  build OK.
+- =rustfmt --edition 2021 --check= clean on all changed Rust.

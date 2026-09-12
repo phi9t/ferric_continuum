@@ -1,0 +1,48 @@
+#+TITLE: TODO multimodal DeepSeek V4.1 wave
+#+TYPE: task
+#+STATUS: ready-for-human
+#+BLOCKED_BY: 09-text-compatibility-closure
+#+PARENT: ../spec.org
+
+* Context
+
+This is a placeholder TODO wave for multimodal/image support after text-only
+logits compatibility is proven. It is intentionally not implementation-ready.
+
+Read first:
+
+- =../spec.org=
+- =../research/upstream-architecture.md=
+- =../upstream/inference/vision.py=
+- =../upstream/inference/image_processor.py=
+- =../upstream/encoding/encoding.py=
+
+* Requirements
+
+- Before implementation, split this TODO into fresh design/spec tickets.
+- Cover:
+  - vision config parser and source verifier
+  - ViT patch embedding
+  - 2D RoPE
+  - downsample/aligner path
+  - image placeholder expansion
+  - token type vector generation
+  - learned image delimiter embeddings
+  - text/vision merge semantics
+  - image-mask routing bias
+  - multimodal prompt encoding parity
+  - image fixture parity against upstream
+
+* Out of scope
+
+- Do not implement this as part of Wave 1 text compatibility.
+- Do not let text-only CLI silently accept image placeholders.
+
+* Verification
+
+Future multimodal wave must provide source, config, op, layer, block, prompt,
+and logits/embedding parity verifiers comparable to the text wave.
+
+* Comments
+
+- This ticket exists to keep the TODO visible without expanding the first wave.

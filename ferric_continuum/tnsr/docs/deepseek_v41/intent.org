@@ -1,0 +1,62 @@
+#+TITLE: DeepSeek V4.1 Flash tnsr implementation intent
+#+TYPE: task
+#+STATUS: needs-design-approval
+#+BLOCKED_BY:
+
+* Route
+
+This request is on the gated feature path.
+
+Evidence:
+- The work introduces a new model architecture under =ferric_continuum/tnsr=.
+- The implementation changes public Rust module surfaces, checkpoint loading,
+  and verifier tools.
+- Compatibility depends on upstream HuggingFace and DeepSeek inference code,
+  including quantized checkpoint conventions.
+- The acceptance criteria require numerical compatibility, not only shape or
+  smoke-test coverage.
+
+Matt owner fallback:
+- The user invoked =/ask-matt= and provided the router text.
+- The model-invocable Matt implementation skills for =/grill-with-docs=,
+  =/to-spec=, and =/to-tickets= are not exposed in this session.
+- Per =docs/agents/skill-orchestration.md=, this tracker artifact applies the
+  named route and combined completion criteria directly instead of pretending
+  those skills ran.
+
+* Outcome
+
+Implement a text-only DeepSeek V4.1 Flash causal-LM path in =tnsr= with enough
+verifiers to establish compatibility with the upstream local inference code and
+HuggingFace checkpoint metadata.
+
+* Initial acceptance criteria
+
+- Parse the upstream =deepseek_v41= HuggingFace =config.json= into a typed Rust
+  config without losing architecture-specific fields.
+- Implement the text causal-LM executable derivation needed for forward logits:
+  embedding, hyper-connection residual stream, MLA-style attention with sparse
+  window/compressed KV semantics, routed MoE plus shared expert, final norm, and
+  LM head.
+- Load local safetensors checkpoints through explicit layout, transpose,
+  sharding, and quantization adapters.
+- Provide deterministic tiny-model tests for every new mathematical primitive.
+- Provide upstream parity verifiers that compare selected intermediate tensors
+  and final logits against the DeepSeek reference inference code.
+- Keep vision encoding, distributed serving, GPU kernels, and production-speed
+  speculative decoding outside the first compatibility slice unless explicitly
+  approved.
+
+* Authority boundary
+
+Implementation may edit =ferric_continuum/tnsr= and this effort's
+=ferric_continuum/tnsr/docs/deepseek_v41= tracker files after design approval.
+
+No commit, push, merge, or destructive checkout operation is authorized by this
+intent file.
+
+* Comments
+
+- Created from the user request: "deep dive this new dsv4.1 model arch ... and
+  implement then in the tnsr module | create sufficient amount of verifiers to
+  ensure the tnsr impl is compatible with the upstream inference code".

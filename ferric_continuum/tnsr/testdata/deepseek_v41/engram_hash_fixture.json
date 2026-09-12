@@ -1,0 +1,154 @@
+{
+  "absolute_tolerance": 0.0,
+  "expected": {
+    "decode_hashes": [
+      8059046,
+      30055401,
+      33447010,
+      57611759,
+      70472553,
+      94181877,
+      15974723,
+      25243314,
+      44990076,
+      52055016,
+      67681699,
+      92225317
+    ],
+    "prefill_hashes": [
+      8934053,
+      20801014,
+      37246049,
+      48586001,
+      74855728,
+      93867882,
+      12078896,
+      23782018,
+      34439343,
+      53793484,
+      79269985,
+      91356043,
+      288458,
+      18360092,
+      46306695,
+      54165640,
+      67547318,
+      80997997,
+      6244924,
+      28562668,
+      36060935,
+      48090239,
+      79923865,
+      92151430,
+      8059046,
+      30055401,
+      33447010,
+      57611759,
+      65826538,
+      90775397,
+      15974723,
+      25243314,
+      44990076,
+      52055016,
+      64025083,
+      82183392,
+      288458,
+      18360092,
+      34358846,
+      62147529,
+      72098680,
+      81936226,
+      6244924,
+      28562668,
+      34185384,
+      61505891,
+      72187021,
+      93054912
+    ]
+  },
+  "input": {
+    "decode_input_ids": [
+      5
+    ],
+    "decode_start_pos": 4,
+    "expected_compressed_vocab_size": 6,
+    "expected_token_map": [
+      0,
+      1,
+      2,
+      3,
+      3,
+      3,
+      4,
+      4,
+      5,
+      5
+    ],
+    "max_batch_size": 1,
+    "max_seq_len": 16,
+    "multipliers": [
+      1265604610235772205,
+      79932166973103877,
+      593885974911493955,
+      1221925540571170885,
+      1118365701629147841,
+      850718144586061385,
+      510676356168679127,
+      1364484065151725665
+    ],
+    "pad_token_id": 2,
+    "prefill_input_ids": [
+      3,
+      6,
+      4,
+      7
+    ],
+    "vocab_entries": [
+      {
+        "text": "<BOS>",
+        "token_id": 0
+      },
+      {
+        "text": "<EOS>",
+        "token_id": 1
+      },
+      {
+        "text": "<PAD>",
+        "token_id": 2
+      },
+      {
+        "text": " The",
+        "token_id": 3
+      },
+      {
+        "text": "the",
+        "token_id": 4
+      },
+      {
+        "text": "\uff34\uff28\uff25",
+        "token_id": 5
+      },
+      {
+        "text": "Cafe\u0301",
+        "token_id": 6
+      },
+      {
+        "text": "Caf\u00e9",
+        "token_id": 7
+      },
+      {
+        "text": " \t",
+        "token_id": 8
+      },
+      {
+        "text": " ",
+        "token_id": 9
+      }
+    ]
+  },
+  "line_hint": "NgramHashState.forward around lines 129-184",
+  "source_file": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/engram.py",
+  "upstream_call_status": "called-upstream:NgramHashState.forward:shim-tokenizers,shim-sympy.isprime",
+  "upstream_function": "NgramHashState.forward",
+  "upstream_import_status": "path-import-ok"
+}
