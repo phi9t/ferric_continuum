@@ -1,0 +1,101 @@
+{
+  "absolute_tolerance": 1e-05,
+  "expected": {
+    "output": [
+      -1.80373887,
+      -1.33582591,
+      -0.86791296,
+      -0.4,
+      -0.98939221,
+      -0.52626148,
+      -0.06313074,
+      0.4,
+      0.6,
+      0.8,
+      1.0,
+      -1.0,
+      -0.8,
+      -0.6,
+      -0.4,
+      -0.2
+    ]
+  },
+  "input": {
+    "eps": 1e-20,
+    "k_weight": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "key": [
+      -1.0,
+      -0.75,
+      -0.5,
+      -0.25,
+      0.0,
+      0.25,
+      0.5,
+      0.75,
+      1.0,
+      -1.0,
+      -0.75,
+      -0.5,
+      -0.25,
+      0.0,
+      0.25,
+      0.5
+    ],
+    "q_weight": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "token_mask": [
+      true,
+      false
+    ],
+    "value": [
+      -1.0,
+      -0.66666667,
+      -0.33333333,
+      0.0,
+      0.33333333,
+      0.66666667,
+      1.0,
+      -1.0
+    ],
+    "x": [
+      -1.0,
+      -0.8,
+      -0.6,
+      -0.4,
+      -0.2,
+      0.0,
+      0.2,
+      0.4,
+      0.6,
+      0.8,
+      1.0,
+      -1.0,
+      -0.8,
+      -0.6,
+      -0.4,
+      -0.2
+    ]
+  },
+  "line_hint": "Engram.forward around lines 328-367",
+  "source_file": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py",
+  "upstream_call_status": "fallback:Engram.forward:fixture-only",
+  "upstream_function": "Engram.forward",
+  "upstream_import_status": "path-import-ok"
+}

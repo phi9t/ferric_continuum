@@ -1,0 +1,23 @@
+{
+  "expected": {
+    "prompt": "<\uff5cbegin\u2581of\u2581sentence\uff5c><\uff5cSystem\uff5c>Reasoning Effort: 42 (range 1-100, the higher the value, the more thorough the reasoning)\n\n<\uff5cUser\uff5c>Prove that 2 is prime.<\uff5cAssistant\uff5c><think>",
+    "token_ids": null
+  },
+  "input": {
+    "contains_reasoning_effort_prefix": true,
+    "messages": [
+      {
+        "content": "Prove that 2 is prime.",
+        "role": "user"
+      }
+    ],
+    "reasoning_effort": 42,
+    "reasoning_effort_prefix": "Reasoning Effort: 42 (range 1-100, the higher the value, the more thorough the reasoning)\n\n",
+    "thinking_mode": "thinking"
+  },
+  "mode": "thinking",
+  "source_file": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/encoding/encoding.py",
+  "tokenizer_status": "skipped-no-tokenizer-json",
+  "upstream_function": "encode_messages",
+  "upstream_import_status": "path-import-ok"
+}

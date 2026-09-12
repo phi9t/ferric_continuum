@@ -1,0 +1,522 @@
+// Tests for the DeepSeek V4.1 text-only checkpoint loader.
+//
+// Included from `load.rs` via `include!` so they share the module's private
+// decode helpers.  Tiny safetensors fixtures are written inside each test
+// following the `qwen3_load.rs` pattern.
+
+use super::*;
+use safetensors::tensor::{Dtype, View};
+use std::borrow::Cow;
+use std::path::{Path, PathBuf};
+
+/// A minimal in-test safetensors tensor of an arbitrary dtype.
+struct FixtureTensor {
+    dtype: Dtype,
+    shape: Vec<usize>,
+    bytes: Vec<u8>,
+}
+
+impl FixtureTensor {
+    fn f32(shape: &[usize], data: &[f32]) -> Self {
+        assert_eq!(shape.iter().product::<usize>(), data.len());
+        let mut bytes = Vec::with_capacity(data.len() * 4);
+        for &v in data {
+            bytes.extend_from_slice(&v.to_le_bytes());
+        }
+        Self {
+            dtype: Dtype::F32,
+            shape: shape.to_vec(),
+            bytes,
+        }
+    }
+
+    fn f32_zeros(shape: &[usize]) -> Self {
+        let n = shape.iter().product::<usize>();
+        Self::f32(shape, &vec![0.0f32; n])
+    }
+
+    fn bytes(dtype: Dtype, shape: &[usize], bytes: Vec<u8>) -> Self {
+        Self {
+            dtype,
+            shape: shape.to_vec(),
+            bytes,
+        }
+    }
+}
+
+impl View for FixtureTensor {
+    fn dtype(&self) -> Dtype {
+        self.dtype
+    }
+    fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+    fn data(&self) -> Cow<[u8]> {
+        Cow::Borrowed(&self.bytes)
+    }
+    fn data_len(&self) -> usize {
+        self.bytes.len()
+    }
+}
+
+fn unique_tmp_dir(name: &str) -> PathBuf {
+    let mut dir = std::env::temp_dir();
+    dir.push(format!("tnsr-dsv41-load-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn write_safetensors(dir: &Path, file: &str, tensors: Vec<(String, FixtureTensor)>) {
+    let bytes = safetensors::tensor::serialize(tensors, &None).unwrap();
+    std::fs::write(dir.join(file), bytes).unwrap();
+}
+
+/// A tiny converted-style config the loader can parse via `from_inference_json`.
+/// dim=4, 1 layer (sliding-window only), hc_mult=2, 2 experts, topk=1.
+const TINY_CONFIG_JSON: &str = r#"{
+  "vocab_size": 5,
+  "dim": 4,
+  "moe_inter_dim": 3,
+  "n_layers": 1,
+  "n_heads": 2,
+  "head_dim": 2,
+  "rope_head_dim": 1,
+  "q_lora_rank": 3,
+  "o_lora_rank": 2,
+  "o_groups": 2,
+  "norm_eps": 1e-6,
+  "rope_theta": 10000.0,
+  "rope_factor": 1.0,
+  "original_seq_len": 0,
+  "beta_fast": 32.0,
+  "beta_slow": 1.0,
+  "window_size": 4,
+  "compress_ratios": [0],
+  "compress_rope_theta": 40000.0,
+  "kv_source_layers": [],
+  "index_source_layers": [],
+  "index_n_heads": 2,
+  "index_head_dim": 2,
+  "index_topk": 1,
+  "candidate_source_layer": 0,
+  "candidate_topk_blocks": 1,
+  "candidate_block_size": 1,
+  "hc_mult": 2,
+  "hc_sinkhorn_iters": 2,
+  "hc_eps": 1e-6,
+  "n_routed_experts": 2,
+  "n_shared_experts": 1,
+  "n_activated_experts": 1,
+  "score_func": "sqrtsoftplus",
+  "route_scale": 1.0,
+  "swiglu_limit": 0.0,
+  "engram_layer_ids": [],
+  "engram_num_embeddings": [],
+  "engram_max_ngram_size": 3,
+  "engram_vocab_size": 5,
+  "engram_n_heads": 2,
+  "engram_head_dim": 2,
+  "engram_pad_id": 2,
+  "engram_compressed_vocab_size": 5,
+  "image_token_id": 4,
+  "dtype": "bf16",
+  "expert_dtype": "bf16",
+  "n_mtp_layers": 0,
+  "dspark_block_size": 0,
+  "dspark_noise_token_id": 0,
+  "dspark_target_layer_ids": [],
+  "dspark_markov_rank": 0,
+  "dspark_n_routed_experts": 0,
+  "dspark_n_activated_experts": 0,
+  "vision_n_layers": 0,
+  "vision_dim": 0,
+  "vision_n_heads": 0,
+  "vision_inter_dim": 0,
+  "vision_patch_size": 0,
+  "vision_rope_theta": 0.0,
+  "vision_downsample_ratio": 0,
+  "vision_max_n_token": 0,
+  "vision_min_pixels": 0,
+  "vision_max_wh_ratio": null
+}"#;
+
+/// The full set of required f32 tensors for the tiny 1-layer text model.
+/// dim=4, n_heads=2, head_dim=2, q_lora=3, o_lora=2, o_groups=2, inter=3,
+/// experts=2, hc_mult=2 => mix_hc=(2+2)*2=8, hc_dim=8.
+fn tiny_tensor_map() -> Vec<(String, FixtureTensor)> {
+    let mut t: Vec<(String, FixtureTensor)> = Vec::new();
+    // globals
+    t.push(("embed.weight".into(), FixtureTensor::f32_zeros(&[5, 4])));
+    t.push(("head.weight".into(), FixtureTensor::f32_zeros(&[5, 4])));
+    t.push(("norm.weight".into(), FixtureTensor::f32_zeros(&[4])));
+    // layer 0
+    t.push((
+        "layers.0.attn_norm.weight".into(),
+        FixtureTensor::f32_zeros(&[4]),
+    ));
+    t.push((
+        "layers.0.ffn_norm.weight".into(),
+        FixtureTensor::f32_zeros(&[4]),
+    ));
+    // attention: upstream [out,in]
+    t.push((
+        "layers.0.attn.wq_a.weight".into(),
+        FixtureTensor::f32_zeros(&[3, 4]),
+    )); // [q_lora, dim]
+    t.push((
+        "layers.0.attn.q_norm.weight".into(),
+        FixtureTensor::f32_zeros(&[3]),
+    ));
+    t.push((
+        "layers.0.attn.wq_b.weight".into(),
+        FixtureTensor::f32_zeros(&[4, 3]),
+    )); // [n_heads*head_dim, q_lora]
+    t.push((
+        "layers.0.attn.wkv.weight".into(),
+        FixtureTensor::f32_zeros(&[2, 4]),
+    )); // [head_dim, dim]
+    t.push((
+        "layers.0.attn.kv_norm.weight".into(),
+        FixtureTensor::f32_zeros(&[2]),
+    ));
+    // wo_a [n_groups*o_lora, group_in] = [2*2, 2] = [4,2]
+    t.push((
+        "layers.0.attn.wo_a.weight".into(),
+        FixtureTensor::f32_zeros(&[4, 2]),
+    ));
+    t.push((
+        "layers.0.attn.wo_b.weight".into(),
+        FixtureTensor::f32_zeros(&[4, 4]),
+    )); // [dim, o_groups*o_lora]
+    t.push((
+        "layers.0.attn.attn_sink".into(),
+        FixtureTensor::f32_zeros(&[2]),
+    ));
+    // moe
+    t.push((
+        "layers.0.ffn.gate.weight".into(),
+        FixtureTensor::f32_zeros(&[2, 4]),
+    )); // [experts, dim]
+    t.push((
+        "layers.0.ffn.gate.bias".into(),
+        FixtureTensor::f32_zeros(&[2]),
+    ));
+    for e in 0..2 {
+        t.push((
+            format!("layers.0.ffn.experts.{e}.w1.weight"),
+            FixtureTensor::f32_zeros(&[3, 4]),
+        )); // [inter, dim]
+        t.push((
+            format!("layers.0.ffn.experts.{e}.w2.weight"),
+            FixtureTensor::f32_zeros(&[4, 3]),
+        )); // [dim, inter]
+        t.push((
+            format!("layers.0.ffn.experts.{e}.w3.weight"),
+            FixtureTensor::f32_zeros(&[3, 4]),
+        ));
+    }
+    t.push((
+        "layers.0.ffn.shared_experts.w1.weight".into(),
+        FixtureTensor::f32_zeros(&[3, 4]),
+    ));
+    t.push((
+        "layers.0.ffn.shared_experts.w2.weight".into(),
+        FixtureTensor::f32_zeros(&[4, 3]),
+    ));
+    t.push((
+        "layers.0.ffn.shared_experts.w3.weight".into(),
+        FixtureTensor::f32_zeros(&[3, 4]),
+    ));
+    // hc: mix_hc=8, hc_dim=8
+    t.push((
+        "layers.0.hc_attn_fn".into(),
+        FixtureTensor::f32_zeros(&[8, 8]),
+    ));
+    t.push((
+        "layers.0.hc_attn_base".into(),
+        FixtureTensor::f32_zeros(&[8]),
+    ));
+    t.push((
+        "layers.0.hc_attn_scale".into(),
+        FixtureTensor::f32_zeros(&[3]),
+    ));
+    t.push((
+        "layers.0.hc_ffn_fn".into(),
+        FixtureTensor::f32_zeros(&[8, 8]),
+    ));
+    t.push((
+        "layers.0.hc_ffn_base".into(),
+        FixtureTensor::f32_zeros(&[8]),
+    ));
+    t.push((
+        "layers.0.hc_ffn_scale".into(),
+        FixtureTensor::f32_zeros(&[3]),
+    ));
+    t
+}
+
+fn replace(tensors: &mut [(String, FixtureTensor)], name: &str, t: FixtureTensor) {
+    let slot = tensors
+        .iter_mut()
+        .find(|(k, _)| k == name)
+        .unwrap_or_else(|| panic!("no fixture tensor {name}"));
+    slot.1 = t;
+}
+
+fn remove(tensors: &mut Vec<(String, FixtureTensor)>, name: &str) {
+    tensors.retain(|(k, _)| k != name);
+}
+
+#[test]
+fn e4m3_decode_matches_known_values() {
+    // 0x00 -> +0; exp=7 (0b0111) mant=0 -> 1.0; sign bit -> -1.0; exp=8 mant=0 -> 2.0.
+    assert_eq!(e4m3_to_f32(0x00), 0.0);
+    assert_eq!(e4m3_to_f32(0b0_0111_000), 1.0);
+    assert_eq!(e4m3_to_f32(0b1_0111_000), -1.0);
+    assert_eq!(e4m3_to_f32(0b0_1000_000), 2.0);
+    // exp=7 mant=4 (0.5) -> 1.5
+    assert_eq!(e4m3_to_f32(0b0_0111_100), 1.5);
+}
+
+#[test]
+fn e8m0_decode_matches_known_values() {
+    assert_eq!(e8m0_to_f32(127), 1.0);
+    assert_eq!(e8m0_to_f32(128), 2.0);
+    assert_eq!(e8m0_to_f32(126), 0.5);
+}
+
+#[test]
+fn fp8_dequant_matches_known_f32() {
+    // 2x2 fp8 weight, block size 32 => one scale block [1,1].
+    // bytes: 1.0, 2.0, -1.0, 1.5 ; scale exponent 128 => *2 => 2,4,-2,3.
+    let w = FixtureTensor::bytes(
+        Dtype::F8_E4M3,
+        &[2, 2],
+        vec![0b0_0111_000, 0b0_1000_000, 0b1_0111_000, 0b0_0111_100],
+    );
+    let s = FixtureTensor::bytes(Dtype::U8, &[1, 1], vec![128]);
+    let dir = unique_tmp_dir("fp8");
+    write_safetensors(
+        &dir,
+        "m.safetensors",
+        vec![("w".into(), w), ("w.scale".into(), s)],
+    );
+    let ckpt = Checkpoint::open_single(&dir.join("m.safetensors")).unwrap();
+    let (out, kind) = ckpt.linear_weight("w", 2, 2).unwrap();
+    assert_eq!(kind, QuantKind::Fp8E4m3);
+    assert_eq!(out, vec![2.0, 4.0, -2.0, 3.0]);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn fp4_dequant_matches_known_f32() {
+    // out=2, in=4 => packed [2, 2]. byte low nibble first.
+    // row0: byte0 = (high=1 -> 0.5)<<4 | (low=2 -> 1.0) ; byte1 = (high=3 -> 1.5)<<4 | (low=4 -> 2.0)
+    // logical row0 = [1.0, 0.5, 2.0, 1.5]
+    // row1: byte0 = (high=9 -> -0.5)<<4 | (low=8 -> 0.0) ; byte1 = (high=0xA -> -1.0)<<4 | (low=0 -> 0.0)
+    // logical row1 = [0.0, -0.5, 0.0, -1.0]
+    let b = |low: u8, high: u8| (high << 4) | (low & 0x0F);
+    let w = FixtureTensor::bytes(
+        Dtype::I8,
+        &[2, 2],
+        vec![b(2, 1), b(4, 3), b(8, 9), b(0, 0x0A)],
+    );
+    // scale [ceil(2/32), ceil(4/32)] = [1,1], exponent 127 => *1.
+    let s = FixtureTensor::bytes(Dtype::U8, &[1, 1], vec![127]);
+    let dir = unique_tmp_dir("fp4");
+    write_safetensors(
+        &dir,
+        "m.safetensors",
+        vec![("w".into(), w), ("w.scale".into(), s)],
+    );
+    let ckpt = Checkpoint::open_single(&dir.join("m.safetensors")).unwrap();
+    let (out, kind) = ckpt.linear_weight("w", 2, 4).unwrap();
+    assert_eq!(kind, QuantKind::Fp4E2m1);
+    assert_eq!(out, vec![1.0, 0.5, 2.0, 1.5, 0.0, -0.5, 0.0, -1.0]);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn tiny_converted_checkpoint_loads() {
+    let dir = unique_tmp_dir("tiny-ok");
+    std::fs::write(dir.join("config.json"), TINY_CONFIG_JSON).unwrap();
+    write_safetensors(&dir, "model.safetensors", tiny_tensor_map());
+    let mut model = load_text_model(&dir).expect("tiny checkpoint should load");
+    assert_eq!(model.vocab_size, 5);
+    assert_eq!(model.hidden_size, 4);
+    assert_eq!(model.hc_mult, 2);
+    assert_eq!(model.layers.len(), 1);
+    // A forward over in-vocab ids should produce [b, s, vocab] logits.  The
+    // seed helper wires the per-batch token count into each MoE gate first.
+    let out = forward_with_token_seed(&mut model, &[0, 1], 1, 2).expect("forward");
+    assert_eq!(out.inner.borrow().value.shape.0, vec![1, 2, 5]);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn wrong_shape_returns_err_naming_tensor() {
+    let dir = unique_tmp_dir("bad-shape");
+    std::fs::write(dir.join("config.json"), TINY_CONFIG_JSON).unwrap();
+    let mut tensors = tiny_tensor_map();
+    // wq_a expected [3,4]; give [3,5].
+    replace(
+        &mut tensors,
+        "layers.0.attn.wq_a.weight",
+        FixtureTensor::f32_zeros(&[3, 5]),
+    );
+    write_safetensors(&dir, "model.safetensors", tensors);
+    let err = match load_text_model(&dir) {
+        Ok(_) => panic!("expected load to fail"),
+        Err(e) => e,
+    };
+    assert!(err.contains("layers.0.attn.wq_a.weight"), "err: {err}");
+    assert!(
+        err.contains("[3, 4]") && err.contains("[3, 5]"),
+        "err: {err}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn missing_required_tensor_returns_err() {
+    let dir = unique_tmp_dir("missing");
+    std::fs::write(dir.join("config.json"), TINY_CONFIG_JSON).unwrap();
+    let mut tensors = tiny_tensor_map();
+    remove(&mut tensors, "layers.0.attn.kv_norm.weight");
+    write_safetensors(&dir, "model.safetensors", tensors);
+    let err = match load_text_model(&dir) {
+        Ok(_) => panic!("expected load to fail"),
+        Err(e) => e,
+    };
+    assert!(err.contains("layers.0.attn.kv_norm.weight"), "err: {err}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn qwen_style_names_are_rejected() {
+    let dir = unique_tmp_dir("qwen");
+    std::fs::write(dir.join("config.json"), TINY_CONFIG_JSON).unwrap();
+    let mut tensors = tiny_tensor_map();
+    // Inject a Qwen marker.
+    tensors.push((
+        "model.embed_tokens.weight".into(),
+        FixtureTensor::f32_zeros(&[5, 4]),
+    ));
+    write_safetensors(&dir, "model.safetensors", tensors);
+    let err = match load_text_model(&dir) {
+        Ok(_) => panic!("expected load to fail"),
+        Err(e) => e,
+    };
+    assert!(err.contains("Qwen3"), "err: {err}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn vision_and_mtp_tensors_ignored_in_text_mode() {
+    let dir = unique_tmp_dir("vision-mtp");
+    std::fs::write(dir.join("config.json"), TINY_CONFIG_JSON).unwrap();
+    let mut tensors = tiny_tensor_map();
+    // Deferred surfaces present in the file must not break a text-only load.
+    tensors.push((
+        "vision.blocks.0.attn.qkv.weight".into(),
+        FixtureTensor::f32_zeros(&[2, 2]),
+    ));
+    tensors.push((
+        "aligner.w1.weight".into(),
+        FixtureTensor::f32_zeros(&[2, 2]),
+    ));
+    tensors.push((
+        "mtp.0.attn.wq_a.weight".into(),
+        FixtureTensor::f32_zeros(&[3, 4]),
+    ));
+    write_safetensors(&dir, "model.safetensors", tensors);
+    let model = load_text_model(&dir).expect("text-only load should ignore vision/mtp");
+    assert_eq!(model.layers.len(), 1);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn missing_engram_tensor_on_engram_layer_is_error() {
+    // Build a 2-layer config where layer 1 is an engram layer, then omit the
+    // required engram tensor so the loader must error.
+    let cfg = TINY_CONFIG_JSON
+        .replace("\"n_layers\": 1", "\"n_layers\": 2")
+        .replace("\"compress_ratios\": [0]", "\"compress_ratios\": [0, 0]")
+        .replace("\"engram_layer_ids\": []", "\"engram_layer_ids\": [1]")
+        .replace(
+            "\"engram_num_embeddings\": []",
+            "\"engram_num_embeddings\": [4]",
+        );
+    let dir = unique_tmp_dir("engram-missing");
+    std::fs::write(dir.join("config.json"), cfg).unwrap();
+    let mut tensors = tiny_tensor_map();
+    // Duplicate layer-0 tensors as layer-1 (rename), so layer 1 is otherwise complete.
+    let layer1: Vec<(String, FixtureTensor)> = tiny_tensor_map()
+        .into_iter()
+        .filter(|(k, _)| k.starts_with("layers.0."))
+        .map(|(k, v)| (k.replacen("layers.0.", "layers.1.", 1), v))
+        .collect();
+    tensors.extend(layer1);
+    // Add engram q_weight/k_weight but NOT engram.wkv.weight -> must error.
+    tensors.push((
+        "layers.1.engram.q_weight".into(),
+        FixtureTensor::f32_zeros(&[2, 4]),
+    ));
+    tensors.push((
+        "layers.1.engram.k_weight".into(),
+        FixtureTensor::f32_zeros(&[2, 4]),
+    ));
+    write_safetensors(&dir, "model.safetensors", tensors);
+    let err = match load_text_model(&dir) {
+        Ok(_) => panic!("expected load to fail"),
+        Err(e) => e,
+    };
+    assert!(
+        err.contains("Engram") && err.contains("layers.1.engram"),
+        "err: {err}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn converted_tp_shard_loads() {
+    let dir = unique_tmp_dir("tp");
+    std::fs::write(dir.join("config.json"), TINY_CONFIG_JSON).unwrap();
+    write_safetensors(&dir, "model0-mp1.safetensors", tiny_tensor_map());
+    let model = load_text_model_from_converted_tp(&dir, 0, 1).expect("tp shard should load");
+    assert_eq!(model.layers.len(), 1);
+    // load_text_model auto-discovers the mp shard when no single-file exists.
+    let model2 = load_text_model(&dir).expect("auto-discovery of mp shard");
+    assert_eq!(model2.layers.len(), 1);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn wo_a_grouped_layout_transposes_inner_axes() {
+    // group_in=(2/2)*2=2, o_lora=2, o_groups=2 -> upstream [4,2], tnsr [2,2,2].
+    // upstream row-major [g*o_lora+r, i]:
+    //   g0: r0=[a00,a01], r1=[a10,a11]
+    //   g1: r0=[b00,b01], r1=[b10,b11]
+    // tnsr dst[(g*group_in+i)*o_lora+r] expects [g,i,r].
+    let data = vec![
+        1.0, 2.0, // g0 r0 (i0,i1)
+        3.0, 4.0, // g0 r1
+        5.0, 6.0, // g1 r0
+        7.0, 8.0, // g1 r1
+    ];
+    let w = FixtureTensor::f32(&[4, 2], &data);
+    let dir = unique_tmp_dir("wo-a");
+    write_safetensors(&dir, "m.safetensors", vec![("wo_a".into(), w)]);
+    let ckpt = Checkpoint::open_single(&dir.join("m.safetensors")).unwrap();
+    let t = load_wo_a(&ckpt, "wo_a", 2, 2, 2, 2).unwrap();
+    let v = t.inner.borrow().value.clone();
+    assert_eq!(v.shape.0, vec![2, 2, 2]);
+    // g0: i0 r0=1(a00), i0 r1=3(a10), i1 r0=2(a01), i1 r1=4(a11)
+    // g1: i0 r0=5, i0 r1=7, i1 r0=6, i1 r1=8
+    assert_eq!(
+        v.data.as_ref(),
+        &vec![1.0, 3.0, 2.0, 4.0, 5.0, 7.0, 6.0, 8.0]
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}

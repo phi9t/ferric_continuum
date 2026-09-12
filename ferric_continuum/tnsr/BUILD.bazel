@@ -32,6 +32,19 @@ _TNSR_SRCS = [
     "src/transformer.rs",
     "src/qwen3.rs",
     "src/qwen3_load.rs",
+    "src/deepseek_v41/config.rs",
+    "src/deepseek_v41/attention.rs",
+    "src/deepseek_v41/engram.rs",
+    "src/deepseek_v41/hc_tensor.rs",
+    "src/deepseek_v41/hyper.rs",
+    "src/deepseek_v41/load.rs",
+    "src/deepseek_v41/load_test.rs",
+    "src/deepseek_v41/model.rs",
+    "src/deepseek_v41/moe.rs",
+    "src/deepseek_v41/mod.rs",
+    "src/deepseek_v41/residual.rs",
+    "src/deepseek_v41/rope.rs",
+    "src/deepseek_v41/sparse.rs",
     "src/bpe.rs",
     "src/ops/mod.rs",
     "src/ops/activations.rs",
@@ -158,6 +171,19 @@ rust_binary(
     ],
 )
 
+# DeepSeek V4.1-Flash text-only inference (converted-style dir via CLI arg).
+rust_binary(
+    name = "deepseek_v41_infer",
+    srcs = ["src/bin/deepseek_v41_infer.rs"],
+    crate_name = "deepseek_v41_infer",
+    edition = "2021",
+    deps = [
+        ":tnsr",
+        "@crates//:tracing",
+        "@crates//:tracing-subscriber",
+    ],
+)
+
 # Integration tests: gradient checks, checkpoint correctness, shape panics
 rust_test(
     name = "tnsr_tests",
@@ -271,6 +297,75 @@ rust_test(
     crate_name = "qwen3_test",
     edition = "2021",
     deps = [":tnsr"],
+)
+
+# DeepSeek V4.1 release metadata verifiers: config and index only, no weights.
+rust_test(
+    name = "deepseek_v41_config_tests",
+    srcs = ["tests/deepseek_v41_config_test.rs"],
+    crate_name = "deepseek_v41_config_test",
+    data = [
+        "testdata/deepseek_v41/upstream/config.json",
+        "testdata/deepseek_v41/upstream/inference/config.json",
+        "testdata/deepseek_v41/upstream/model.safetensors.index.json",
+    ],
+    edition = "2021",
+    deps = [
+        ":tnsr",
+        "@crates//:serde_json",
+    ],
+)
+
+# DeepSeek V4.1 op-level math fixtures for RoPE, sparse indices, and compression.
+rust_test(
+    name = "deepseek_v41_math_tests",
+    srcs = ["tests/deepseek_v41_math_test.rs"],
+    crate_name = "deepseek_v41_math_test",
+    data = [
+        "testdata/deepseek_v41/candidate_blocks_fixture.json",
+        "testdata/deepseek_v41/compressor_fixture.json",
+        "testdata/deepseek_v41/engram_hash_fixture.json",
+        "testdata/deepseek_v41/engram_layout_fixture.json",
+        "testdata/deepseek_v41/engram_update_fixture.json",
+        "testdata/deepseek_v41/expert_swiglu_fixture.json",
+        "testdata/deepseek_v41/hyper_connection_fixture.json",
+        "testdata/deepseek_v41/moe_gate_fixture.json",
+        "testdata/deepseek_v41/rope_yarn_fixture.json",
+        "testdata/deepseek_v41/window_topk_fixture.json",
+    ],
+    edition = "2021",
+    deps = [
+        ":tnsr",
+        "@crates//:serde_json",
+    ],
+)
+
+# DeepSeek V4.1 layer/block/model verifier ladder. Ticket 05A starts with
+# layer-level fixtures; later tickets add block and tiny-model fixtures here.
+rust_test(
+    name = "deepseek_v41_model_tests",
+    srcs = ["tests/deepseek_v41_model_test.rs"],
+    crate_name = "deepseek_v41_model_test",
+    data = [
+        "testdata/deepseek_v41/attention_layer_fixture.json",
+        "testdata/deepseek_v41/block_engram_layer_fixture.json",
+        "testdata/deepseek_v41/block_index_source_fixture.json",
+        "testdata/deepseek_v41/block_kv_source_fixture.json",
+        "testdata/deepseek_v41/block_reuse_fixture.json",
+        "testdata/deepseek_v41/block_sliding_window_fixture.json",
+        "testdata/deepseek_v41/engram_layer_fixture.json",
+        "testdata/deepseek_v41/moe_layer_fixture.json",
+        "testdata/deepseek_v41/prompt_chat_fixture.json",
+        "testdata/deepseek_v41/prompt_dsml_fixture.json",
+        "testdata/deepseek_v41/prompt_plain_fixture.json",
+        "testdata/deepseek_v41/prompt_thinking_fixture.json",
+        "testdata/deepseek_v41/tiny_model_fixture.json",
+    ],
+    edition = "2021",
+    deps = [
+        ":tnsr",
+        "@crates//:serde_json",
+    ],
 )
 
 # Logical context-parallel GQA: shard-wise forward/backward + Qwen3 integration.

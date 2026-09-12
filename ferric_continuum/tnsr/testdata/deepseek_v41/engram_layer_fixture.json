@@ -1,0 +1,119 @@
+{
+  "absolute_tolerance": 1e-05,
+  "expected": {
+    "masked_token_original": [
+      0.2,
+      0.4,
+      0.6,
+      0.8,
+      1.0,
+      -1.0
+    ],
+    "output": [
+      -1.49764507,
+      -1.04882254,
+      -0.6,
+      -0.64084405,
+      -0.32042202,
+      0.0,
+      0.2,
+      0.4,
+      0.6,
+      0.8,
+      1.0,
+      -1.0
+    ],
+    "shape": [
+      2,
+      2,
+      3
+    ]
+  },
+  "input": {
+    "eps": 1e-06,
+    "key": [
+      -0.75,
+      -0.5,
+      -0.25,
+      0.0,
+      0.25,
+      0.5,
+      0.75,
+      -0.75,
+      -0.5,
+      -0.25,
+      0.0,
+      0.25
+    ],
+    "masked_token_end": 12,
+    "masked_token_start": 6,
+    "token_mask": [
+      true,
+      false
+    ],
+    "value": [
+      -0.66666667,
+      -0.33333333,
+      0.0,
+      0.33333333,
+      0.66666667,
+      -0.66666667
+    ],
+    "value_shape": [
+      2,
+      3
+    ],
+    "x": [
+      -1.0,
+      -0.8,
+      -0.6,
+      -0.4,
+      -0.2,
+      0.0,
+      0.2,
+      0.4,
+      0.6,
+      0.8,
+      1.0,
+      -1.0
+    ],
+    "x_shape": [
+      2,
+      2,
+      3
+    ]
+  },
+  "line_hint": "Engram.forward around lines 328-367",
+  "parameters": {
+    "k_weight": {
+      "data": [
+        0.5,
+        1.25,
+        0.75,
+        1.0,
+        0.625,
+        1.375
+      ],
+      "shape": [
+        6
+      ]
+    },
+    "q_weight": {
+      "data": [
+        1.0,
+        0.75,
+        1.25,
+        0.5,
+        1.5,
+        0.875
+      ],
+      "shape": [
+        6
+      ]
+    }
+  },
+  "source_file": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/engram.py",
+  "upstream_call_status": "fixture-seam:Engram.forward:layer-skeleton",
+  "upstream_function": "Engram.forward",
+  "upstream_import_status": "path-import-ok"
+}

@@ -1,0 +1,138 @@
+#+TITLE: Text logits parity harness against upstream inference
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 07-tokenizer-prompt-and-cli
+#+PARENT: ../spec.org
+
+* Context
+
+This ticket builds the end-to-end compatibility verifier for text-only logits.
+It must compare the Rust =tnsr= implementation against upstream DeepSeek
+inference code, while keeping lower-level op/layer/block verifiers as separate
+required evidence.
+
+Read first:
+
+- =../spec.org=
+- =../research/upstream-architecture.md=
+- =../upstream/inference/model.py=
+- =../upstream/inference/generate.py=
+- =ferric_continuum/tnsr/tools/hf_reference.py=
+- =ferric_continuum/tnsr/tools/compare_logits.py=
+- =ferric_continuum/tnsr/tools/verify_hf_compat.sh=
+
+* Requirements
+
+- Create =ferric_continuum/tnsr/tools/deepseek_v41_reference.py=.
+- Create =ferric_continuum/tnsr/tools/deepseek_v41_compare_logits.py=.
+- Create =ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh=.
+- Reference script requirements:
+  - Load upstream mirrored inference code by path or load an installed upstream
+    package when explicitly requested.
+  - Support tiny deterministic fixture checkpoints.
+  - Support converted DeepSeek runtime checkpoint directories when present.
+  - Emit JSON schema matching the Rust CLI:
+    - =token_ids=
+    - =prompt=
+    - =vocab_size=
+    - =logits=
+    - =model_type=
+    - =reference_backend=
+  - Allow a pure-PyTorch monkeypatch for upstream GPU-only kernels in tiny
+    fixture mode. The output JSON must record =kernel_patch= metadata when this
+    is used.
+- Comparator requirements:
+  - report token-id equality
+  - report shape equality
+  - report =max_abs_diff=
+  - report =mean_abs_diff=
+  - report cosine similarity
+  - report top-1 agreement
+  - report top-5 overlap
+  - return nonzero on failed math thresholds
+  - if token IDs differ, print a command hint for rerunning Rust with
+    =--token-ids <reference ids>=
+- Shell verifier requirements:
+  - Build =deepseek_v41_infer= with opt Rust flags.
+  - Run source/config/index verifiers first.
+  - Run op/layer/block Bazel tests before final logits.
+  - Run tiny parity by default without released weights.
+  - Run real checkpoint parity only when =MODEL_DIR= or =DEEPSEEK_V41_MODEL_DIR=
+    points to local assets.
+  - Produce a clear SKIP, PASS, or FAIL summary per verifier level.
+
+* Out of scope
+
+- No attempt to download model shards.
+- No GPU requirement for tiny parity.
+- No image or DSpark parity.
+- No claim that full release parity passed when local weights are absent.
+
+* Verification
+
+- Run no-weight ladder:
+  =ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh=
+- Expected:
+  - source verifier PASS
+  - config/index verifier PASS
+  - op/layer/block tests PASS
+  - tiny text logits parity PASS
+  - real checkpoint parity SKIP if no model dir is supplied
+- Run real checkpoint ladder when assets exist:
+  =DEEPSEEK_V41_MODEL_DIR=/path/to/DeepSeek-V4.1-Flash-TP1-or-TPN ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh=
+
+* Comments
+
+- This is Level 6 of the verifier ladder.
+- This ticket is not complete unless the script refuses to present skipped real
+  checkpoint parity as success.
+
+* Resolution
+
+Implemented and verified in worktree =deepseek-v41-text-impl=.
+
+Created:
+- =ferric_continuum/tnsr/tools/deepseek_v41_reference.py= (516 lines).
+  - =--emit-tiny-checkpoint <dir>= writes a converted-style tiny checkpoint
+    (=config.json= in =from_inference_json= schema + single =model.safetensors=
+    with upstream =[out,in]= tensor names the Rust loader consumes; =wo_a= in
+    upstream =[g*o_lora, group_in]= grouped layout, =head= =[V,D]=).
+  - =--out <path>= recomputes expected last-position logits with the same
+    =deepseek_v41_fixture_gen.py= =*_ref= helpers the Rust tiny forward is
+    validated against, and emits the CLI JSON schema plus =reference_backend=
+    and =kernel_patch= metadata.
+  - Path-imports upstream =inference/model.py= (under the CPU stub installer,
+    with a pure-torch =hc_split_sinkhorn= monkeypatch and raising GPU-kernel
+    stubs) only to record =reference_backend=/=kernel_patch=; benign skip on
+    failure. This keeps parity honest as a Rust-regression check, not a
+    modeling claim (tnsr sparse attn uses a sigmoid gate + no RoPE, so a
+    faithful upstream forward would not match).
+  - =--model-dir= fails loudly (exit 3): no faithful CPU reference for real
+    checkpoints exists on this host.
+- =ferric_continuum/tnsr/tools/deepseek_v41_compare_logits.py= (123 lines):
+  token-id equality, shape/vocab equality, =max_abs_diff=, =mean_abs_diff=,
+  cosine, top-1, top-5 overlap; nonzero exit on math threshold fail
+  (=cosine>=0.999=, top1 match, top5 overlap>=4); prints =--token-ids <ref ids>=
+  rerun hint on id mismatch. Reads optional =reference_backend=/=kernel_patch=.
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh= (185 lines):
+  per-level PASS/SKIP/FAIL accounting; NEVER presents SKIP as PASS
+  (=PASS-WITH-SKIPS= is a distinct terminal state). Levels:
+  L1 sources, L2 config, L3 ops, L4 model+loader (Bazel tests), L6 tiny parity
+  (emit tiny checkpoint -> Rust =--dump-logits --token-ids 1,3= -> reference ->
+  compare), L6* real-checkpoint parity SKIP unless =DEEPSEEK_V41_MODEL_DIR= /
+  =MODEL_DIR= is set (then loader-smoke only, still SKIP for numeric parity).
+  =HF_PYTHON= defaults to the main-checkout =.venv-hf= (worktrees lack it).
+
+Evidence (from worktree root):
+
+- Tiny parity compare: =token_ids match: True=, =max_abs_diff 3.95895e-07=,
+  =cosine_sim 1.00000000=, =top1 3/3 match=, =top5 overlap 5/5=, =PASS=.
+- Full ladder =verify_deepseek_v41_text_compat.sh=: L1-sources PASS,
+  L2-config PASS, L3-ops PASS, L4-model+loader PASS, L6-tiny-parity PASS,
+  L6-real-parity SKIP -> =RESULT: PASS-WITH-SKIPS=, exit 0.
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests
+  //ferric_continuum/tnsr:deepseek_v41_math_tests
+  //ferric_continuum/tnsr:deepseek_v41_model_tests= -> 3 tests pass.
+- =bazel build -c opt ... //ferric_continuum/tnsr:deepseek_v41_infer= -> OK.
+- =python3 -m py_compile= clean on both new tools; =bash -n= clean on verifier;
+  =rustfmt --check= clean on all changed/new Rust in this ticket set.

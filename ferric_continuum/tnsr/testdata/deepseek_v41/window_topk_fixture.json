@@ -1,0 +1,104 @@
+{
+  "absolute_tolerance": 0.0,
+  "cases": [
+    {
+      "expected": [
+        0,
+        -1,
+        -1,
+        -1,
+        0,
+        1,
+        -1,
+        -1,
+        0,
+        1,
+        2,
+        -1,
+        0,
+        1,
+        2,
+        3,
+        1,
+        2,
+        3,
+        4,
+        2,
+        3,
+        4,
+        5,
+        0,
+        -1,
+        -1,
+        -1,
+        0,
+        1,
+        -1,
+        -1,
+        0,
+        1,
+        2,
+        -1,
+        0,
+        1,
+        2,
+        3,
+        1,
+        2,
+        3,
+        4,
+        2,
+        3,
+        4,
+        5
+      ],
+      "input": {
+        "batch": 2,
+        "seqlen": 6,
+        "start_pos": 0,
+        "window_size": 4
+      },
+      "name": "prefill_with_padding",
+      "upstream_call_status": "called-upstream:get_window_topk_idxs"
+    },
+    {
+      "expected": [
+        -1,
+        -1,
+        0,
+        1,
+        2
+      ],
+      "input": {
+        "batch": 1,
+        "seqlen": 1,
+        "start_pos": 2,
+        "window_size": 5
+      },
+      "name": "decode_ring_still_filling",
+      "upstream_call_status": "called-upstream:get_window_topk_idxs"
+    },
+    {
+      "expected": [
+        3,
+        4,
+        0,
+        1,
+        2
+      ],
+      "input": {
+        "batch": 1,
+        "seqlen": 1,
+        "start_pos": 7,
+        "window_size": 5
+      },
+      "name": "decode_full_ring_oldest_first",
+      "upstream_call_status": "called-upstream:get_window_topk_idxs"
+    }
+  ],
+  "line_hint": "get_window_topk_idxs around lines 410-427",
+  "source_file": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py",
+  "upstream_call_status": "called-upstream:get_window_topk_idxs",
+  "upstream_function": "get_window_topk_idxs",
+  "upstream_import_status": "path-import-ok"
+}

@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "claims": [
+    {
+      "id": "readme-model-name",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/README.md",
+      "expected": {
+        "all_phrases": [
+          "DeepSeek-V4.1-Flash"
+        ]
+      },
+      "why": "Pins the verifier ladder to the exact upstream release being implemented."
+    },
+    {
+      "id": "readme-multimodal-moe",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/README.md",
+      "expected": {
+        "all_phrases": [
+          "a multimodal Mixture-of-Experts (MoE) model"
+        ]
+      },
+      "why": "Keeps the text-first implementation honest about later multimodal and MoE surfaces."
+    },
+    {
+      "id": "readme-ced-20-20",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/README.md",
+      "expected": {
+        "all_phrases": [
+          "a 40-layer Transformer organized as a 20-layer causal encoder followed by a 20-layer decoder"
+        ]
+      },
+      "why": "Defines the text block organization and the CED boundary used by later model fixtures."
+    },
+    {
+      "id": "readme-csa2-modes",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/README.md",
+      "expected": {
+        "all_phrases": [
+          "one of three static modes",
+          "Full",
+          "Reindex",
+          "Reuse",
+          "reuse Top-K sparse-attention indices"
+        ]
+      },
+      "why": "Records the CSA2 mode names and shared-index behavior that later sparse attention tests must preserve."
+    },
+    {
+      "id": "readme-fp4-main-kv-footprint",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/README.md",
+      "expected": {
+        "all_phrases": [
+          "FP4 main KV caching",
+          "one E4M3 scale per 16 channels",
+          "reduce the global KV cache footprint to **890 bytes per token**",
+          "roughly **1/4** of DeepSeek-V4-Flash"
+        ]
+      },
+      "why": "Captures the runtime KV-cache precision and footprint claim that affects cache layout."
+    },
+    {
+      "id": "readme-1m-context",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/README.md",
+      "expected": {
+        "all_phrases": [
+          "support for contexts of up to one million tokens"
+        ]
+      },
+      "why": "Preserves the long-context requirement that drives RoPE, sparse indexing, and cache metadata choices."
+    },
+    {
+      "id": "report-552b-backbone",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/DeepSeek_V41_Tech_Report.txt",
+      "expected": {
+        "all_phrases": [
+          "has 552B backbone parameters"
+        ]
+      },
+      "why": "Grounds parameter-count expectations in the technical report rather than a derived local note."
+    },
+    {
+      "id": "report-engram-196b",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/DeepSeek_V41_Tech_Report.txt",
+      "expected": {
+        "all_phrases": [
+          "196B Engram parameters"
+        ]
+      },
+      "why": "Keeps Engram in the text compatibility scope when the mirrored report extraction includes the claim."
+    },
+    {
+      "id": "report-fp4-main-kv-scale",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/DeepSeek_V41_Tech_Report.txt",
+      "expected": {
+        "all_phrases": [
+          "select E2M1 with one E4M3 scale",
+          "per 16 channels"
+        ]
+      },
+      "why": "Documents the exact main-KV scale semantics required by later cache and loader checks."
+    }
+  ]
+}

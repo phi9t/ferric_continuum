@@ -24,6 +24,7 @@ pub mod bpe;
 pub mod checkpoint;
 pub mod cuda_ffi;
 pub mod debug;
+pub mod deepseek_v41;
 pub mod dtensor;
 pub mod grad_mode;
 pub mod inference;
