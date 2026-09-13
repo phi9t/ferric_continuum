@@ -2,6 +2,7 @@
 
 #include "absl/strings/string_view.h"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
