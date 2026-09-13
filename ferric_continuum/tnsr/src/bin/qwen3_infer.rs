@@ -31,10 +31,7 @@ use std::path::PathBuf;
 use std::process::exit;
 
 use tnsr::{
-    bpe::Tokenizer,
-    grad_mode::NoGradGuard,
-    qwen3_load::load_qwen3,
-    tensor::tensor_value_stats,
+    bpe::Tokenizer, grad_mode::NoGradGuard, qwen3_load::load_qwen3, tensor::tensor_value_stats,
 };
 use tracing::{info, warn, Level};
 

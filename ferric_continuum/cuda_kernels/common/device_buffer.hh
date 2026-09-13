@@ -9,9 +9,8 @@
 // `ok()` rather than exceptions, keeping the kernels usable from the C ABI where
 // exceptions must not cross the boundary.
 
-#include <cuda_runtime.h>
-
 #include <cstddef>
+#include <cuda_runtime.h>
 #include <utility>
 
 namespace ferric_continuum::cuda_kernels {

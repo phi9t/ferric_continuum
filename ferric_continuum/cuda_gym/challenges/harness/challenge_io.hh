@@ -12,11 +12,10 @@
 // a minimal parser (no nested arrays/strings beyond what we need) suffices and
 // keeps challenge binaries dependency-free.
 
-#include <cuda_runtime.h>
-
 #include <cctype>
 #include <chrono>
 #include <cstdio>
+#include <cuda_runtime.h>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -28,8 +27,7 @@ namespace ferric_continuum::cuda_gym::challenges {
 // reference (and student) binaries so device failures never look like success.
 inline void CheckCuda(cudaError_t status, const char* what) {
   if (status != cudaSuccess) {
-    throw std::runtime_error(std::string(what) + ": " +
-                             cudaGetErrorString(status));
+    throw std::runtime_error(std::string(what) + ": " + cudaGetErrorString(status));
   }
 }
 
@@ -68,15 +66,13 @@ class CaseSpec {
       return false;
     }
     ++pos;
-    while (pos < json_.size() &&
-           (json_[pos] == ' ' || json_[pos] == '\t')) {
+    while (pos < json_.size() && (json_[pos] == ' ' || json_[pos] == '\t')) {
       ++pos;
     }
     std::size_t end = pos;
     while (end < json_.size() &&
-           (std::isdigit(static_cast<unsigned char>(json_[end])) ||
-            json_[end] == '-' || json_[end] == '+' || json_[end] == '.' ||
-            json_[end] == 'e' || json_[end] == 'E')) {
+           (std::isdigit(static_cast<unsigned char>(json_[end])) || json_[end] == '-' ||
+            json_[end] == '+' || json_[end] == '.' || json_[end] == 'e' || json_[end] == 'E')) {
       ++end;
     }
     if (end == pos) {
@@ -91,8 +87,7 @@ class CaseSpec {
 
 // Deterministic uniform inputs in [-1, 1], seeded per key so different tensors
 // (e.g. Q/K/V) get independent but reproducible data.
-inline std::vector<float> RandomInput(std::size_t n, unsigned seed,
-                                      unsigned key = 0) {
+inline std::vector<float> RandomInput(std::size_t n, unsigned seed, unsigned key = 0) {
   std::mt19937 rng(seed * 2654435761u + key * 40503u + 1u);
   std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
   std::vector<float> v(n);
@@ -112,19 +107,21 @@ double TimeMs(Fn&& fn) {
 }
 
 // Prints the challenge result JSON to stdout.
-inline void PrintResult(int status, const std::vector<int>& shape,
-                        const std::vector<float>& data, double elapsed_ms) {
+inline void PrintResult(int status, const std::vector<int>& shape, const std::vector<float>& data,
+                        double elapsed_ms) {
   std::string out = "{\"status\": " + std::to_string(status) + ", \"shape\": [";
   for (std::size_t i = 0; i < shape.size(); ++i) {
     out += std::to_string(shape[i]);
-    if (i + 1 < shape.size()) out += ", ";
+    if (i + 1 < shape.size())
+      out += ", ";
   }
   out += "], \"data\": [";
   char buf[64];
   for (std::size_t i = 0; i < data.size(); ++i) {
     std::snprintf(buf, sizeof(buf), "%.9g", data[i]);
     out += buf;
-    if (i + 1 < data.size()) out += ", ";
+    if (i + 1 < data.size())
+      out += ", ";
   }
   out += "], \"elapsed_ms\": ";
   std::snprintf(buf, sizeof(buf), "%.6f", elapsed_ms);

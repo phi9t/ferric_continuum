@@ -13,8 +13,7 @@ std::vector<float> RoundTrip(const std::vector<float>& host_in);
 
 // Round-trips through device memory while scaling each element by `factor` on
 // the device, so the copy is observable. Throws std::runtime_error on failure.
-std::vector<float> RoundTripScaled(const std::vector<float>& host_in,
-                                   float factor);
+std::vector<float> RoundTripScaled(const std::vector<float>& host_in, float factor);
 
 }  // namespace ferric_continuum::cuda_gym::memory
 

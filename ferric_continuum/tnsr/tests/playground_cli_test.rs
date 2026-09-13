@@ -62,12 +62,10 @@ fn writes_requested_dot_and_trace_json_artifacts() {
         serde_json::from_str(&trace_text).expect("trace artifact should be valid JSON");
     assert_eq!(trace["schema"], "tnsr.debug_trace");
     assert_eq!(trace["schema_version"], 1);
-    assert!(
-        !trace["forward_ops"]
-            .as_array()
-            .expect("forward_ops array")
-            .is_empty()
-    );
+    assert!(!trace["forward_ops"]
+        .as_array()
+        .expect("forward_ops array")
+        .is_empty());
 }
 
 #[test]

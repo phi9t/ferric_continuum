@@ -117,9 +117,9 @@ py::array_t<double> MuonUpdate(py::array_t<double> params, py::array_t<double> g
 
   const double one_minus_beta = 1.0 - beta;
   momentum_map = beta * momentum_map + one_minus_beta * grads_map;
-  Eigen::MatrixXd update =
-      nesterov ? Eigen::MatrixXd(beta * momentum_map + one_minus_beta * grads_map)
-               : Eigen::MatrixXd(momentum_map);
+  Eigen::MatrixXd update = nesterov
+                               ? Eigen::MatrixXd(beta * momentum_map + one_minus_beta * grads_map)
+                               : Eigen::MatrixXd(momentum_map);
 
   const Eigen::MatrixXd ortho_update =
       OrthogonalizeNewtonSchulz(update, ns_steps, ns_coeff_a, ns_coeff_b, ns_coeff_c);
