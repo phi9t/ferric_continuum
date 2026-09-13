@@ -1,7 +1,5 @@
 use tnsr::{
-    inference::{
-        apply_rope, AttentionStep, ContinuousBatcher, DecodeRequest, KvCache, RopeConfig,
-    },
+    inference::{apply_rope, AttentionStep, ContinuousBatcher, DecodeRequest, KvCache, RopeConfig},
     tensor::{Shape, TensorValue},
 };
 
