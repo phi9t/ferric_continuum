@@ -1,0 +1,78 @@
+#+TITLE: Aligner downsample and encode_image
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 15-vit-patch-embed-2d-rope-blocks
+#+PARENT: ../spec.org
+
+* Context
+
+The aligner downsamples the ViT patch grid by =downsample_ratio= via an unfold
+and projects it into the LLM =dim=. =encode_image= composes ViT + Aligner into
+the aligner rows the merge step drops into IMAGE slots.
+
+Read first:
+
+- =../spec.org= (Aligner, Text/vision merge)
+- =../upstream/inference/vision.py= (=Aligner=)
+- =../upstream/inference/model.py= (=Transformer.encode_image=)
+
+* Requirements
+
+- Add =VisionAligner { downsample_ratio, w1, w1_b, w2, w2_b }= to
+  =src/deepseek_v41/vision.rs= (or a sibling =aligner.rs=).
+- Implement =forward(vit_rows: &[f32], n_h, n_w, vision_dim) -> Vec<f32>=
+  matching upstream exactly:
+  - reshape rows to =[n_h, n_w, vision_dim]=, permute to channel-major,
+  - pad to a multiple of r on both spatial axes (=-n_w % r=, =-n_h % r=),
+  - =unfold(r, stride=r)= producing =in_dim = vision_dim * r^2= columns per
+    output cell in the SAME element order as =F.unfold=,
+  - =w2(gelu(w1(x)))= with the exact-erf gelu (matches =crate::ops::gelu=).
+- Add =encode_image(tower, aligner, patches, n_h, n_w) -> aligner rows= helper.
+- Add fixture family =aligner= to =deepseek_v41_fixture_gen.py= using upstream
+  =Aligner= with tiny weights (torch =F.unfold= is the reference for element
+  order). Emit =aligner_fixture.json= and an =encode_image_fixture.json= that
+  chains a tiny ViT + Aligner. Include the =(n_h, n_w)= that exercise padding
+  (non-multiple of r) so the pad branch is covered.
+- Add layer tests to the vision test target; wire fixtures into BUILD data.
+
+* Out of scope
+
+- No merge into the text stream (ticket 17).
+
+* Verification
+
+- =python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family aligner=
+- Bazel vision test target passes, including a padded =(n_h, n_w)= case.
+
+* Comments
+
+- =F.unfold= column order is the subtle part: for each output cell it emits the
+  r*r window flattened channel-major. Derive the exact index mapping from the
+  fixture, not from intuition.
+
+* Resolution
+
+- =src/deepseek_v41/vision.rs=: added =erf_approx=/=gelu_scalar= (A&S erf,
+  matches =ops::gelu=), =aligner_unfold= (channel-major r*r window, zero-pad to
+  multiple of r), =AlignerWeights= + =aligner_forward= (=w2(gelu(w1(x)))=), and
+  =VitWeights= + =vit_forward= + =encode_image= chaining the ViT tower with the
+  aligner.
+- =tools/deepseek_v41_fixture_gen.py=: added =_AlignerArgs=/=_EncodeImageArgs=,
+  =generate_aligner= (=--family aligner=) and =generate_encode_image=
+  (=--family encode-image=), both instantiating upstream =vision.py= modules.
+  Both tiny configs use odd =n_h=n_w=3= to exercise the aligner pad branch.
+- Tests =aligner_matches_upstream_downsample= and
+  =encode_image_matches_upstream_vit_plus_aligner= in
+  =deepseek_v41_model_test.rs=; fixtures wired into =deepseek_v41_model_tests=
+  BUILD data.
+
+Command evidence:
+
+#+begin_example
+$ python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family aligner
+$ python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family encode-image
+  aligner_fixture.json    upstream_call_status=called-upstream:Aligner
+  encode_image_fixture.json upstream_call_status=called-upstream:EncodeImage
+$ bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_model_tests
+  //ferric_continuum/tnsr:deepseek_v41_model_tests   PASSED
+#+end_example

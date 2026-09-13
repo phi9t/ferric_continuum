@@ -91,16 +91,35 @@ be fast enough for production serving, but verifier fixtures must bound the
 numeric drift introduced by dequantization and by any pure-Rust reference
 fallback.
 
-** Wave 2: multimodal TODO
+** Wave 2: multimodal (image input)
 
-TODO after text logits pass:
+Text logits parity is landed on =ultron/mainline=. Wave 2 adds the image input
+path so the model can consume the =[IMAGE_START] ([IMAGE]*n_llm_w
+[IMAGE_NEW_LINE])*n_llm_h [IMAGE_END]= span layout upstream produces.
 
-- Vision config parser and source verifier.
-- ViT patch embedding, 2D RoPE, downsample/aligner path.
-- Image token span processing and learned image delimiter embeddings.
-- Text/vision merge semantics and image-mask routing bias.
+Wave 2 delivers:
+
+- First-class vision config (promoted from the deferred struct) and source
+  verifier for =vision.py=/=image_processor.py=.
+- Image grid planning: =plan_image_grid=, =llm_grid=, =solve_resize_ratio=,
+  =safe_resize=, =num_image_tokens=, and the =image_token_types= span layout.
+- ViT patch embedding, 2D half-split RoPE, full bidirectional block stack, and
+  final ViT norm.
+- Aligner downsample (=F.unfold= r=downsample_ratio) + =w1/gelu/w2= and
+  =encode_image=.
+- Text/vision merge: =merge_image_embeddings= overwrites image-span rows with
+  aligner features and learned =image_start/image_end/image_newline=
+  delimiters; the image mask (=token_types >= 0=) drives the MoE VL routing bias
+  (=bias_vl=) and suppresses the engram contribution on image tokens.
+- Vision/aligner/image checkpoint loader tensors.
 - Multimodal prompt encoding parity against upstream =encoding.py= and
-  =image_processor.py=.
+  =image_processor.py= plus a CLI image path.
+
+Wave 2 keeps the CPU/f32 inspectable-math discipline of Wave 1. Parity is proven
+two ways: a tiny upstream-executed reference on CPU with GPU-only kernels
+monkeypatched to pure PyTorch, and — where a GPU torch runtime is available — a
+real B200 upstream forward. Real-checkpoint image parity remains an explicit
+SKIP until released weights are local, and a SKIP is never presented as PASS.
 
 ** Wave 3: DSpark TODO
 
@@ -237,6 +256,76 @@ Required text pieces:
 - Prefill and decode hash-state behavior for text token IDs.
 - Engram table loading and dequantized lookup.
 - Residual update using per-HC normalized signed-square-root gate.
+
+* Multimodal architecture contract (Wave 2)
+
+** Vision config
+
+The Rust vision config is promoted from the Wave-1 deferred struct to a
+first-class type. Required fields (HF nested =vision_config= / flat
+=inference/config.json= names):
+
+- =vision_n_layers= / =num_hidden_layers= 32
+- =vision_dim= / =hidden_size= 1024
+- =vision_n_heads= / =num_attention_heads= 16
+- =vision_inter_dim= / =intermediate_size= 2816
+- =vision_patch_size= / =patch_size= 14
+- =vision_rope_theta= / =rope_theta= 10000
+- =vision_downsample_ratio= / =downsample_ratio= 3
+- =vision_max_n_token= / =max_image_tokens= 1024
+- =vision_min_pixels= / =min_pixels= 295936
+- =vision_max_wh_ratio= / =max_wh_ratio= null
+- =image_token_id= 129264
+- =vision_enabled= is derived: =vision_n_layers > 0=.
+
+** Image grid planning
+
+Pure functions matching =image_processor.py=:
+
+- =num_image_tokens(n_llm_h, n_llm_w) = n_llm_h*(n_llm_w+1) + 2=.
+- =llm_grid= = ceil(ceil(px/patch)/downsample) per axis.
+- =solve_resize_ratio= largest aspect-preserving pixel size fitting max tokens,
+  including the tall/wide single-column/row collapse branches.
+- =safe_resize= shrinks until token cost <= max_n_token.
+- =plan_image_grid= applies wh-ratio clamp, min-pixels upscaling, patch rounding.
+- =image_token_types= span layout =[IMAGE_START] + ([IMAGE]*n_llm_w +
+  [IMAGE_NEW_LINE])*n_llm_h + [IMAGE_END]=, with TEXT=-1 and
+  IMAGE_START/IMAGE/IMAGE_NEW_LINE/IMAGE_END = 0..3.
+
+Image byte decoding, PIL resize, and normalization stay out of the Rust path;
+patch tensors are supplied by fixtures/reference. The Rust code owns the pure
+grid/token-type math only.
+
+** ViT
+
+- =PatchEmbed=: single Linear over flattened =3*patch^2= per patch.
+- 2D RoPE is HALF-SPLIT (=x1,x2 = chunk(2); [x1*cos - x2*sin, x2*cos + x1*sin]=)
+  over =rope_dim = vision_dim // vision_n_heads // 2=; frequencies stacked from
+  (hpos,wpos). This differs from text adjacent-pair RoPE; do not share code.
+- =Attention=: full bidirectional SDPA with =wqkv= (bias) and =wo= (bias);
+  RoPE applied to q and k only.
+- =MLP=: chunked SwiGLU (=w1 -> chunk(2) -> silu(gate)*up -> w2=), no bias.
+- =Block=: =x + attn(norm1(x)); x + mlp(norm2(x))= with vision RMSNorm.
+- =ViT.forward= = patch_embed -> blocks -> final norm.
+
+** Aligner
+
+- =in_dim = vision_dim * downsample_ratio^2=; =w1: in_dim -> dim=, gelu,
+  =w2: dim -> dim= (both with bias).
+- Forward reshapes ViT rows to =[n_h, n_w, dim]=, pads to a multiple of r,
+  =F.unfold(r, stride=r)= downsample, then =w2(gelu(w1(x)))=. The unfold column
+  order (channel-major within each r*r window) must match upstream exactly.
+
+** Text/vision merge
+
+- =encode_image = aligner(vit(patches, n_vit_h, n_vit_w), n_vit_h, n_vit_w)=.
+- =merge_image_embeddings= overwrites each image span in the =[B,S,D]= embedding
+  (before HC expansion): IMAGE slots take aligner rows in reading order;
+  IMAGE_START/IMAGE_END/IMAGE_NEW_LINE take the learned delimiter embeddings.
+- =image_mask = token_types >= 0=; =engram_mask = ~image_mask= (image tokens get
+  no engram contribution and no n-gram membership).
+- MoE gate: when vision is enabled, =bias = where(image_mask, bias_vl, bias)= for
+  expert *selection* only; routing weights still come from unbiased scores.
 
 * Verifier ladder
 
@@ -410,9 +499,35 @@ Expected Bazel targets:
 - [[file:issues/08-text-logits-parity-harness.org][08-text-logits-parity-harness]]
 - [[file:issues/09-text-compatibility-closure.org][09-text-compatibility-closure]]
 
-** Wave 2 TODO: multimodal
+** Wave 2 multimodal
 
-- [[file:issues/10-todo-multimodal-v41.org][10-todo-multimodal-v41]]
+- [[file:issues/10-todo-multimodal-v41.org][10-todo-multimodal-v41]] (superseded by the W2 tickets below)
+- [[file:issues/13-vision-config-and-source-verifier.org][13-vision-config-and-source-verifier]]
+- [[file:issues/14-image-grid-planning-fixtures.org][14-image-grid-planning-fixtures]]
+- [[file:issues/15-vit-patch-embed-2d-rope-blocks.org][15-vit-patch-embed-2d-rope-blocks]]
+- [[file:issues/16-aligner-downsample-and-encode-image.org][16-aligner-downsample-and-encode-image]]
+- [[file:issues/17-text-vision-merge-and-vl-routing-bias.org][17-text-vision-merge-and-vl-routing-bias]]
+- [[file:issues/18-vision-checkpoint-loader.org][18-vision-checkpoint-loader]]
+- [[file:issues/19-multimodal-prompt-and-cli.org][19-multimodal-prompt-and-cli]]
+- [[file:issues/20-multimodal-parity-harness-and-closure.org][20-multimodal-parity-harness-and-closure]]
+
+*** Wave 2 resolution
+
+All Wave-2 tickets (13-20) are =done=. The Rust multimodal path loads
+=vision.*=/=aligner.*=/=image_*= tensors and per-layer =ffn.gate.bias_vl=, runs
+the ViT + Aligner =encode_image=, merges aligner rows into the image span before
+the HyperConnection expansion, and applies =bias_vl= to expert *selection* only
+on image tokens. The text-only path is unchanged and still rejects image tokens.
+
+Evidence: =tools/verify_deepseek_v41_multimodal_compat.sh= on this CPU host →
+L1-sources/L2-config/L3-ops/L4-model/L5-vl-prompt/L6-tiny-mm-parity =PASS=;
+=B200-gpu-parity=/=L6-real-parity= =SKIP= (no CUDA runtime, no local weights;
+never presented as PASS). Tiny multimodal logits parity vs the faithful upstream
+ViT/Aligner reference: =cosine=1.00000000=, =max_abs_diff=1.31e-07=, top1/top5
+match. Focused Bazel tests (=deepseek_v41_config_tests=, =_math_tests=,
+=_model_tests=, =lib_tests=) pass under
+=/data02/home/philip.yang/.local/bin/bazel-9.2.0=.
+
 
 ** Wave 3 TODO: DSpark
 

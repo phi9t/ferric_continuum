@@ -1,0 +1,84 @@
+#+TITLE: Image grid planning op fixtures
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 13-vision-config-and-source-verifier
+#+PARENT: ../spec.org
+
+* Context
+
+The LLM sees an image as a token span whose size is a pure function of the
+original image dimensions and the vision config. This ticket ports that pure
+grid/token-type math to Rust and pins it with fixtures generated from upstream
+=image_processor.py=.
+
+Read first:
+
+- =../spec.org= (Image grid planning)
+- =../upstream/inference/image_processor.py= functions =num_image_tokens=,
+  =llm_grid=, =solve_resize_ratio=, =safe_resize=, =plan_image_grid=,
+  =image_token_types=.
+
+* Requirements
+
+- Create =ferric_continuum/tnsr/src/deepseek_v41/vision_grid.rs=.
+- Implement pure functions mirroring upstream exactly (integer/float order must
+  match so results are bit-stable at the fixture tolerance):
+  - =num_image_tokens(n_llm_h, n_llm_w) -> usize=
+  - =llm_grid(best_h, best_w, patch, downsample) -> (usize, usize)=
+  - =solve_resize_ratio(h, w, patch, downsample, max_n_token) -> (usize, usize)=
+    including the tall (single-column) and wide (single-row) collapse branches.
+  - =safe_resize(h, w, best_h, best_w, patch, downsample, max_n_token) ->
+    (n_llm_h, n_llm_w, best_h, best_w)=
+  - =plan_image_grid(width, height, cfg: &DeepSeekV41VisionConfig) ->
+    (n_llm_h, n_llm_w, best_h, best_w)= with the wh-ratio clamp and min-pixels
+    upscaling.
+  - =image_token_types(n_llm_h, n_llm_w) -> Vec<i64>= producing the
+    =[IMAGE_START] + ([IMAGE]*n_llm_w + [IMAGE_NEW_LINE])*n_llm_h + [IMAGE_END]=
+    layout (TEXT=-1, IMAGE_START/IMAGE/IMAGE_NEW_LINE/IMAGE_END = 0..3).
+- Add fixture family =image-grid= to =deepseek_v41_fixture_gen.py=, importing
+  =image_processor.py= by path (extend the stub installer so it imports without
+  =PIL=/torch heavy deps — the pure grid functions only need =math=). Emit
+  =image_grid_fixture.json= with several original sizes (square, tall, wide,
+  below min-pixels, above max-tokens) and the expected grids + token-type
+  vectors + source hints.
+- Add op tests in =tests/deepseek_v41_math_test.rs= (or a new
+  =deepseek_v41_vision_test.rs=) driven by the fixture. Wire the fixture into the
+  BUILD test data.
+
+* Out of scope
+
+- No pixel decoding, PIL resize, or normalization.
+- No ViT/Aligner math.
+
+* Verification
+
+- =python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family image-grid=
+- =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_math_tests=
+  (or the vision test target) passes.
+
+* Comments
+
+- Match upstream integer division and =math.ceil= ordering precisely; grid math
+  is integer-exact, token-type vectors are exact.
+
+* Resolution
+
+- Added =ferric_continuum/tnsr/src/deepseek_v41/vision_grid.rs= with pure
+  functions =num_image_tokens=, =llm_grid=, =solve_resize_ratio= (incl. tall
+  single-column and wide single-row collapse branches), =safe_resize=,
+  =plan_image_grid= (wh-ratio clamp + min-pixels upscale), and
+  =image_token_types= (TEXT=-1, IMAGE_START/IMAGE/IMAGE_NEW_LINE/IMAGE_END=0..3).
+  Registered in =mod.rs= and the =tnsr= srcs list in =BUILD.bazel=.
+- Added =generate_image_grid= + =--family image-grid= to
+  =deepseek_v41_fixture_gen.py=, importing upstream =image_processor.py= by path
+  under lightweight numpy/torch/PIL stubs (pure grid math only needs =math=).
+  Emits =image_grid_fixture.json= for square/tall/wide/below-min-pixels/
+  above-max-tokens originals, all with =upstream_call_status
+  called-upstream:plan_image_grid=.
+- Added =image_grid_matches_upstream_plan_and_token_types= to
+  =tests/deepseek_v41_math_test.rs= (asserts upstream execution, grids,
+  num_image_tokens, and full token-type vectors) and wired the fixture into the
+  =deepseek_v41_math_tests= data.
+- Evidence: =python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py
+  --repo-root . --family image-grid= -> GEN_OK (upstream executed);
+  =bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_math_tests= -> PASSED.

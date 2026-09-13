@@ -98,6 +98,76 @@
         ]
       },
       "why": "Documents the exact main-KV scale semantics required by later cache and loader checks."
+    },
+    {
+      "id": "vision-source-surface",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/vision.py",
+      "expected": {
+        "all_phrases": [
+          "def get_vision_cos_sin",
+          "def apply_rotary",
+          "class PatchEmbed",
+          "class Attention",
+          "class MLP",
+          "class Block",
+          "class ViT",
+          "class Aligner"
+        ]
+      },
+      "why": "Pins the upstream vision.py surface the Wave-2 ViT/Aligner parity fixtures execute."
+    },
+    {
+      "id": "vision-2d-rope-half-split",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/vision.py",
+      "expected": {
+        "all_phrases": [
+          "x1, x2 = x.float().chunk(2, dim=-1)",
+          "torch.cat([x1 * cos - x2 * sin, x2 * cos + x1 * sin]"
+        ]
+      },
+      "why": "Records the half-split 2D RoPE rotation the Rust vision path must match (not the text adjacent-pair RoPE)."
+    },
+    {
+      "id": "image-processor-surface",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/image_processor.py",
+      "expected": {
+        "all_phrases": [
+          "def num_image_tokens",
+          "def llm_grid",
+          "def solve_resize_ratio",
+          "def safe_resize",
+          "def plan_image_grid",
+          "def image_token_types",
+          "def prepare_vl_inputs",
+          "TEXT = -1",
+          "IMAGE_START, IMAGE, IMAGE_NEW_LINE, IMAGE_END = range(4)"
+        ]
+      },
+      "why": "Pins the upstream image_processor.py grid/token-type surface the Wave-2 grid fixtures port."
+    },
+    {
+      "id": "image-token-span-layout",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/image_processor.py",
+      "expected": {
+        "all_phrases": [
+          "return n_llm_h * (n_llm_w + 1) + 2",
+          "types += ([IMAGE] * n_llm_w + [IMAGE_NEW_LINE]) * n_llm_h"
+        ]
+      },
+      "why": "Records the exact image token count and span layout the Rust image_token_types must reproduce."
+    },
+    {
+      "id": "transformer-merge-and-vl-bias",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py",
+      "expected": {
+        "all_phrases": [
+          "def merge_image_embeddings",
+          "def encode_image",
+          "image_mask = None if token_types is None else token_types >= 0",
+          "bias = torch.where(image_mask.unsqueeze(-1), self.bias_vl, bias)"
+        ]
+      },
+      "why": "Pins the text/vision merge and VL routing-bias semantics the Wave-2 model forward must match."
     }
   ]
 }

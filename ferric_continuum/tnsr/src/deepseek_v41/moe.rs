@@ -48,6 +48,21 @@ pub fn sqrtsoftplus_scores(
 }
 
 pub fn select_experts(scores: &[f32], correction_bias: &[f32], topk: usize) -> Vec<usize> {
+    select_experts_masked(scores, correction_bias, None, None, topk)
+}
+
+/// Per-token expert selection with an optional VL bias.
+///
+/// Mirrors upstream `Gate.forward`: the selection score is
+/// `scores + where(image_mask, bias_vl, bias)`. When `bias_vl`/`image_mask` are
+/// `None` every token uses `correction_bias`, matching [`select_experts`].
+pub fn select_experts_masked(
+    scores: &[f32],
+    correction_bias: &[f32],
+    bias_vl: Option<&[f32]>,
+    image_mask: Option<&[bool]>,
+    topk: usize,
+) -> Vec<usize> {
     assert!(topk > 0, "topk must be positive");
     assert!(
         scores.len() % correction_bias.len() == 0,
@@ -56,13 +71,25 @@ pub fn select_experts(scores: &[f32], correction_bias: &[f32], topk: usize) -> V
     let experts = correction_bias.len();
     assert!(experts > 0, "experts must be positive");
     let tokens = scores.len() / experts;
+    if let Some(vl) = bias_vl {
+        assert_eq!(vl.len(), experts, "bias_vl length must equal experts");
+    }
+    if let Some(mask) = image_mask {
+        assert_eq!(mask.len(), tokens, "image_mask length must equal tokens");
+    }
 
-    // Selection uses (scores + correction_bias).topk(...)[1]
+    // Selection uses (scores + effective_bias).topk(...)[1]
     let mut out = vec![0usize; tokens * topk];
     for t in 0..tokens {
         let base = t * experts;
+        let use_vl = matches!((image_mask, bias_vl), (Some(mask), Some(_)) if mask[t]);
+        let bias = if use_vl {
+            bias_vl.expect("bias_vl present when use_vl")
+        } else {
+            correction_bias
+        };
         let mut candidates = (0..experts)
-            .map(|e| (e, scores[base + e] + correction_bias[e]))
+            .map(|e| (e, scores[base + e] + bias[e]))
             .collect::<Vec<_>>();
         candidates.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         for (slot, (idx, _)) in candidates.into_iter().take(topk).enumerate() {
@@ -126,6 +153,8 @@ pub fn expert_swiglu(gate: &[f32], up: &[f32], swiglu_limit: f32) -> Vec<f32> {
 pub struct DeepSeekV41Gate {
     pub weight: Vec<f32>,
     pub correction_bias: Vec<f32>,
+    /// Optional VL routing bias applied to image-span tokens (upstream `bias_vl`).
+    pub bias_vl: Option<Vec<f32>>,
     pub tokens: usize,
     pub dim: usize,
     pub experts: usize,
@@ -137,6 +166,17 @@ pub struct DeepSeekV41Gate {
 
 impl DeepSeekV41Gate {
     pub fn forward(&self, x: &[f32]) -> (Vec<f32>, Vec<usize>, Vec<f32>) {
+        self.forward_masked(x, None)
+    }
+
+    /// Gate forward with an optional per-token image mask that switches the
+    /// correction bias to `bias_vl`. Routing weights always come from the
+    /// unbiased scores, so `image_mask` affects selection only.
+    pub fn forward_masked(
+        &self,
+        x: &[f32],
+        image_mask: Option<&[bool]>,
+    ) -> (Vec<f32>, Vec<usize>, Vec<f32>) {
         let scores = sqrtsoftplus_scores(
             x,
             &self.weight,
@@ -147,7 +187,13 @@ impl DeepSeekV41Gate {
                 experts: self.experts,
             },
         );
-        let indices = select_experts(&scores, &self.correction_bias, self.topk);
+        let indices = select_experts_masked(
+            &scores,
+            &self.correction_bias,
+            self.bias_vl.as_deref(),
+            image_mask,
+            self.topk,
+        );
         let mut weights = Vec::with_capacity(self.tokens * self.topk);
         for token in 0..self.tokens {
             weights.extend(route_weights(
@@ -213,6 +259,12 @@ impl DeepSeekV41MoE {
     }
 
     pub fn forward_layer(&self, x: &Tensor) -> Tensor {
+        self.forward_layer_masked(x, None)
+    }
+
+    /// MoE forward with an optional image mask threaded to the gate so image
+    /// tokens select experts via `bias_vl`. Mirrors `MoE.forward(x, image_mask)`.
+    pub fn forward_layer_masked(&self, x: &Tensor, image_mask: Option<&[bool]>) -> Tensor {
         let xv = x.inner.borrow().value.clone();
         let shape = xv.shape.0.clone();
         let (tokens, dim) = flatten_tokens(&shape);
@@ -224,7 +276,7 @@ impl DeepSeekV41MoE {
             "expert count mismatch"
         );
 
-        let (_, indices, weights) = self.gate.forward(xv.data.as_ref());
+        let (_, indices, weights) = self.gate.forward_masked(xv.data.as_ref(), image_mask);
         let mut out = vec![0.0f32; tokens * dim];
         for token in 0..tokens {
             let row = &xv.data[token * dim..(token + 1) * dim];

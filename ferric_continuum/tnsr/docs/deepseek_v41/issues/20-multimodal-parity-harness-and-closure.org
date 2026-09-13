@@ -1,0 +1,111 @@
+#+TITLE: Multimodal parity harness (tiny + B200 GPU) and closure
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 19-multimodal-prompt-and-cli
+#+PARENT: ../spec.org
+
+* Context
+
+Wave 2 closes with a parity ladder mirroring Wave 1, proving the Rust vision +
+merge path against upstream code. Parity is proven two ways: a tiny
+upstream-executed reference on CPU (GPU-only kernels monkeypatched), and — where
+a GPU torch runtime is available — a real B200 upstream forward on a tiny
+config. Real released-weight image parity stays an explicit SKIP.
+
+Read first:
+
+- =../spec.org= (Verifier ladder)
+- =ferric_continuum/tnsr/tools/deepseek_v41_reference.py=
+- =ferric_continuum/tnsr/tools/deepseek_v41_compare_logits.py=
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh=
+
+* Requirements
+
+- Extend =deepseek_v41_reference.py= with a multimodal tiny forward that executes
+  upstream =vision.py= =ViT=/=Aligner= and =Transformer.merge_image_embeddings= +
+  the VL gate path on a tiny deterministic state dict, emitting the same JSON
+  schema plus =reference_backend=/=kernel_patch= metadata. It must run on CPU
+  with GPU-only kernels monkeypatched, and detect + use a CUDA device when torch
+  reports one (B200 path), recording the device in metadata.
+- Add =verify_deepseek_v41_multimodal_compat.sh= (or extend the text verifier)
+  with the ladder:
+  - Level 1 source surface (vision.py/image_processor.py anchors),
+  - Level 2 vision config parse,
+  - Level 3 op/layer/block vision + grid Bazel tests,
+  - Level 4 tiny multimodal logits parity (Rust dump vs reference),
+  - Level 5 vl-prompt encoding parity,
+  - Level 6 real-weight image parity = SKIP unless =DEEPSEEK_V41_MODEL_DIR= is
+    set, and an optional real B200 tiny-forward parity when a GPU torch runtime
+    is available (gated, never blocking CI).
+  Never present SKIP as PASS; per-level PASS/SKIP/FAIL summary.
+- GPU-executed reference steps must be tagged =requires-gpu=/=local-only= so CI
+  (which filters =-cuda,-requires-gpu,-local-only=) never runs them.
+- Closure: inspect the final diff for scope; confirm text-only path unchanged and
+  still rejects images; confirm every Wave-2 level has evidence; standards +
+  spec review; update =CONTEXT.md= only if new durable vocab is needed; append
+  resolution notes with command evidence to tickets 13-20 and =spec.org=.
+
+* Out of scope
+
+- No real 510GB weight download.
+- No DSpark, no Wave-4 perf.
+
+* Verification
+
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_multimodal_compat.sh= →
+  Levels 1-5 PASS, Level-6 real weights SKIP, B200 tiny parity PASS if a GPU
+  torch runtime is present else SKIP.
+- =python3 -m py_compile= on new/changed tools; =rustfmt= on new/changed Rust.
+
+* Comments
+
+- The B200 tiny-forward is the "real GPU parity" the user asked for: it runs the
+  actual upstream torch modules on device, not a fixture, at tiny size.
+
+* Resolution
+
+Extended =tools/deepseek_v41_reference.py= with a faithful multimodal tiny
+reference: it imports upstream =vision.py= by path (=path-import-ok=), runs the
+real ViT + Aligner (=encode_image=) on the tiny 2x2 patch grid, overwrites the
+image span (delimiters + aligner rows) before the HyperConnection expansion, and
+runs an image-mask-aware MoE selection that applies =bias_vl= only to image
+tokens' expert *selection* while weighting from unbiased scores. New CLI flags:
+=--emit-tiny-mm-checkpoint=, =--emit-image-patches=, =--multimodal=; the
+=--multimodal= path emits =model_type:"deepseek_v41_multimodal"= with
+=token_types= and a =reference_backend= recording the detected torch device.
+
+Added =tools/verify_deepseek_v41_multimodal_compat.sh= (Levels 1-6 + a gated
+B200 GPU tier). Full run on this CPU host:
+
+: L1-sources           PASS
+: L2-config            PASS
+: L3-ops               PASS
+: L4-model             PASS
+: L5-vl-prompt         PASS
+: L6-tiny-mm-parity    PASS
+: B200-gpu-parity      SKIP   (no CUDA torch runtime; device=cpu)
+: L6-real-parity       SKIP   (no DEEPSEEK_V41_MODEL_DIR/MODEL_DIR)
+: RESULT: PASS-WITH-SKIPS (skipped levels are NOT counted as pass)
+
+Tiny multimodal logits parity (Rust dump vs upstream ViT/Aligner reference):
+
+: token_ids match : True
+: max_abs_diff    : 1.31393e-07
+: cosine_sim      : 1.00000000
+: top1 (tnsr/ref) : 4 / 4  -> match=True
+: top5 overlap    : 5/5
+: PASS  (cosine>=0.999, top1 match, top5 overlap>=4)
+
+The B200 GPU tier detects =torch.cuda.is_available()= and re-runs the identical
+tiny reference on device; on this host torch is =2.13.0+cpu= so it is an honest
+SKIP, never presented as PASS. Real-checkpoint parity is SKIP (no local weights;
+upstream =model.py= needs GPU-only kernels — out of scope).
+
+Evidence commands:
+- =python3 -m py_compile ferric_continuum/tnsr/tools/deepseek_v41_reference.py= → OK
+- =bash -n .../verify_deepseek_v41_multimodal_compat.sh= → OK
+- =~/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_config_tests
+  //ferric_continuum/tnsr:deepseek_v41_math_tests
+  //ferric_continuum/tnsr:deepseek_v41_model_tests
+  //ferric_continuum/tnsr:lib_tests= → 4 tests pass
+- =rustfmt= applied to all changed Rust (no residual diff).

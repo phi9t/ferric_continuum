@@ -1,0 +1,76 @@
+#+TITLE: Vision config (first-class) and source verifier
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 09-text-compatibility-closure
+#+PARENT: ../spec.org
+
+* Context
+
+Wave 1 parsed the vision fields into a =DeepSeekV41DeferredVisionConfig=. Wave 2
+promotes them to a first-class =DeepSeekV41VisionConfig= the ViT/Aligner code can
+consume, and extends the source verifier to pin the upstream =vision.py= and
+=image_processor.py= surfaces the parity fixtures depend on.
+
+Read first:
+
+- =../spec.org= (Multimodal architecture contract, Vision config)
+- =../research/upstream-architecture.md=
+- =../upstream/inference/config.json= and =../upstream/config.json=
+- =../upstream/inference/vision.py=
+- =../upstream/inference/image_processor.py=
+- =ferric_continuum/tnsr/src/deepseek_v41/config.rs=
+- =ferric_continuum/tnsr/tools/deepseek_v41_verify_sources.py=
+
+* Requirements
+
+- Add =DeepSeekV41VisionConfig= to =config.rs= with the fields listed in the spec
+  contract, plus =vision_enabled()= derived from =vision_n_layers > 0=.
+- Parse it from both the HF nested =vision_config= object and the flat
+  =inference/config.json= =vision_*= keys, matching the existing text-config
+  dual-path style. Keep =max_wh_ratio: Option<f64>= (upstream default null).
+- Keep =DeepSeekV41DeferredVisionConfig= as a deprecated alias or remove its
+  usages in favor of the new type; either way the text config must still expose
+  the vision fields it already did (no lost fields).
+- Extend =deepseek_v41_verify_sources.py= to assert the upstream source surface:
+  =vision.py= exposes =get_vision_cos_sin=, =apply_rotary=, =PatchEmbed=,
+  =Attention=, =MLP=, =Block=, =ViT=, =Aligner=; =image_processor.py= exposes
+  =num_image_tokens=, =llm_grid=, =solve_resize_ratio=, =safe_resize=,
+  =plan_image_grid=, =image_token_types=, =prepare_vl_inputs=, and the
+  =TEXT/IMAGE_START/IMAGE/IMAGE_NEW_LINE/IMAGE_END= constants.
+- Add config-test cases in =tests/deepseek_v41_config_test.rs= asserting the
+  vision config parses from both schemas with the exact release values, and that
+  =vision_enabled()= is true for the release config.
+
+* Out of scope
+
+- No ViT/Aligner math (ticket 15/16).
+- No image byte decoding.
+
+* Verification
+
+- =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_config_tests=
+- =python3 ferric_continuum/tnsr/tools/deepseek_v41_verify_sources.py --repo-root .=
+  (or the source-level in the verify script) passes with the new anchors.
+
+* Comments
+
+- Keep the vision config a plain typed value; the ViT/Aligner modules borrow it.
+
+* Resolution
+
+Promoted the vision config to a first-class =DeepSeekV41VisionConfig= in
+=src/deepseek_v41/config.rs= (with =vision_enabled()= derived from
+=num_hidden_layers > 0=); kept =DeepSeekV41DeferredVisionConfig= as a type alias
+so existing call sites (math test) keep compiling. Both =from_hf_json= (nested
+=vision_config=) and =from_inference_json= (flat =vision_*= keys) populate it.
+Extended =testdata/deepseek_v41/source_manifest.json= with five new claims
+pinning =vision.py= surface + half-split 2D RoPE, =image_processor.py= surface +
+span layout, and =model.py= merge/VL-bias semantics. Added a
+=config.vision.vision_enabled()= assertion to =deepseek_v41_config_test.rs=.
+
+Evidence (pinned Bazel 9.2.0):
+- =bash tools/verify_deepseek_v41_sources.sh= -> PASS: checked 14 source claims
+  (9 text + 5 vision/image/merge).
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests= -> PASSED.
+- =bazel build //ferric_continuum/tnsr:deepseek_v41_math_tests= -> OK (alias
+  keeps the existing call site compiling).

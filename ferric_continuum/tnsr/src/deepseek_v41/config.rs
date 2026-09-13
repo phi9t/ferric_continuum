@@ -22,7 +22,7 @@ pub struct DeepSeekV41DeferredDsparkConfig {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DeepSeekV41DeferredVisionConfig {
+pub struct DeepSeekV41VisionConfig {
     pub num_hidden_layers: usize,
     pub hidden_size: usize,
     pub num_attention_heads: usize,
@@ -34,6 +34,18 @@ pub struct DeepSeekV41DeferredVisionConfig {
     pub min_pixels: usize,
     pub max_wh_ratio: Option<f64>,
 }
+
+impl DeepSeekV41VisionConfig {
+    /// Vision tower is present iff it has at least one layer (upstream
+    /// `ModelArgs.vision_enabled`).
+    pub fn vision_enabled(&self) -> bool {
+        self.num_hidden_layers > 0
+    }
+}
+
+/// Deprecated alias retained for existing call sites; use
+/// [`DeepSeekV41VisionConfig`].
+pub type DeepSeekV41DeferredVisionConfig = DeepSeekV41VisionConfig;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeepSeekV41TextConfig {
@@ -87,7 +99,7 @@ pub struct DeepSeekV41TextConfig {
     pub dtype: String,
     pub expert_dtype: String,
     pub dspark: DeepSeekV41DeferredDsparkConfig,
-    pub vision: DeepSeekV41DeferredVisionConfig,
+    pub vision: DeepSeekV41VisionConfig,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -164,7 +176,7 @@ impl DeepSeekV41TextConfig {
                 dspark_n_routed_experts: usize_field(text, "dspark_n_routed_experts")?,
                 dspark_num_experts_per_tok: usize_field(text, "dspark_num_experts_per_tok")?,
             },
-            vision: DeepSeekV41DeferredVisionConfig {
+            vision: DeepSeekV41VisionConfig {
                 num_hidden_layers: usize_field(vision, "num_hidden_layers")?,
                 hidden_size: usize_field(vision, "hidden_size")?,
                 num_attention_heads: usize_field(vision, "num_attention_heads")?,
@@ -242,7 +254,7 @@ impl DeepSeekV41TextConfig {
                 dspark_n_routed_experts: usize_field(root, "dspark_n_routed_experts")?,
                 dspark_num_experts_per_tok: usize_field(root, "dspark_n_activated_experts")?,
             },
-            vision: DeepSeekV41DeferredVisionConfig {
+            vision: DeepSeekV41VisionConfig {
                 num_hidden_layers: usize_field(root, "vision_n_layers")?,
                 hidden_size: usize_field(root, "vision_dim")?,
                 num_attention_heads: usize_field(root, "vision_n_heads")?,

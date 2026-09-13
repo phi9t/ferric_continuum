@@ -1,0 +1,101 @@
+#+TITLE: Multimodal prompt encoding parity and CLI image path
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 18-vision-checkpoint-loader
+#+PARENT: ../spec.org
+
+* Context
+
+Wave 1 rejected all image flags. Wave 2 adds a multimodal CLI path and prompt
+encoding parity against upstream =prepare_vl_inputs=, isolating tokenizer drift
+via precomputed token ids and patch tensors the same way Wave 1 isolated text.
+
+Read first:
+
+- =../spec.org=
+- =../upstream/inference/image_processor.py= (=prepare_vl_inputs=)
+- =../upstream/encoding/encoding.py= (IMAGE_PLACEHOLDER)
+- =ferric_continuum/tnsr/src/bin/deepseek_v41_infer.rs=
+
+* Requirements
+
+- Add a multimodal path to =deepseek_v41_infer.rs=, gated behind =--multimodal=
+  (default remains text-only). New args:
+  - =--token-types <comma ids>= (TEXT=-1, span types 0..3),
+  - =--image-patches <path>= to a JSON file carrying =[{n_vit_h, n_vit_w,
+    n_llm_h, n_llm_w, start, patches}]= (avoids pulling image decoding into
+    Rust),
+  - keep =--token-ids= for the full expanded id stream.
+  Reject the image token id only in text-only mode; in multimodal mode it is
+  expected inside image spans. Still reject DSpark/speculative flags.
+- =--dump-logits= writes =model_type: "deepseek_v41_multimodal"= plus the same
+  =token_ids/prompt/vocab_size/logits= schema, plus =token_types= echo.
+- Extend =deepseek_v41_fixture_gen.py= with a =vl-prompt= family calling upstream
+  =prepare_vl_inputs= (stub =load_image= to return tiny deterministic patches so
+  no real image bytes/PIL are needed) and emit =prompt_vl_fixture.json= with the
+  expanded tokens, token_types, and per-image =(start, n_vit_h, n_vit_w,
+  n_llm_h, n_llm_w)=.
+- Add a prompt/token-types assertion to the model test target from the fixture;
+  wire fixture into BUILD data.
+
+* Out of scope
+
+- No image byte/PIL decoding in Rust.
+- No real weights (ticket 20 handles real parity SKIP).
+
+* Verification
+
+- =python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family vl-prompt=
+- =/data02/home/philip.yang/.local/bin/bazel-9.2.0 build -c opt //ferric_continuum/tnsr:deepseek_v41_infer=
+- =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_model_tests=
+
+* Comments
+
+- Supplying patches by file keeps the CLI hermetic and matches the Wave-1
+  =--token-ids= isolation philosophy.
+
+* Resolution
+
+Landed the multimodal CLI path and prompt-encoding parity fixture.
+
+- =deepseek_v41_fixture_gen.py=: added =generate_vl_prompt= + a =vl-prompt=
+  family. It path-imports upstream =image_processor.py=, stubs the tokenizer
+  (=<image>= -> id 4, other words -> deterministic byte-sum ids in {1,2,3}),
+  provides an =encoding= module shim carrying the real =IMAGE_PLACEHOLDER=, binds
+  real =torch= onto the module so =image_token_types= builds a real Tensor, and
+  monkeypatches =load_image= to return tiny deterministic patches. It calls the
+  real =prepare_vl_inputs= and writes =prompt_vl_fixture.json= with the expanded
+  =tokens=/=token_types= and per-image =(start, n_vit_h, n_vit_w, n_llm_h,
+  n_llm_w, token_types)=.
+- =deepseek_v41_infer.rs=: added =--multimodal= (default stays text-only),
+  =--token-types=, and =--image-patches <json>=. The CLI runs each image's
+  patches through the loaded vision tower (=encode_image=), rebuilds the span
+  =image_token_types=, and calls the new =forward_multimodal_with_seed=. Image
+  token id is rejected only in text-only mode. DSpark/speculative flags still
+  rejected; multimodal decode past prefill is refused. =--dump-logits= writes
+  =model_type: "deepseek_v41_multimodal"= plus a =token_types= echo.
+- =load.rs=: added =forward_multimodal_with_seed= (seeds gate token counts, then
+  =try_forward_multimodal=).
+- =deepseek_v41_model_test.rs=: added =vl_prompt_fixture_expands_image_span=,
+  reconstructing the =[START, (IMAGE*w, NL)*h, END]= layout and checking the
+  fixture's tokens/token_types and =num_image_tokens = n_llm_h*(n_llm_w+1)+2=.
+- =BUILD.bazel=: wired =prompt_vl_fixture.json= into =deepseek_v41_model_tests=
+  data and added =serde=/=serde_json= deps to =deepseek_v41_infer=.
+
+Command evidence (worktree, pinned Bazel 9.2.0):
+
+#+begin_example
+$ python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family vl-prompt
+# -> testdata/deepseek_v41/prompt_vl_fixture.json, upstream_call_status=called-upstream:prepare_vl_inputs
+#    tokens=[3,4,4,4,4,4,4,4,4,2] token_types=[-1,0,1,1,2,1,1,2,3,-1]
+
+$ bazel-9.2.0 build -c opt //ferric_continuum/tnsr:deepseek_v41_infer
+INFO: Build completed successfully
+
+$ bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_model_tests //ferric_continuum/tnsr:lib_tests
+//ferric_continuum/tnsr:deepseek_v41_model_tests   PASSED
+//ferric_continuum/tnsr:lib_tests                  PASSED
+
+$ rustfmt --edition 2021 src/bin/deepseek_v41_infer.rs src/deepseek_v41/load.rs tests/deepseek_v41_model_test.rs  # clean
+$ python3 -m py_compile tools/deepseek_v41_fixture_gen.py  # clean
+#+end_example

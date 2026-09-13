@@ -1,0 +1,96 @@
+#+TITLE: Text/vision merge and VL routing bias
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 16-aligner-downsample-and-encode-image
+#+PARENT: ../spec.org
+
+* Context
+
+This ticket wires vision into the transformer forward: merge aligner rows and
+learned delimiters into the embedding, drive the MoE VL routing bias from the
+image mask, and suppress the engram contribution on image tokens. It extends the
+existing =DeepSeekV41TextModel= / block forward rather than forking a new model.
+
+Read first:
+
+- =../spec.org= (Text/vision merge)
+- =../upstream/inference/model.py= (=Transformer.forward=,
+  =merge_image_embeddings=, =Gate.forward= with =bias_vl=, =MoE.forward=)
+- =ferric_continuum/tnsr/src/deepseek_v41/model.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/moe.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/residual.rs=
+
+* Requirements
+
+- Add optional vision fields to the model: =vision: Option<VisionTower>=,
+  =aligner: Option<VisionAligner>=, =image_start/image_end/image_newline:
+  Option<Vec<f32>>=, and the per-layer optional =bias_vl= on the MoE gate.
+- Add =MoE= support for a VL bias: =select_experts= must accept the effective
+  bias vector chosen per token via the image mask
+  (=where(image_mask, bias_vl, bias)=), affecting selection only; routing
+  weights still come from unbiased scores.
+- Add =forward_multimodal(ids, token_types, images) -> logits= to the model:
+  - embed ids,
+  - =merge_image_embeddings= over the =[B,S,D]= embedding using
+    =image_token_types= layout and =encode_image= rows,
+  - HC-expand, run blocks with =image_mask = token_types >= 0= threaded to the
+    MoE gate and =engram_mask = ~image_mask= threaded to the engram update,
+  - collapse -> final norm -> head.
+- The text path (=try_forward_token_ids=) is unchanged and still rejects the
+  image token id.
+- Add fixtures: extend the fixture generator with a =merge= family emitting
+  =merge_image_embeddings_fixture.json= (span overwrite correctness) and a
+  =vl-gate= family emitting =vl_gate_fixture.json= (image-mask bias selection),
+  built from the upstream =Transformer.merge_image_embeddings= and =Gate.forward=
+  with a non-null =bias_vl=.
+- Add layer/block tests to the model test target; wire fixtures into BUILD data.
+
+* Out of scope
+
+- No checkpoint loading of vision tensors (ticket 18) — fixtures supply weights.
+- No CLI (ticket 19).
+- No full tiny end-to-end multimodal logits (that is ticket 20's tiny parity).
+
+* Verification
+
+- =python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family merge,vl-gate=
+- =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_model_tests=
+
+* Comments
+
+- Merge happens BEFORE HC expansion (upstream merges into =h= then unsqueezes to
+  hc_mult copies). Keep that order.
+
+* Resolution
+
+Implemented the text/vision merge and image-mask VL routing bias.
+
+- =moe.rs=: added =select_experts_masked(scores, correction_bias, bias_vl,
+  image_mask, topk)= (old =select_experts= delegates with =None=), added
+  =bias_vl: Option<Vec<f32>>= to =DeepSeekV41Gate=, =Gate::forward_masked=, and
+  =DeepSeekV41MoE::forward_layer_masked=. Per-token effective bias uses
+  =where(image_mask, bias_vl, bias)= for selection only; weights stay unbiased.
+- =model.rs=: =DeepSeekV41Block::forward= now delegates to =forward_with_masks=
+  (engram_mask → engram, image_mask → MoE). Added =ImageSpan=,
+  =ImageDelimiters=, free fn =merge_image_embeddings= (merge before HC expand),
+  and =DeepSeekV41TextModel::try_forward_multimodal=. Text path unchanged.
+- =load.rs=: gate initializer carries =bias_vl: None= (vision loader in W2-06).
+- Fixtures: added =vl-gate= and =merge= families to the generator, both
+  upstream-executed (=called-upstream=). Wired the two JSON files into the model
+  test data.
+- Tests: =vl_gate_selects_vision_bias_on_image_tokens= (mask changes expert
+  selection vs text bias) and =merge_image_embeddings_overwrites_span=.
+
+Command evidence:
+
+#+begin_example
+$ python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family vl-gate
+$ python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family merge
+$ /data02/home/philip.yang/.local/bin/bazel-9.2.0 test \
+    //ferric_continuum/tnsr:deepseek_v41_config_tests \
+    //ferric_continuum/tnsr:deepseek_v41_math_tests \
+    //ferric_continuum/tnsr:deepseek_v41_model_tests
+//ferric_continuum/tnsr:deepseek_v41_config_tests   PASSED
+//ferric_continuum/tnsr:deepseek_v41_math_tests     PASSED
+//ferric_continuum/tnsr:deepseek_v41_model_tests    PASSED
+#+end_example
