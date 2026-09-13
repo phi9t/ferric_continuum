@@ -47,6 +47,7 @@ use super::config::DeepSeekV41TextConfig;
 use super::engram::DeepSeekV41Engram;
 use super::model::{DeepSeekV41Block, DeepSeekV41TextModel};
 use super::moe::{DeepSeekV41Expert, DeepSeekV41Gate, DeepSeekV41MoE};
+use super::vision::{OwnedVisionBlock, OwnedVisionModel};
 use crate::tensor::{Shape, Tensor, TensorValue};
 
 /// Source quantization of a loaded tensor.  Wave 1 always dequantizes to f32
@@ -427,6 +428,25 @@ pub fn load_text_model(model_dir: &Path) -> Result<DeepSeekV41TextModel, String>
     build_text_model(&cfg, &ckpt)
 }
 
+/// Load a DeepSeek V4.1-Flash **vision-enabled** checkpoint directory.
+///
+/// In addition to the text subset this maps the vision tower (`vision.*`),
+/// the aligner (`aligner.*`), the learned image-span delimiters
+/// (`image_start`/`image_end`/`image_newline`), and the per-layer MoE
+/// `bias_vl`.  The config must report `vision_enabled` (a positive
+/// `vision_n_layers`); a text-only config is an error.
+pub fn load_multimodal_model(model_dir: &Path) -> Result<DeepSeekV41TextModel, String> {
+    let cfg = read_config(model_dir)?;
+    if !cfg.vision.vision_enabled() {
+        return Err(
+            "load_multimodal_model requires a vision-enabled config (vision_n_layers > 0)"
+                .to_string(),
+        );
+    }
+    let ckpt = open_checkpoint(model_dir)?;
+    build_model(&cfg, &ckpt, true)
+}
+
 /// Load one converted tensor-parallel shard, `model{mp_rank}-mp{mp_world}.safetensors`.
 ///
 /// This wires the single-shard fixture path for TP-converted directories.  The
@@ -478,6 +498,17 @@ fn build_text_model(
     cfg: &DeepSeekV41TextConfig,
     ckpt: &Checkpoint,
 ) -> Result<DeepSeekV41TextModel, String> {
+    build_model(cfg, ckpt, false)
+}
+
+/// Build the model, optionally loading the vision tower + aligner + delimiters
+/// and the per-layer MoE `bias_vl`.  When `with_vision` is false the vision
+/// namespace is ignored (recorded as deferred), matching Wave-1 behavior.
+fn build_model(
+    cfg: &DeepSeekV41TextConfig,
+    ckpt: &Checkpoint,
+    with_vision: bool,
+) -> Result<DeepSeekV41TextModel, String> {
     reject_qwen_names(ckpt)?;
 
     let v = cfg.vocab_size;
@@ -500,8 +531,30 @@ fn build_text_model(
 
     let mut layers = Vec::with_capacity(cfg.num_hidden_layers);
     for layer_id in 0..cfg.num_hidden_layers {
-        layers.push(load_block(cfg, ckpt, layer_id, &engram_layers)?);
+        let mut block = load_block(cfg, ckpt, layer_id, &engram_layers)?;
+        if with_vision {
+            // bias_vl is present only when the checkpoint has vision.
+            let name = format!("layers.{layer_id}.ffn.gate.bias_vl");
+            let experts = cfg.n_routed_experts;
+            block.ffn.gate.bias_vl = Some(ckpt.float_exact(&name, &[experts])?);
+        }
+        layers.push(block);
     }
+
+    let (vision, image_start, image_end, image_newline) = if with_vision {
+        let vision = load_vision(cfg, ckpt)?;
+        let image_start = ckpt.float_exact("image_start", &[d])?;
+        let image_end = ckpt.float_exact("image_end", &[d])?;
+        let image_newline = ckpt.float_exact("image_newline", &[d])?;
+        (
+            Some(vision),
+            Some(image_start),
+            Some(image_end),
+            Some(image_newline),
+        )
+    } else {
+        (None, None, None, None)
+    };
 
     Ok(DeepSeekV41TextModel {
         vocab_size: v,
@@ -512,6 +565,10 @@ fn build_text_model(
         layers,
         final_norm,
         lm_head,
+        vision,
+        image_start,
+        image_end,
+        image_newline,
     })
 }
 
@@ -647,7 +704,8 @@ fn load_block(
         gate: DeepSeekV41Gate {
             weight: gate_weight,
             correction_bias,
-            tokens: 0, // set per-forward by callers building from config
+            bias_vl: None, // vision routing bias is loaded in the vision loader (W2-06)
+            tokens: 0,     // set per-forward by callers building from config
             dim: d,
             experts,
             topk: cfg.num_experts_per_tok,
@@ -756,6 +814,100 @@ fn load_wo_a(
     Ok(param_from(&[o_groups, group_in, o_lora_rank], out))
 }
 
+/// Load the vision tower (`vision.*`) + aligner (`aligner.*`) into an
+/// [`OwnedVisionModel`].
+///
+/// Vision linears keep torch `[out, in]` layout (the vision math functions
+/// expect `[out, in]`), and biases are copied as-is.  Every tensor is
+/// shape-checked and named on failure.  Geometry is derived from the vision
+/// config:
+///
+/// * `vision_dim = vision.hidden_size`, `n_heads = vision.num_attention_heads`
+/// * `inter = vision.intermediate_size`, `patch_flat = 3 * patch_size^2`
+/// * `rope_dim = vision_dim / n_heads / 2` (per-half rotary width)
+/// * aligner `in_dim = vision_dim * downsample_ratio^2` -> `llm_dim`
+fn load_vision(cfg: &DeepSeekV41TextConfig, ckpt: &Checkpoint) -> Result<OwnedVisionModel, String> {
+    let vision_dim = cfg.vision.hidden_size;
+    let n_heads = cfg.vision.num_attention_heads;
+    let inter = cfg.vision.intermediate_size;
+    let layers = cfg.vision.num_hidden_layers;
+    let patch_size = cfg.vision.patch_size;
+    let theta = cfg.vision.rope_theta;
+    let r = cfg.vision.downsample_ratio;
+    let llm_dim = cfg.hidden_size;
+
+    if n_heads == 0 || vision_dim % n_heads != 0 {
+        return Err(format!(
+            "vision hidden_size {vision_dim} not divisible by num_attention_heads {n_heads}"
+        ));
+    }
+    let head_dim = vision_dim / n_heads;
+    if head_dim % 2 != 0 {
+        return Err(format!(
+            "vision head_dim {head_dim} must be even for 2D RoPE (dim/heads)"
+        ));
+    }
+    let rope_dim = head_dim / 2;
+    let patch_flat = 3 * patch_size * patch_size;
+
+    // Patch embed: torch Linear(patch_flat -> vision_dim).
+    let proj_w = ckpt.float_exact("vision.patch_embed.proj.weight", &[vision_dim, patch_flat])?;
+    let proj_b = ckpt.float_exact("vision.patch_embed.proj.bias", &[vision_dim])?;
+
+    let mut blocks = Vec::with_capacity(layers);
+    for i in 0..layers {
+        let b = |s: &str| format!("vision.blocks.{i}.{s}");
+        let norm1 = ckpt.float_exact(&b("norm1.weight"), &[vision_dim])?;
+        let wqkv = ckpt.float_exact(&b("attn.wqkv.weight"), &[3 * vision_dim, vision_dim])?;
+        let wqkv_b = ckpt.float_exact(&b("attn.wqkv.bias"), &[3 * vision_dim])?;
+        let wo = ckpt.float_exact(&b("attn.wo.weight"), &[vision_dim, vision_dim])?;
+        let wo_b = ckpt.float_exact(&b("attn.wo.bias"), &[vision_dim])?;
+        let norm2 = ckpt.float_exact(&b("norm2.weight"), &[vision_dim])?;
+        // MLP: w1 = Linear(vision_dim -> 2*inter, bias=False) chunked to gate/up;
+        // w2 = Linear(inter -> vision_dim, bias=False).
+        let w1 = ckpt.float_exact(&b("mlp.w1.weight"), &[2 * inter, vision_dim])?;
+        let w2 = ckpt.float_exact(&b("mlp.w2.weight"), &[vision_dim, inter])?;
+        blocks.push(OwnedVisionBlock {
+            norm1,
+            wqkv,
+            wqkv_b,
+            wo,
+            wo_b,
+            norm2,
+            w1,
+            w2,
+        });
+    }
+
+    let final_norm = ckpt.float_exact("vision.norm.weight", &[vision_dim])?;
+
+    // Aligner: in_dim = vision_dim * r^2 -> llm_dim -> llm_dim (both with bias).
+    let in_dim = vision_dim * r * r;
+    let al_w1 = ckpt.float_exact("aligner.w1.weight", &[llm_dim, in_dim])?;
+    let al_w1_b = ckpt.float_exact("aligner.w1.bias", &[llm_dim])?;
+    let al_w2 = ckpt.float_exact("aligner.w2.weight", &[llm_dim, llm_dim])?;
+    let al_w2_b = ckpt.float_exact("aligner.w2.bias", &[llm_dim])?;
+
+    Ok(OwnedVisionModel {
+        proj_w,
+        proj_b,
+        blocks,
+        final_norm,
+        al_w1,
+        al_w1_b,
+        al_w2,
+        al_w2_b,
+        vision_dim,
+        llm_dim,
+        n_heads,
+        inter,
+        rope_dim,
+        theta,
+        downsample_ratio: r,
+        patch_flat,
+    })
+}
+
 /// Convenience: run a text-only forward that seeds the per-layer MoE token
 /// counts from the input length before delegating to the model.  Loaded gates
 /// leave `tokens` at 0 (unknown until a batch arrives).
@@ -770,6 +922,26 @@ pub fn forward_with_token_seed(
         layer.ffn.gate.tokens = tokens;
     }
     model.try_forward_token_ids(ids, b, s)
+}
+
+/// Multimodal forward that seeds each MoE gate's token count from `b*s` before
+/// running [`DeepSeekV41TextModel::try_forward_multimodal`].  Same seeding role
+/// as [`forward_with_token_seed`], for the image-aware path.
+#[allow(clippy::too_many_arguments)]
+pub fn forward_multimodal_with_seed(
+    model: &mut DeepSeekV41TextModel,
+    ids: &[usize],
+    token_types: &[i64],
+    b: usize,
+    s: usize,
+    images: &[Vec<crate::deepseek_v41::model::ImageSpan>],
+    delims: &crate::deepseek_v41::model::ImageDelimiters,
+) -> Result<Tensor, String> {
+    let tokens = b * s;
+    for layer in &mut model.layers {
+        layer.ffn.gate.tokens = tokens;
+    }
+    model.try_forward_multimodal(ids, token_types, b, s, images, delims)
 }
 
 #[cfg(test)]

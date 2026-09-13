@@ -1,0 +1,98 @@
+#+TITLE: Vision checkpoint loader
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 17-text-vision-merge-and-vl-routing-bias
+#+PARENT: ../spec.org
+
+* Context
+
+Wave 1 explicitly ignored =vision.*=/=aligner.*=/=image_*= tensors. Wave 2 loads
+them into the new vision structs when a vision-enabled model is requested, while
+keeping the text-only loader behavior unchanged.
+
+Read first:
+
+- =../spec.org=
+- =../upstream/model.safetensors.index.json= (vision/aligner/image names)
+- =ferric_continuum/tnsr/src/deepseek_v41/load.rs=
+
+* Requirements
+
+- Add =load_multimodal_model(model_dir) -> Result<DeepSeekV41TextModel, String>=
+  (or a =load_text_model= variant with a vision flag) that additionally maps:
+  - =vision.patch_embed.proj.{weight,bias}=
+  - =vision.blocks.N.norm1.weight=, =vision.blocks.N.norm2.weight=
+  - =vision.blocks.N.attn.wqkv.{weight,bias}=,
+    =vision.blocks.N.attn.wo.{weight,bias}=
+  - =vision.blocks.N.mlp.{w1,w2}.weight=
+  - =vision.norm.weight=
+  - =aligner.w1.{weight,bias}=, =aligner.w2.{weight,bias}=
+  - =image_start=, =image_end=, =image_newline=
+  - the MoE gate =bias_vl= per layer (present only when vision enabled)
+- Transpose PyTorch =[out,in]= linears to tnsr =[in,out]=; keep biases as-is.
+- Reuse the Wave-1 dequant paths (BF16/F16/F32; FP8/FP4 as needed).
+- Shape-check every loaded vision tensor; error naming the offending tensor.
+- Text-only =load_text_model= still ignores vision tensors and records them as
+  deferred (unchanged behavior).
+- Add loader tests in =load_test.rs= with a tiny in-test safetensors containing
+  the vision namespace: multimodal load succeeds, wrong vision shape errors,
+  missing =image_start= errors in vision mode, and text-only mode still ignores
+  the vision tensors.
+
+* Out of scope
+
+- No real weight download.
+- No native quantized vision kernels.
+
+* Verification
+
+- =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:deepseek_v41_model_tests=
+
+* Comments
+
+- The learned delimiters (=image_start/end/newline=) are 1-D =[dim]= params, not
+  linears; do not transpose them.
+
+* Resolution
+
+Implemented in worktree =.worktrees/deepseek-v41-wave2= (branch
+=deepseek-v41-mm-wave2=).
+
+- =src/deepseek_v41/vision.rs=: added owned =OwnedVisionBlock= /
+  =OwnedVisionModel= (owning torch =[out,in]= weights + biases) with
+  =OwnedVisionModel::encode_image(patches, n_h, n_w)= borrowing into the
+  existing =encode_image= free function. The borrow-based =VitWeights= /
+  =AlignerWeights= are unsuitable for storage in the model.
+- =src/deepseek_v41/load.rs=: added =load_multimodal_model(model_dir)= (errors
+  unless =cfg.vision.vision_enabled()=), refactored =build_text_model= to a thin
+  wrapper over =build_model(cfg, ckpt, with_vision)=, and added
+  =load_vision(cfg, ckpt)= mapping =vision.patch_embed.proj.{weight,bias}=, per
+  block =norm1/norm2/attn.wqkv/attn.wo/mlp.{w1,w2}=, =vision.norm.weight=,
+  =aligner.{w1,w2}.{weight,bias}=. Vision linears keep torch =[out,in]= layout
+  (the vision math expects it); every tensor is shape-checked and named on
+  failure. When =with_vision= is set, each block's =ffn.gate.bias_vl= and the
+  three 1-D =image_{start,end,newline}= delimiters are loaded; geometry
+  (=rope_dim = vision_dim/n_heads/2=, =patch_flat = 3*patch_size^2=,
+  aligner =in_dim = vision_dim*r^2=) is derived from the vision config.
+- =model.rs=: =DeepSeekV41TextModel= gained =vision: Option<OwnedVisionModel>=
+  and =image_{start,end,newline}: Option<Vec<f32>>=, all =None= in text mode.
+- =src/deepseek_v41/load_test.rs=: added
+  =tiny_multimodal_checkpoint_loads=, =multimodal_wrong_vision_shape_returns_err=,
+  =multimodal_missing_image_start_returns_err=,
+  =multimodal_requires_vision_enabled_config=,
+  =text_only_load_ignores_vision_tensors_present= (tiny ViT vision_dim=8,
+  n_heads=2 -> head_dim=4, rope_dim=2 even).
+
+Evidence:
+
+#+begin_example
+$ /data02/home/philip.yang/.local/bin/bazel-9.2.0 test \
+    //ferric_continuum/tnsr:lib_tests \
+    //ferric_continuum/tnsr:deepseek_v41_model_tests \
+    //ferric_continuum/tnsr:deepseek_v41_config_tests \
+    //ferric_continuum/tnsr:deepseek_v41_math_tests
+//ferric_continuum/tnsr:deepseek_v41_config_tests   PASSED
+//ferric_continuum/tnsr:deepseek_v41_math_tests     PASSED
+//ferric_continuum/tnsr:deepseek_v41_model_tests    PASSED
+//ferric_continuum/tnsr:lib_tests                   PASSED
+#+end_example

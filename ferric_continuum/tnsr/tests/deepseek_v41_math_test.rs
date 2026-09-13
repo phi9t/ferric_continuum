@@ -178,6 +178,82 @@ fn usize_array(value: &Value, key: &str) -> Vec<usize> {
         .collect()
 }
 
+fn i64_array(value: &Value, key: &str) -> Vec<i64> {
+    value[key]
+        .as_array()
+        .unwrap_or_else(|| panic!("{key} should be array"))
+        .iter()
+        .map(|v| {
+            v.as_i64()
+                .unwrap_or_else(|| panic!("{key} item should be integer"))
+        })
+        .collect()
+}
+
+#[test]
+fn image_grid_matches_upstream_plan_and_token_types() {
+    use tnsr::deepseek_v41::config::DeepSeekV41VisionConfig;
+    use tnsr::deepseek_v41::vision_grid::{image_token_types, num_image_tokens, plan_image_grid};
+
+    let fixture = fixture("image_grid_fixture.json");
+    assert_eq!(
+        fixture["source_file"],
+        "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/image_processor.py"
+    );
+    let status = fixture["upstream_call_status"]
+        .as_str()
+        .expect("upstream_call_status should be string");
+    assert!(
+        status.contains("called-upstream:plan_image_grid"),
+        "expected upstream execution, got {status:?}"
+    );
+
+    let vc = &fixture["vision_config"];
+    let cfg = DeepSeekV41VisionConfig {
+        num_hidden_layers: 32,
+        hidden_size: 1024,
+        num_attention_heads: 16,
+        intermediate_size: 2816,
+        patch_size: usize_field(vc, "vision_patch_size"),
+        rope_theta: 10000.0,
+        downsample_ratio: usize_field(vc, "vision_downsample_ratio"),
+        max_image_tokens: usize_field(vc, "vision_max_n_token"),
+        min_pixels: usize_field(vc, "vision_min_pixels"),
+        max_wh_ratio: vc["vision_max_wh_ratio"].as_f64(),
+    };
+
+    for case in fixture["cases"].as_array().expect("cases array") {
+        let name = case["name"].as_str().unwrap_or("?");
+        let width = usize_field(case, "width");
+        let height = usize_field(case, "height");
+        let expected = &case["expected"];
+
+        let (n_llm_h, n_llm_w, best_h, best_w) = plan_image_grid(width, height, &cfg);
+        assert_eq!(n_llm_h, usize_field(expected, "n_llm_h"), "{name} n_llm_h");
+        assert_eq!(n_llm_w, usize_field(expected, "n_llm_w"), "{name} n_llm_w");
+        assert_eq!(
+            best_h,
+            usize_field(expected, "best_height"),
+            "{name} best_height"
+        );
+        assert_eq!(
+            best_w,
+            usize_field(expected, "best_width"),
+            "{name} best_width"
+        );
+        assert_eq!(
+            num_image_tokens(n_llm_h, n_llm_w),
+            usize_field(expected, "num_image_tokens"),
+            "{name} num_image_tokens"
+        );
+        assert_eq!(
+            image_token_types(n_llm_h, n_llm_w),
+            i64_array(expected, "token_types"),
+            "{name} token_types"
+        );
+    }
+}
+
 #[test]
 fn yarn_freqs_match_upstream_selected_positions() {
     let fixture = fixture("rope_yarn_fixture.json");

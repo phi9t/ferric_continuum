@@ -109,6 +109,7 @@ fn assert_release_text_config(config: &DeepSeekV41TextConfig) {
     assert_eq!(config.vision.max_image_tokens, 1024);
     assert_eq!(config.vision.min_pixels, 295936);
     assert!(config.vision.max_wh_ratio.is_none());
+    assert!(config.vision.vision_enabled());
     assert_eq!(config.image_token_id, 129264);
     assert_eq!(config.dtype, "fp8");
     assert_eq!(config.expert_dtype, "fp4");

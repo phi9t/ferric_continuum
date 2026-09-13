@@ -281,6 +281,55 @@ def _stubbed_kernel_call(*_args, **_kwargs):
     raise RuntimeError("stubbed upstream kernel is outside Ticket 03 fixture scope")
 
 
+def import_upstream_image_processor_by_path(image_py: Path) -> tuple[object | None, str]:
+    """Load upstream image_processor.py by path.
+
+    The pure grid functions only need `math`, but the module top-level imports
+    numpy/torch/PIL. We stub those to lightweight placeholders so the pure grid
+    functions (which never touch them) import and run in a CPU-only env.
+    """
+    saved = {name: sys.modules.get(name) for name in ("numpy", "torch", "PIL")}
+    try:
+        if "numpy" not in sys.modules:
+            sys.modules["numpy"] = types.ModuleType("numpy")
+        if "torch" not in sys.modules:
+            torch_stub = types.ModuleType("torch")
+            torch_stub.Tensor = object
+            torch_stub.int64 = "int64"
+
+            def _tensor(data, dtype=None):
+                return data
+
+            torch_stub.tensor = _tensor
+            sys.modules["torch"] = torch_stub
+        if "PIL" not in sys.modules:
+            pil = types.ModuleType("PIL")
+            pil.Image = object
+            pil.ImageOps = object
+            sys.modules["PIL"] = pil
+            sys.modules["PIL.Image"] = types.ModuleType("PIL.Image")
+
+        spec = importlib.util.spec_from_file_location(
+            "deepseek_v41_upstream_image_processor", image_py
+        )
+        if spec is None or spec.loader is None:
+            raise SystemExit(f"could not create import spec for {image_py}")
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except ModuleNotFoundError as err:
+            return None, f"path-import-skipped-missing-dependency:{err.name}"
+        except Exception as err:
+            return None, f"path-import-skipped:{type(err).__name__}:{err}"
+        return module, "path-import-ok"
+    finally:
+        for name, prev in saved.items():
+            if prev is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = prev
+
+
 def import_upstream_model_by_path(model_py: Path) -> tuple[object | None, str]:
     """Load upstream model.py by path, stubbing unrelated heavy modules."""
     spec = importlib.util.spec_from_file_location("deepseek_v41_upstream_model", model_py)
@@ -2392,6 +2441,904 @@ def generate_prompt(out_dir: Path, repo_root: Path) -> None:
     )
 
 
+def _vision_cfg():
+    """Release vision config values (see spec.org / config.rs)."""
+    return dict(
+        vision_patch_size=14,
+        vision_downsample_ratio=3,
+        vision_max_n_token=1024,
+        vision_min_pixels=295936,
+        vision_max_wh_ratio=None,
+    )
+
+
+class _VisionArgs:
+    def __init__(self, cfg: dict):
+        for key, value in cfg.items():
+            setattr(self, key, value)
+
+
+def generate_image_grid(out_dir: Path, image_module: object | None, import_status: str) -> None:
+    cfg = _vision_cfg()
+    args = _VisionArgs(cfg)
+    # (width, height) originals: square, tall, wide, below min-pixels, above max-tokens.
+    cases = [
+        {"name": "square_small", "width": 224, "height": 224},
+        {"name": "tall", "width": 224, "height": 2016},
+        {"name": "wide", "width": 4032, "height": 224},
+        {"name": "below_min_pixels", "width": 64, "height": 48},
+        {"name": "above_max_tokens", "width": 4096, "height": 4096},
+    ]
+
+    def upstream_case(case):
+        assert image_module is not None
+        n_llm_h, n_llm_w, best_h, best_w = image_module.plan_image_grid(
+            case["width"], case["height"], args
+        )
+        types = image_module.image_token_types(n_llm_h, n_llm_w)
+        types_list = types.tolist() if hasattr(types, "tolist") else list(types)
+        return {
+            "n_llm_h": int(n_llm_h),
+            "n_llm_w": int(n_llm_w),
+            "best_height": int(best_h),
+            "best_width": int(best_w),
+            "num_image_tokens": image_module.num_image_tokens(n_llm_h, n_llm_w),
+            "token_types": [int(t) for t in types_list],
+        }
+
+    def fallback_case(case):
+        return _fallback_image_grid(case["width"], case["height"], cfg)
+
+    for case in cases:
+        expected, case_status = call_upstream_or_fallback(
+            import_status,
+            "plan_image_grid",
+            lambda case=case: upstream_case(case),
+            lambda case=case: fallback_case(case),
+        )
+        case["expected"] = expected
+        case["upstream_call_status"] = case_status
+
+    write_json(
+        out_dir / "image_grid_fixture.json",
+        {
+            **source_meta(
+                "plan_image_grid/image_token_types",
+                "plan_image_grid around lines 101-137",
+                source_file="ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/image_processor.py",
+            ),
+            "upstream_import_status": import_status,
+            "upstream_call_status": ",".join(
+                sorted({case["upstream_call_status"] for case in cases})
+            ),
+            "absolute_tolerance": 0.0,
+            "vision_config": cfg,
+            "cases": cases,
+        },
+    )
+
+
+def _fallback_image_grid(width: int, height: int, cfg: dict) -> dict:
+    """Pure-Python mirror of plan_image_grid + image_token_types."""
+    p = cfg["vision_patch_size"]
+    ds = cfg["vision_downsample_ratio"]
+    max_n = cfg["vision_max_n_token"]
+    min_pixels = cfg["vision_min_pixels"]
+    max_wh = cfg["vision_max_wh_ratio"]
+
+    def num_image_tokens(n_llm_h, n_llm_w):
+        return n_llm_h * (n_llm_w + 1) + 2
+
+    def llm_grid(best_h, best_w):
+        return math.ceil((best_h // p) / ds), math.ceil((best_w // p) / ds)
+
+    def solve_resize_ratio(h, w):
+        r = h / w
+        max_w_float = math.sqrt((max_n - 2) / r + 0.25) - 0.5
+        max_h_float = max_w_float * r
+        cell = p * ds
+        if max_w_float < 1.0:
+            return (max_n - 2) // 2 * cell, cell
+        if max_h_float < 1.0:
+            return cell, (max_n - 3) * cell
+        beta = min(math.floor(max_w_float) * cell / w, math.floor(max_h_float) * cell / h)
+        return math.floor(h * beta / p) * p, math.floor(w * beta / p) * p
+
+    def safe_resize(h, w, best_h, best_w):
+        n_llm_h, n_llm_w = llm_grid(best_h, best_w)
+        if num_image_tokens(n_llm_h, n_llm_w) > max_n:
+            best_h, best_w = solve_resize_ratio(h, w)
+            n_llm_h, n_llm_w = llm_grid(best_h, best_w)
+        return n_llm_h, n_llm_w, best_h, best_w
+
+    if max_wh is not None and width > height * max_wh:
+        width = int(height * max_wh)
+    if 0 < width * height < min_pixels:
+        ratio = (min_pixels / (width * height)) ** 0.5
+        width = int(width * ratio)
+        height = int(height * ratio)
+    best_width = math.ceil(width / p) * p
+    best_height = math.ceil(height / p) * p
+    n_llm_h, n_llm_w, best_h, best_w = safe_resize(height, width, best_height, best_width)
+
+    types = [0]  # IMAGE_START
+    types += ([1] * n_llm_w + [2]) * n_llm_h  # IMAGE, IMAGE_NEW_LINE
+    types.append(3)  # IMAGE_END
+    return {
+        "n_llm_h": int(n_llm_h),
+        "n_llm_w": int(n_llm_w),
+        "best_height": int(best_h),
+        "best_width": int(best_w),
+        "num_image_tokens": num_image_tokens(n_llm_h, n_llm_w),
+        "token_types": types,
+    }
+
+
+def import_upstream_vision_by_path(vision_py: Path) -> tuple[object | None, str]:
+    """Load upstream vision.py by path. It is pure torch (no kernel stubs)."""
+    spec = importlib.util.spec_from_file_location(
+        "deepseek_v41_upstream_vision", vision_py
+    )
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"could not create import spec for {vision_py}")
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except ModuleNotFoundError as err:
+        return None, f"path-import-skipped-missing-dependency:{err.name}"
+    except Exception as err:
+        return None, f"path-import-skipped:{type(err).__name__}:{err}"
+    return module, "path-import-ok"
+
+
+class _VitArgs:
+    """Minimal ModelArgs surface the vision.py modules read."""
+
+    def __init__(self, dim, n_heads, inter, patch, theta, n_layers):
+        self.vision_dim = dim
+        self.vision_n_heads = n_heads
+        self.vision_inter_dim = inter
+        self.vision_patch_size = patch
+        self.vision_rope_theta = theta
+        self.vision_n_layers = n_layers
+
+
+class _AlignerArgs:
+    """Minimal ModelArgs surface the Aligner reads: vision_dim, downsample, dim."""
+
+    def __init__(self, vision_dim, downsample_ratio, dim):
+        self.vision_dim = vision_dim
+        self.vision_downsample_ratio = downsample_ratio
+        self.dim = dim
+
+
+def _det_weights(count: int, span: int = 11, scale: float = 6.0) -> list[float]:
+    return [((i % span) - (span // 2)) / scale for i in range(count)]
+
+
+def generate_vision(out_dir: Path, vision_module: object | None, import_status: str) -> None:
+    # Tiny deterministic ViT config. head_dim = dim/n_heads = 4; rope_dim = 2.
+    dim, n_heads, inter, patch, theta, n_layers = 8, 2, 3, 2, 10000.0, 1
+    head_dim = dim // n_heads
+    rope_dim = dim // n_heads // 2
+    patch_flat = 3 * patch * patch
+    n_h, n_w = 2, 3
+    n_patch = n_h * n_w
+
+    args = _VitArgs(dim, n_heads, inter, patch, theta, n_layers)
+
+    patches = _det_weights(n_patch * patch_flat, span=9, scale=5.0)
+    proj_w = _det_weights(dim * patch_flat, span=7, scale=8.0)
+    proj_b = _det_weights(dim, span=5, scale=4.0)
+    wqkv = _det_weights(3 * dim * dim, span=11, scale=9.0)
+    wqkv_b = _det_weights(3 * dim, span=5, scale=6.0)
+    wo = _det_weights(dim * dim, span=7, scale=7.0)
+    wo_b = _det_weights(dim, span=5, scale=5.0)
+    norm1 = _det_weights(dim, span=5, scale=8.0)
+    norm2 = _det_weights(dim, span=7, scale=9.0)
+    w1 = _det_weights(2 * inter * dim, span=13, scale=10.0)
+    w2 = _det_weights(dim * inter, span=11, scale=9.0)
+    vit_norm = _det_weights(dim, span=5, scale=7.0)
+
+    def build_and_run():
+        import torch
+
+        assert vision_module is not None
+
+        def as_param(data, shape):
+            return torch.nn.Parameter(torch.tensor(data, dtype=torch.float32).reshape(shape))
+
+        # cos/sin table
+        cos, sin = vision_module.get_vision_cos_sin(n_h, n_w, rope_dim, theta)
+
+        # Patch embed
+        pe = vision_module.PatchEmbed(args)
+        pe.proj.weight = as_param(proj_w, (dim, patch_flat))
+        pe.proj.bias = as_param(proj_b, (dim,))
+
+        # Attention
+        attn = vision_module.Attention(args)
+        attn.wqkv.weight = as_param(wqkv, (3 * dim, dim))
+        attn.wqkv.bias = as_param(wqkv_b, (3 * dim,))
+        attn.wo.weight = as_param(wo, (dim, dim))
+        attn.wo.bias = as_param(wo_b, (dim,))
+
+        # MLP
+        mlp = vision_module.MLP(args)
+        mlp.w1.weight = as_param(w1, (2 * inter, dim))
+        mlp.w2.weight = as_param(w2, (dim, inter))
+
+        # Norms
+        n1 = vision_module.RMSNorm(dim)
+        n1.weight = as_param(norm1, (dim,))
+        n2 = vision_module.RMSNorm(dim)
+        n2.weight = as_param(norm2, (dim,))
+
+        patches_t = torch.tensor(patches, dtype=torch.float32).reshape(n_patch, patch_flat)
+
+        with torch.no_grad():
+            embedded = pe(patches_t)
+            rope_out = tensor_to_nested_list(
+                vision_module.apply_rotary(
+                    embedded.view(n_patch, n_heads, head_dim), cos, sin
+                )
+            )
+            attn_out = attn(n1(embedded), cos, sin)
+            block_h = embedded + attn_out
+            block_out = block_h + mlp(n2(block_h))
+        return {
+            "cos": flatten_nested(tensor_to_nested_list(cos)),
+            "sin": flatten_nested(tensor_to_nested_list(sin)),
+            "rope_out": flatten_nested(rope_out),
+            "embedded": flatten_nested(tensor_to_nested_list(embedded)),
+            "attn_out": flatten_nested(tensor_to_nested_list(attn_out)),
+            "block_out": flatten_nested(tensor_to_nested_list(block_out)),
+        }
+
+    def fallback():
+        # Pure-Python mirror is unnecessary for parity intent; we only emit a
+        # marker so the fixture explains why upstream did not run. The Rust test
+        # skips assertions when upstream did not execute.
+        return {
+            "cos": [],
+            "sin": [],
+            "rope_out": [],
+            "embedded": [],
+            "attn_out": [],
+            "block_out": [],
+        }
+
+    result, call_status = call_upstream_or_fallback(
+        import_status, "ViT", build_and_run, fallback
+    )
+
+    write_json(
+        out_dir / "vision_block_fixture.json",
+        {
+            **source_meta(
+                "get_vision_cos_sin/Attention/Block",
+                "vision.py Attention/Block around lines 9-84",
+                source_file="ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/vision.py",
+            ),
+            "upstream_import_status": import_status,
+            "upstream_call_status": call_status,
+            "absolute_tolerance": 2e-5,
+            "input": {
+                "dim": dim,
+                "n_heads": n_heads,
+                "head_dim": head_dim,
+                "rope_dim": rope_dim,
+                "inter": inter,
+                "patch": patch,
+                "patch_flat": patch_flat,
+                "theta": theta,
+                "n_h": n_h,
+                "n_w": n_w,
+                "n_patch": n_patch,
+                "patches": round_list(patches),
+            },
+            "parameters": {
+                "proj_w": fixture_param([dim, patch_flat], proj_w),
+                "proj_b": fixture_param([dim], proj_b),
+                "wqkv": fixture_param([3 * dim, dim], wqkv),
+                "wqkv_b": fixture_param([3 * dim], wqkv_b),
+                "wo": fixture_param([dim, dim], wo),
+                "wo_b": fixture_param([dim], wo_b),
+                "norm1": fixture_param([dim], norm1),
+                "norm2": fixture_param([dim], norm2),
+                "w1": fixture_param([2 * inter, dim], w1),
+                "w2": fixture_param([dim, inter], w2),
+                "vit_norm": fixture_param([dim], vit_norm),
+            },
+            "expected": {
+                "cos": round_list(result["cos"]),
+                "sin": round_list(result["sin"]),
+                "rope_out": round_list(result["rope_out"]),
+                "embedded": round_list(result["embedded"]),
+                "attn_out": round_list(result["attn_out"]),
+                "block_out": round_list(result["block_out"]),
+            },
+        },
+    )
+
+
+def generate_aligner(out_dir: Path, vision_module: object | None, import_status: str) -> None:
+    # Tiny deterministic Aligner config with a non-multiple-of-r grid to exercise
+    # zero-padding in the unfold path.
+    vision_dim, downsample_ratio, dim = 4, 2, 6
+    r = downsample_ratio
+    in_dim = vision_dim * r * r
+    n_h, n_w = 3, 3  # both odd -> pad by 1 in each spatial axis
+    n_patch = n_h * n_w
+
+    args = _AlignerArgs(vision_dim, downsample_ratio, dim)
+
+    vit_rows = _det_weights(n_patch * vision_dim, span=9, scale=5.0)
+    w1 = _det_weights(dim * in_dim, span=11, scale=9.0)
+    w1_b = _det_weights(dim, span=5, scale=6.0)
+    w2 = _det_weights(dim * dim, span=7, scale=7.0)
+    w2_b = _det_weights(dim, span=5, scale=5.0)
+
+    def build_and_run():
+        import torch
+
+        assert vision_module is not None
+
+        def as_param(data, shape):
+            return torch.nn.Parameter(torch.tensor(data, dtype=torch.float32).reshape(shape))
+
+        aligner = vision_module.Aligner(args)
+        aligner.w1.weight = as_param(w1, (dim, in_dim))
+        aligner.w1.bias = as_param(w1_b, (dim,))
+        aligner.w2.weight = as_param(w2, (dim, dim))
+        aligner.w2.bias = as_param(w2_b, (dim,))
+
+        vit_t = torch.tensor(vit_rows, dtype=torch.float32).reshape(n_patch, vision_dim)
+        with torch.no_grad():
+            out = aligner(vit_t, n_h, n_w)
+        return {"aligned": flatten_nested(tensor_to_nested_list(out))}
+
+    def fallback():
+        return {"aligned": []}
+
+    result, call_status = call_upstream_or_fallback(
+        import_status, "Aligner", build_and_run, fallback
+    )
+
+    write_json(
+        out_dir / "aligner_fixture.json",
+        {
+            **source_meta(
+                "Aligner.forward",
+                "vision.py Aligner around lines 106-119",
+                source_file="ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/vision.py",
+            ),
+            "upstream_import_status": import_status,
+            "upstream_call_status": call_status,
+            "absolute_tolerance": 2e-5,
+            "input": {
+                "vision_dim": vision_dim,
+                "downsample_ratio": downsample_ratio,
+                "dim": dim,
+                "in_dim": in_dim,
+                "n_h": n_h,
+                "n_w": n_w,
+                "n_patch": n_patch,
+                "vit_rows": round_list(vit_rows),
+            },
+            "parameters": {
+                "w1": fixture_param([dim, in_dim], w1),
+                "w1_b": fixture_param([dim], w1_b),
+                "w2": fixture_param([dim, dim], w2),
+                "w2_b": fixture_param([dim], w2_b),
+            },
+            "expected": {
+                "aligned": round_list(result["aligned"]),
+            },
+        },
+    )
+
+
+class _EncodeImageArgs:
+    """ModelArgs surface for a chained ViT + Aligner (encode_image)."""
+
+    def __init__(self, dim, n_heads, inter, patch, theta, n_layers, downsample, llm_dim):
+        self.vision_dim = dim
+        self.vision_n_heads = n_heads
+        self.vision_inter_dim = inter
+        self.vision_patch_size = patch
+        self.vision_rope_theta = theta
+        self.vision_n_layers = n_layers
+        self.vision_downsample_ratio = downsample
+        self.dim = llm_dim
+
+
+def generate_encode_image(out_dir: Path, vision_module: object | None, import_status: str) -> None:
+    # Tiny ViT (2 layers) + Aligner over a non-multiple-of-r grid.
+    dim, n_heads, inter, patch, theta, n_layers = 8, 2, 3, 2, 10000.0, 2
+    downsample, llm_dim = 2, 6
+    head_dim = dim // n_heads
+    rope_dim = dim // n_heads // 2
+    patch_flat = 3 * patch * patch
+    n_h, n_w = 3, 3  # odd -> aligner pad branch
+    n_patch = n_h * n_w
+    r = downsample
+    in_dim = dim * r * r
+
+    args = _EncodeImageArgs(dim, n_heads, inter, patch, theta, n_layers, downsample, llm_dim)
+
+    patches = _det_weights(n_patch * patch_flat, span=9, scale=5.0)
+    proj_w = _det_weights(dim * patch_flat, span=7, scale=8.0)
+    proj_b = _det_weights(dim, span=5, scale=4.0)
+    vit_norm = _det_weights(dim, span=5, scale=7.0)
+    # Per-block params (distinct per layer so a layer swap would be detected).
+    blocks = []
+    for li in range(n_layers):
+        blocks.append(
+            {
+                "wqkv": _det_weights(3 * dim * dim, span=11 + li, scale=9.0),
+                "wqkv_b": _det_weights(3 * dim, span=5, scale=6.0),
+                "wo": _det_weights(dim * dim, span=7, scale=7.0),
+                "wo_b": _det_weights(dim, span=5, scale=5.0),
+                "norm1": _det_weights(dim, span=5, scale=8.0),
+                "norm2": _det_weights(dim, span=7, scale=9.0),
+                "w1": _det_weights(2 * inter * dim, span=13, scale=10.0),
+                "w2": _det_weights(dim * inter, span=11, scale=9.0),
+            }
+        )
+    al_w1 = _det_weights(llm_dim * in_dim, span=11, scale=9.0)
+    al_w1_b = _det_weights(llm_dim, span=5, scale=6.0)
+    al_w2 = _det_weights(llm_dim * llm_dim, span=7, scale=7.0)
+    al_w2_b = _det_weights(llm_dim, span=5, scale=5.0)
+
+    def build_and_run():
+        import torch
+
+        assert vision_module is not None
+
+        def as_param(data, shape):
+            return torch.nn.Parameter(torch.tensor(data, dtype=torch.float32).reshape(shape))
+
+        vit = vision_module.ViT(args)
+        vit.patch_embed.proj.weight = as_param(proj_w, (dim, patch_flat))
+        vit.patch_embed.proj.bias = as_param(proj_b, (dim,))
+        for li, blk in enumerate(vit.blocks):
+            b = blocks[li]
+            blk.attn.wqkv.weight = as_param(b["wqkv"], (3 * dim, dim))
+            blk.attn.wqkv.bias = as_param(b["wqkv_b"], (3 * dim,))
+            blk.attn.wo.weight = as_param(b["wo"], (dim, dim))
+            blk.attn.wo.bias = as_param(b["wo_b"], (dim,))
+            blk.norm1.weight = as_param(b["norm1"], (dim,))
+            blk.norm2.weight = as_param(b["norm2"], (dim,))
+            blk.mlp.w1.weight = as_param(b["w1"], (2 * inter, dim))
+            blk.mlp.w2.weight = as_param(b["w2"], (dim, inter))
+        vit.norm.weight = as_param(vit_norm, (dim,))
+
+        aligner = vision_module.Aligner(args)
+        aligner.w1.weight = as_param(al_w1, (llm_dim, in_dim))
+        aligner.w1.bias = as_param(al_w1_b, (llm_dim,))
+        aligner.w2.weight = as_param(al_w2, (llm_dim, llm_dim))
+        aligner.w2.bias = as_param(al_w2_b, (llm_dim,))
+
+        patches_t = torch.tensor(patches, dtype=torch.float32).reshape(n_patch, patch_flat)
+        with torch.no_grad():
+            vit_rows = vit(patches_t, n_h, n_w)
+            aligned = aligner(vit_rows, n_h, n_w)
+        return {
+            "vit_rows": flatten_nested(tensor_to_nested_list(vit_rows)),
+            "aligned": flatten_nested(tensor_to_nested_list(aligned)),
+        }
+
+    def fallback():
+        return {"vit_rows": [], "aligned": []}
+
+    result, call_status = call_upstream_or_fallback(
+        import_status, "EncodeImage", build_and_run, fallback
+    )
+
+    def block_params(b):
+        return {
+            "wqkv": fixture_param([3 * dim, dim], b["wqkv"]),
+            "wqkv_b": fixture_param([3 * dim], b["wqkv_b"]),
+            "wo": fixture_param([dim, dim], b["wo"]),
+            "wo_b": fixture_param([dim], b["wo_b"]),
+            "norm1": fixture_param([dim], b["norm1"]),
+            "norm2": fixture_param([dim], b["norm2"]),
+            "w1": fixture_param([2 * inter, dim], b["w1"]),
+            "w2": fixture_param([dim, inter], b["w2"]),
+        }
+
+    write_json(
+        out_dir / "encode_image_fixture.json",
+        {
+            **source_meta(
+                "ViT.forward+Aligner.forward",
+                "vision.py ViT/Aligner (encode_image) around lines 86-119",
+                source_file="ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/vision.py",
+            ),
+            "upstream_import_status": import_status,
+            "upstream_call_status": call_status,
+            "absolute_tolerance": 2e-5,
+            "input": {
+                "dim": dim,
+                "n_heads": n_heads,
+                "head_dim": head_dim,
+                "rope_dim": rope_dim,
+                "inter": inter,
+                "patch": patch,
+                "patch_flat": patch_flat,
+                "theta": theta,
+                "n_layers": n_layers,
+                "downsample_ratio": downsample,
+                "llm_dim": llm_dim,
+                "in_dim": in_dim,
+                "n_h": n_h,
+                "n_w": n_w,
+                "n_patch": n_patch,
+                "patches": round_list(patches),
+            },
+            "parameters": {
+                "proj_w": fixture_param([dim, patch_flat], proj_w),
+                "proj_b": fixture_param([dim], proj_b),
+                "vit_norm": fixture_param([dim], vit_norm),
+                "blocks": [block_params(b) for b in blocks],
+                "al_w1": fixture_param([llm_dim, in_dim], al_w1),
+                "al_w1_b": fixture_param([llm_dim], al_w1_b),
+                "al_w2": fixture_param([llm_dim, llm_dim], al_w2),
+                "al_w2_b": fixture_param([llm_dim], al_w2_b),
+            },
+            "expected": {
+                "vit_rows": round_list(result["vit_rows"]),
+                "aligned": round_list(result["aligned"]),
+            },
+        },
+    )
+
+
+def generate_vl_gate(out_dir: Path, module: object | None, import_status: str) -> None:
+    """Image-mask VL routing bias: bias_vl steers selection on image tokens only."""
+    tokens, dim, experts, topk = 3, 4, 5, 2
+    gate_temp = 1.2
+    norm_topk_prob = True
+    route_scale = 1.5
+    x = [((i % 9) - 4) / 3.0 for i in range(tokens * dim)]
+    gate_weight = [((i % 11) - 5) / 4.0 for i in range(experts * dim)]
+    correction_bias = [0.0, 0.0, 0.2, -0.1, 0.05]
+    # bias_vl deliberately favours a different expert so image tokens diverge.
+    bias_vl = [0.0, 5.0, -5.0, 0.0, 0.0]
+    # token 0 text, tokens 1 and 2 inside an image span.
+    image_mask = [False, True, True]
+
+    def upstream_gate():
+        import torch
+
+        assert module is not None
+        gate = module.Gate.__new__(module.Gate)
+        module.nn.Module.__init__(gate)
+        gate.dim = dim
+        gate.topk = topk
+        gate.score_func = "sqrtsoftplus"
+        gate.gate_temp = gate_temp
+        gate.norm_topk_prob = norm_topk_prob
+        gate.route_scale = route_scale
+        gate.weight = torch.nn.Parameter(
+            torch.tensor(gate_weight, dtype=torch.float32).reshape(experts, dim)
+        )
+        gate.bias = torch.nn.Parameter(torch.tensor(correction_bias, dtype=torch.float32))
+        gate.bias_vl = torch.nn.Parameter(torch.tensor(bias_vl, dtype=torch.float32))
+
+        mask = torch.tensor(image_mask, dtype=torch.bool)
+        x_t = torch.tensor(x, dtype=torch.float32).reshape(tokens, dim)
+        weights, indices = gate.forward(x_t, mask)
+        scores = (
+            torch.nn.functional.softplus(module.linear(x_t, gate.weight) / gate_temp).sqrt()
+        )
+        return scores.flatten().tolist(), weights.flatten().tolist(), indices.flatten().tolist()
+
+    if import_status != "path-import-ok" or module is None:
+        raise SystemExit(f"vl-gate fixtures require upstream model.py, got {import_status}")
+
+    (scores, weights, indices), call_status = call_upstream_or_fallback(
+        import_status,
+        "Gate.forward(image_mask)",
+        upstream_gate,
+        lambda: (_ for _ in ()).throw(RuntimeError("unreachable")),
+    )
+
+    write_json(
+        out_dir / "vl_gate_fixture.json",
+        {
+            **source_meta("Gate.forward(image_mask)", "Gate.forward(image_mask) around lines 809-827"),
+            "upstream_import_status": import_status,
+            "upstream_call_status": call_status,
+            "absolute_tolerance": 1e-5,
+            "input": {
+                "shape": {"tokens": tokens, "dim": dim, "experts": experts},
+                "x": round_list(x),
+                "gate_weight": round_list(gate_weight),
+                "gate_temp": gate_temp,
+                "correction_bias": round_list(correction_bias),
+                "bias_vl": round_list(bias_vl),
+                "image_mask": image_mask,
+                "topk": topk,
+                "norm_topk_prob": norm_topk_prob,
+                "route_scale": route_scale,
+            },
+            "expected": {
+                "scores": round_list(scores),
+                "indices": indices,
+                "weights": round_list(weights),
+            },
+        },
+    )
+
+
+def generate_merge(out_dir: Path, module: object | None, import_status: str) -> None:
+    """merge_image_embeddings span-overwrite correctness for one image."""
+    # One batch row, one image; 2x2 aligner grid -> types layout has 4 IMAGE, 2
+    # IMAGE_NEW_LINE, IMAGE_START/IMAGE_END. Sequence has text on either side.
+    b, dim = 1, 4
+    n_llm_h, n_llm_w = 2, 2
+    # token_types over the image span (reading order): START, (IMAGE*w, NEWLINE)*h, END.
+    IMAGE_START, IMAGE, IMAGE_NEW_LINE, IMAGE_END = 0, 1, 2, 3
+    types = [IMAGE_START]
+    for _ in range(n_llm_h):
+        types += [IMAGE] * n_llm_w + [IMAGE_NEW_LINE]
+    types.append(IMAGE_END)
+    span_len = len(types)
+    start = 2  # two text tokens before the image span
+    s = start + span_len + 1  # one trailing text token
+    n_image = n_llm_h * n_llm_w
+
+    embed = [((i % 13) - 6) / 5.0 for i in range(b * s * dim)]
+    aligner_rows = [((i % 7) - 3) / 2.0 for i in range(n_image * dim)]
+    image_start = [1.0, 2.0, 3.0, 4.0]
+    image_end = [-1.0, -2.0, -3.0, -4.0]
+    image_newline = [0.5, -0.5, 0.5, -0.5]
+
+    def upstream_merge():
+        import torch
+
+        assert module is not None
+        transformer = module.Transformer.__new__(module.Transformer)
+        module.nn.Module.__init__(transformer)
+        transformer.image_start = torch.nn.Parameter(torch.tensor(image_start, dtype=torch.float32))
+        transformer.image_end = torch.nn.Parameter(torch.tensor(image_end, dtype=torch.float32))
+        transformer.image_newline = torch.nn.Parameter(
+            torch.tensor(image_newline, dtype=torch.float32)
+        )
+
+        class _Img:
+            pass
+
+        img = _Img()
+        img.start = start
+        img.types = torch.tensor(types, dtype=torch.long)
+
+        # Stub encode_image to return the fixed aligner rows (isolate the merge).
+        rows = torch.tensor(aligner_rows, dtype=torch.float32).reshape(n_image, dim)
+        transformer.encode_image = lambda *_args, **_kw: rows
+        img.patches = torch.zeros(1)
+        img.n_vit_h = n_llm_h
+        img.n_vit_w = n_llm_w
+
+        h = torch.tensor(embed, dtype=torch.float32).reshape(b, s, dim)
+        transformer.merge_image_embeddings([[img]], h)
+        return h.flatten().tolist()
+
+    if import_status != "path-import-ok" or module is None:
+        raise SystemExit(f"merge fixtures require upstream model.py, got {import_status}")
+
+    merged, call_status = call_upstream_or_fallback(
+        import_status,
+        "Transformer.merge_image_embeddings",
+        upstream_merge,
+        lambda: (_ for _ in ()).throw(RuntimeError("unreachable")),
+    )
+
+    write_json(
+        out_dir / "merge_image_embeddings_fixture.json",
+        {
+            **source_meta(
+                "Transformer.merge_image_embeddings",
+                "Transformer.merge_image_embeddings around lines 1228-1239",
+            ),
+            "upstream_import_status": import_status,
+            "upstream_call_status": call_status,
+            "absolute_tolerance": 0.0,
+            "input": {
+                "b": b,
+                "s": s,
+                "dim": dim,
+                "start": start,
+                "n_image": n_image,
+                "token_types": types,
+                "embed": round_list(embed),
+                "aligner_rows": round_list(aligner_rows),
+                "image_start": round_list(image_start),
+                "image_end": round_list(image_end),
+                "image_newline": round_list(image_newline),
+            },
+            "expected": {"merged": round_list(merged)},
+        },
+    )
+
+
+def generate_vl_prompt(out_dir: Path, repo_root: Path) -> None:
+    """Emit a multimodal prompt-expansion fixture by calling upstream
+    `prepare_vl_inputs`.
+
+    The full VL pipeline (`prepare_vl_inputs`) needs a tokenizer and PIL image
+    decode. To stay hermetic and avoid real image bytes, we:
+
+    * stub the tokenizer with a tiny deterministic encoder that maps the image
+      placeholder to `image_token_id` and any other text to a fixed id stream,
+    * monkeypatch `image_processor.load_image` to return tiny deterministic
+      patches plus a fixed `(n_vit_h, n_vit_w, n_llm_h, n_llm_w)` grid,
+
+    so the fixture exercises the real placeholder->span expansion,
+    `image_token_types` layout, and per-image `(start, grid)` bookkeeping — which
+    is exactly what the Rust CLI's `--token-types`/`--image-patches` path mirrors.
+    """
+    image_py = (
+        repo_root
+        / "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/image_processor.py"
+    )
+    if not image_py.exists():
+        raise SystemExit(f"missing mirrored upstream source: {image_py}")
+    module, import_status = import_upstream_image_processor_by_path(image_py)
+    if import_status != "path-import-ok" or module is None:
+        raise SystemExit(
+            f"vl-prompt fixtures require upstream image_processor.py import, got {import_status}"
+        )
+
+    image_token_id = 4
+    # Tiny deterministic grid for the single image: 2x2 aligner cells.
+    n_vit_h, n_vit_w, n_llm_h, n_llm_w = 2, 2, 2, 2
+    vd = 8  # tiny vision_dim (mirrors the loader fixture geometry)
+    patch_flat = 3  # 3 * patch_size^2 with patch_size=1
+    n_patch = n_vit_h * n_vit_w
+
+    class _Args:
+        vision_enabled = True
+        image_token_id = 4
+
+    class _Tokenizer:
+        """Deterministic encoder: the marker string maps to `image_token_id`,
+        every other whitespace-separated word maps to a stable small id."""
+
+        unk_token_id = 0
+
+        def convert_tokens_to_ids(self, tok):
+            return None  # skip the placeholder cross-check
+
+        def encode(self, prompt):
+            ids = []
+            for word in prompt.split():
+                if word == "<image>":
+                    ids.append(image_token_id)
+                else:
+                    # Deterministic across runs (Python hashes are salted):
+                    # sum of byte codes, mapped into {1,2,3}.
+                    ids.append(1 + (sum(word.encode("utf-8")) % 3))
+            return ids
+
+    # Deterministic patches + grid: isolate span expansion from PIL/torch decode.
+    patches = [((i % 5) - 2) / 2.0 for i in range(n_patch * patch_flat)]
+
+    def fake_load_image(record, args):
+        import torch
+
+        t = torch.tensor(patches, dtype=torch.float32).reshape(n_patch, patch_flat)
+        return t, n_vit_h, n_vit_w, n_llm_h, n_llm_w
+
+    def upstream_prepare():
+        import torch  # noqa: F401  (module.torch is the stub; real torch here)
+
+        # prepare_vl_inputs does `from encoding import IMAGE_PLACEHOLDER`; expose
+        # the real spelling from the mirrored upstream encoding module without
+        # importing its heavy transitive deps.
+        encoding_py = (
+            repo_root
+            / "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/encoding/encoding.py"
+        )
+        placeholder = "<｜deepseek_image｜>"
+        for line in encoding_py.read_text().splitlines():
+            if line.startswith("IMAGE_PLACEHOLDER ="):
+                placeholder = line.split("=", 1)[1].strip().strip('"').strip("'")
+                break
+        encoding_stub = types.ModuleType("encoding")
+        encoding_stub.IMAGE_PLACEHOLDER = placeholder
+        saved_encoding = sys.modules.get("encoding")
+        sys.modules["encoding"] = encoding_stub
+
+        # The module was imported with a stub `torch` (its top-level import), so
+        # `image_token_types` would build a Python list instead of a Tensor.
+        # Bind the real torch onto the module so span expansion runs for real.
+        saved_torch = getattr(module, "torch", None)
+        module.torch = torch
+        saved = module.load_image
+        module.load_image = fake_load_image
+        try:
+            prompt = "describe <image> please"
+            tokens, token_types, image_inputs = module.prepare_vl_inputs(
+                prompt, [{"data": b"x"}], _Tokenizer(), _Args()
+            )
+            imgs = []
+            for img in image_inputs or []:
+                span_types = (
+                    img.types.tolist() if hasattr(img.types, "tolist") else list(img.types)
+                )
+                imgs.append(
+                    {
+                        "start": int(img.start),
+                        "n_vit_h": int(img.n_vit_h),
+                        "n_vit_w": int(img.n_vit_w),
+                        "n_llm_h": n_llm_h,
+                        "n_llm_w": n_llm_w,
+                        "token_types": [int(x) for x in span_types],
+                    }
+                )
+            return {
+                "tokens": [int(x) for x in tokens],
+                "token_types": [int(x) for x in token_types],
+                "images": imgs,
+            }
+        finally:
+            module.load_image = saved
+            if saved_torch is None:
+                if hasattr(module, "torch"):
+                    del module.torch
+            else:
+                module.torch = saved_torch
+            if saved_encoding is None:
+                sys.modules.pop("encoding", None)
+            else:
+                sys.modules["encoding"] = saved_encoding
+
+    # Real torch is needed for the stubbed load_image tensor; if unavailable the
+    # fixture cannot be produced (no meaningful fallback for span expansion).
+    try:
+        import torch  # noqa: F401
+    except Exception as err:  # noqa: BLE001
+        raise SystemExit(
+            f"vl-prompt fixtures require torch for deterministic patches, got {type(err).__name__}: {err}"
+        )
+
+    result, call_status = call_upstream_or_fallback(
+        import_status,
+        "prepare_vl_inputs",
+        upstream_prepare,
+        lambda: (_ for _ in ()).throw(RuntimeError("unreachable")),
+    )
+
+    write_json(
+        out_dir / "prompt_vl_fixture.json",
+        {
+            **source_meta(
+                "prepare_vl_inputs",
+                "prepare_vl_inputs around lines 140-173",
+                source_file="ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/image_processor.py",
+            ),
+            "upstream_import_status": import_status,
+            "upstream_call_status": call_status,
+            "absolute_tolerance": 0.0,
+            "input": {
+                "prompt": "describe <image> please",
+                "image_token_id": image_token_id,
+                "n_vit_h": n_vit_h,
+                "n_vit_w": n_vit_w,
+                "n_llm_h": n_llm_h,
+                "n_llm_w": n_llm_w,
+                "vision_dim": vd,
+                "patch_flat": patch_flat,
+                "patches": round_list(patches),
+            },
+            "expected": result,
+        },
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", type=Path, default=Path("."))
@@ -2407,6 +3354,70 @@ def main() -> None:
     if "prompt" in families:
         generate_prompt(out_dir, root)
         families.discard("prompt")
+        if not families:
+            return
+
+    # VL-prompt fixtures need only the pure-Python image_processor.py, not model.py.
+    if "vl-prompt" in families:
+        generate_vl_prompt(out_dir, root)
+        families.discard("vl-prompt")
+        if not families:
+            return
+
+    # Image-grid fixtures need only the pure-Python grid math from
+    # image_processor.py, not model.py.
+    if "image-grid" in families:
+        image_py = (
+            root
+            / "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/image_processor.py"
+        )
+        if not image_py.exists():
+            raise SystemExit(f"missing mirrored upstream source: {image_py}")
+        image_module, image_status = import_upstream_image_processor_by_path(image_py)
+        generate_image_grid(out_dir, image_module, image_status)
+        families.discard("image-grid")
+        if not families:
+            return
+
+    # Vision ViT fixtures need only the pure-torch vision.py, not model.py.
+    if "vision" in families:
+        vision_py = (
+            root
+            / "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/vision.py"
+        )
+        if not vision_py.exists():
+            raise SystemExit(f"missing mirrored upstream source: {vision_py}")
+        vision_module, vision_status = import_upstream_vision_by_path(vision_py)
+        generate_vision(out_dir, vision_module, vision_status)
+        families.discard("vision")
+        if not families:
+            return
+
+    # Aligner fixtures need only the pure-torch vision.py, not model.py.
+    if "aligner" in families:
+        vision_py = (
+            root
+            / "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/vision.py"
+        )
+        if not vision_py.exists():
+            raise SystemExit(f"missing mirrored upstream source: {vision_py}")
+        vision_module, vision_status = import_upstream_vision_by_path(vision_py)
+        generate_aligner(out_dir, vision_module, vision_status)
+        families.discard("aligner")
+        if not families:
+            return
+
+    # encode_image fixtures chain ViT + Aligner from the pure-torch vision.py.
+    if "encode-image" in families:
+        vision_py = (
+            root
+            / "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/vision.py"
+        )
+        if not vision_py.exists():
+            raise SystemExit(f"missing mirrored upstream source: {vision_py}")
+        vision_module, vision_status = import_upstream_vision_by_path(vision_py)
+        generate_encode_image(out_dir, vision_module, vision_status)
+        families.discard("encode-image")
         if not families:
             return
 
@@ -2433,6 +3444,10 @@ def main() -> None:
         generate_block(out_dir, module, import_status)
     if "tiny-model" in families:
         generate_tiny_model(out_dir, module, import_status)
+    if "vl-gate" in families:
+        generate_vl_gate(out_dir, module, import_status)
+    if "merge" in families:
+        generate_merge(out_dir, module, import_status)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,83 @@
+#+TITLE: ViT patch embedding, 2D RoPE, and block fixtures
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 14-image-grid-planning-fixtures
+#+PARENT: ../spec.org
+
+* Context
+
+The vision tower is a full-bidirectional-attention ViT over one image with 2D
+RoPE. This ticket implements the ViT math and pins op/layer/block fixtures
+against upstream =vision.py=. The 2D RoPE is half-split and MUST NOT reuse the
+text adjacent-pair RoPE.
+
+Read first:
+
+- =../spec.org= (ViT)
+- =../upstream/inference/vision.py= (=get_vision_cos_sin=, =apply_rotary=,
+  =PatchEmbed=, =Attention=, =MLP=, =Block=, =ViT=, =RMSNorm=)
+
+* Requirements
+
+- Create =ferric_continuum/tnsr/src/deepseek_v41/vision.rs= (ViT pieces) holding:
+  - =vision_cos_sin(n_h, n_w, rope_dim, theta) -> (Vec<f32>, Vec<f32>)= matching
+    =get_vision_cos_sin= (inv_freq over =arange(0,dim,2)/dim=, freqs stacked from
+    (hpos,wpos), flattened; cos/sin per patch).
+  - =apply_rotary_half_split(x, cos, sin, n, n_heads, head_dim)= implementing the
+    =chunk(2)= half-split rotation.
+  - =VisionPatchEmbed { proj_w, proj_b }= = Linear over flattened =3*patch^2=.
+  - =VisionAttention { wqkv, wqkv_b, wo, wo_b, n_heads, head_dim }= = full
+    bidirectional SDPA (softmax over all patches, no causal mask), RoPE on q,k.
+  - =VisionMlp { w1, w2 }= = chunked SwiGLU (=silu(gate)*up=), no bias.
+  - =VisionBlock { norm1, attn, norm2, mlp }= = pre-norm residual pair with
+    vision RMSNorm.
+  - =VisionTower { patch_embed, blocks, norm, rope_dim, rope_theta }= with a
+    =forward(patches, n_h, n_w) -> [n_patch, dim]=.
+- Vision RMSNorm eps is =1e-6= (upstream default), distinct from the text
+  =1e-20=. Reuse =crate::ops= where the math is genuinely identical
+  (=linear=, =silu=); implement the half-split RoPE and full SDPA locally.
+- Add fixture families =vision-rope=, =vision-attn=, =vision-block= to
+  =deepseek_v41_fixture_gen.py=, instantiating the upstream =vision.py= classes
+  with tiny deterministic weights (monkeypatched kernels not needed — vision.py
+  is pure torch). Emit =vision_rope_fixture.json=, =vision_attn_fixture.json=,
+  =vision_block_fixture.json= with inputs, weights, expected outputs, tolerance,
+  and source hints.
+- Add op/layer/block tests to the vision test target, wired into BUILD data.
+
+* Out of scope
+
+- No aligner downsample (ticket 16).
+- No checkpoint loading (ticket 18).
+
+* Verification
+
+- =python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family vision-rope,vision-attn,vision-block=
+- Bazel vision test target passes.
+
+* Comments
+
+- Full bidirectional attention: every patch attends to every patch; scale is
+  =head_dim^-0.5=. Keep the SDPA numerically stable (subtract row max before
+  exp) to match torch SDPA within tolerance.
+
+* Resolution
+
+- Added =ferric_continuum/tnsr/src/deepseek_v41/vision.rs= with =vision_cos_sin=
+  (half-split 2D RoPE tables, hpos/wpos inv_freq halves), =apply_rotary_half_split=
+  (=chunk(2)= rotation, broadcast across heads), =vision_rms_norm= (eps
+  =1e-6=), =vision_linear= (torch =[out,in]= layout with optional bias),
+  =vision_patch_embed=, =vision_attention= (full bidirectional SDPA, RoPE q/k,
+  row-max-stable softmax, scale =head_dim^-0.5=), =vision_mlp= (chunked SwiGLU,
+  no bias), and =vision_block= (pre-norm residual pair). Registered in =mod.rs=
+  and the =tnsr= srcs list.
+- Added =generate_vision= + =--family vision= to =deepseek_v41_fixture_gen.py=,
+  importing pure-torch =vision.py= by path (no kernel stubs). Instantiates
+  =PatchEmbed/Attention/MLP/RMSNorm= with deterministic weights (=vision_dim=8=,
+  =n_heads=2=, =head_dim=4=, =rope_dim=2=, =n_h=2=, =n_w=3=) and emits
+  =vision_block_fixture.json= with cos/sin, embedded, rope_out, attn+mlp block
+  output; =upstream_call_status called-upstream:ViT=.
+- Added =vision_block_matches_upstream_vit= to =tests/deepseek_v41_model_test.rs=
+  (asserts upstream execution then cos/sin, embedded, rope_out, and full block
+  output within =2e-5=) and wired the fixture into =deepseek_v41_model_tests=.
+- Evidence: =python3 ... --family vision= -> =called-upstream:ViT=;
+  =bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_model_tests= -> PASSED.

@@ -1,0 +1,77 @@
+{
+  "absolute_tolerance": 0.0,
+  "expected": {
+    "images": [
+      {
+        "n_llm_h": 2,
+        "n_llm_w": 2,
+        "n_vit_h": 2,
+        "n_vit_w": 2,
+        "start": 1,
+        "token_types": [
+          0,
+          1,
+          1,
+          2,
+          1,
+          1,
+          2,
+          3
+        ]
+      }
+    ],
+    "token_types": [
+      -1,
+      0,
+      1,
+      1,
+      2,
+      1,
+      1,
+      2,
+      3,
+      -1
+    ],
+    "tokens": [
+      3,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      2
+    ]
+  },
+  "input": {
+    "image_token_id": 4,
+    "n_llm_h": 2,
+    "n_llm_w": 2,
+    "n_vit_h": 2,
+    "n_vit_w": 2,
+    "patch_flat": 3,
+    "patches": [
+      -1.0,
+      -0.5,
+      0.0,
+      0.5,
+      1.0,
+      -1.0,
+      -0.5,
+      0.0,
+      0.5,
+      1.0,
+      -1.0,
+      -0.5
+    ],
+    "prompt": "describe <image> please",
+    "vision_dim": 8
+  },
+  "line_hint": "prepare_vl_inputs around lines 140-173",
+  "source_file": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/image_processor.py",
+  "upstream_call_status": "called-upstream:prepare_vl_inputs",
+  "upstream_function": "prepare_vl_inputs",
+  "upstream_import_status": "path-import-ok"
+}

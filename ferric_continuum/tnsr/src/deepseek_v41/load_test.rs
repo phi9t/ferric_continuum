@@ -520,3 +520,208 @@ fn wo_a_grouped_layout_transposes_inner_axes() {
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+// -- W2-06: vision checkpoint loader ---------------------------------------
+
+/// A vision-enabled variant of `TINY_CONFIG_JSON`. Reuses the text geometry
+/// (dim=4) and adds a tiny 1-layer ViT: vision_dim=8, n_heads=2 (head_dim=4,
+/// rope_dim=2, which `vision_cos_sin` requires to be even), inter=3,
+/// patch_size=1 (patch_flat=3), downsample_ratio=1, llm_dim=dim=4.
+fn tiny_vision_config_json() -> String {
+    TINY_CONFIG_JSON
+        .replace("\"vision_n_layers\": 0", "\"vision_n_layers\": 1")
+        .replace("\"vision_dim\": 0", "\"vision_dim\": 8")
+        .replace("\"vision_n_heads\": 0", "\"vision_n_heads\": 2")
+        .replace("\"vision_inter_dim\": 0", "\"vision_inter_dim\": 3")
+        .replace("\"vision_patch_size\": 0", "\"vision_patch_size\": 1")
+        .replace(
+            "\"vision_rope_theta\": 0.0",
+            "\"vision_rope_theta\": 10000.0",
+        )
+        .replace(
+            "\"vision_downsample_ratio\": 0",
+            "\"vision_downsample_ratio\": 1",
+        )
+        .replace("\"vision_max_n_token\": 0", "\"vision_max_n_token\": 16")
+        .replace("\"vision_min_pixels\": 0", "\"vision_min_pixels\": 1")
+}
+
+/// Append the vision tower + aligner + image delimiter + per-layer `bias_vl`
+/// tensors to a base tiny tensor map. vision_dim=8, n_heads=2, inter=3,
+/// patch_flat=3, downsample_ratio=1 => aligner in_dim = 8*1*1 = 8, llm_dim=4.
+fn add_vision_tensors(t: &mut Vec<(String, FixtureTensor)>) {
+    let vd = 8;
+    let inter = 3;
+    let patch_flat = 3;
+    let llm_dim = 4;
+    let in_dim = vd * 1 * 1;
+    // patch embed: proj.weight [vision_dim, patch_flat], proj.bias [vision_dim]
+    t.push((
+        "vision.patch_embed.proj.weight".into(),
+        FixtureTensor::f32_zeros(&[vd, patch_flat]),
+    ));
+    t.push((
+        "vision.patch_embed.proj.bias".into(),
+        FixtureTensor::f32_zeros(&[vd]),
+    ));
+    // one block
+    t.push((
+        "vision.blocks.0.norm1.weight".into(),
+        FixtureTensor::f32_zeros(&[vd]),
+    ));
+    t.push((
+        "vision.blocks.0.attn.wqkv.weight".into(),
+        FixtureTensor::f32_zeros(&[3 * vd, vd]),
+    ));
+    t.push((
+        "vision.blocks.0.attn.wqkv.bias".into(),
+        FixtureTensor::f32_zeros(&[3 * vd]),
+    ));
+    t.push((
+        "vision.blocks.0.attn.wo.weight".into(),
+        FixtureTensor::f32_zeros(&[vd, vd]),
+    ));
+    t.push((
+        "vision.blocks.0.attn.wo.bias".into(),
+        FixtureTensor::f32_zeros(&[vd]),
+    ));
+    t.push((
+        "vision.blocks.0.norm2.weight".into(),
+        FixtureTensor::f32_zeros(&[vd]),
+    ));
+    t.push((
+        "vision.blocks.0.mlp.w1.weight".into(),
+        FixtureTensor::f32_zeros(&[2 * inter, vd]),
+    ));
+    t.push((
+        "vision.blocks.0.mlp.w2.weight".into(),
+        FixtureTensor::f32_zeros(&[vd, inter]),
+    ));
+    t.push(("vision.norm.weight".into(), FixtureTensor::f32_zeros(&[vd])));
+    // aligner
+    t.push((
+        "aligner.w1.weight".into(),
+        FixtureTensor::f32_zeros(&[llm_dim, in_dim]),
+    ));
+    t.push((
+        "aligner.w1.bias".into(),
+        FixtureTensor::f32_zeros(&[llm_dim]),
+    ));
+    t.push((
+        "aligner.w2.weight".into(),
+        FixtureTensor::f32_zeros(&[llm_dim, llm_dim]),
+    ));
+    t.push((
+        "aligner.w2.bias".into(),
+        FixtureTensor::f32_zeros(&[llm_dim]),
+    ));
+    // image delimiters [dim]
+    t.push(("image_start".into(), FixtureTensor::f32_zeros(&[4])));
+    t.push(("image_end".into(), FixtureTensor::f32_zeros(&[4])));
+    t.push(("image_newline".into(), FixtureTensor::f32_zeros(&[4])));
+    // per-layer MoE vision routing bias [experts]
+    t.push((
+        "layers.0.ffn.gate.bias_vl".into(),
+        FixtureTensor::f32_zeros(&[2]),
+    ));
+}
+
+#[test]
+fn tiny_multimodal_checkpoint_loads() {
+    let dir = unique_tmp_dir("mm-ok");
+    std::fs::write(dir.join("config.json"), tiny_vision_config_json()).unwrap();
+    let mut tensors = tiny_tensor_map();
+    add_vision_tensors(&mut tensors);
+    write_safetensors(&dir, "model.safetensors", tensors);
+    let model = load_multimodal_model(&dir).expect("multimodal checkpoint should load");
+    assert_eq!(model.layers.len(), 1);
+    let vision = model.vision.as_ref().expect("vision tower loaded");
+    assert_eq!(vision.vision_dim, 8);
+    assert_eq!(vision.n_heads, 2);
+    assert_eq!(vision.rope_dim, 2);
+    assert_eq!(vision.inter, 3);
+    assert_eq!(vision.patch_flat, 3);
+    assert_eq!(vision.downsample_ratio, 1);
+    assert_eq!(vision.llm_dim, 4);
+    assert_eq!(vision.blocks.len(), 1);
+    assert!(model.image_start.is_some());
+    assert!(model.image_end.is_some());
+    assert!(model.image_newline.is_some());
+    // Per-layer vision routing bias is populated.
+    assert!(model.layers[0].ffn.gate.bias_vl.is_some());
+    // The owned vision model can encode a 1x1 patch grid.
+    let out = vision.encode_image(&[0.0, 0.0, 0.0], 1, 1);
+    assert_eq!(out.len(), 4); // one aligner cell -> llm_dim
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn multimodal_wrong_vision_shape_returns_err() {
+    let dir = unique_tmp_dir("mm-bad-shape");
+    std::fs::write(dir.join("config.json"), tiny_vision_config_json()).unwrap();
+    let mut tensors = tiny_tensor_map();
+    add_vision_tensors(&mut tensors);
+    // wqkv expected [3*8, 8] = [24, 8]; give [24, 9].
+    replace(
+        &mut tensors,
+        "vision.blocks.0.attn.wqkv.weight",
+        FixtureTensor::f32_zeros(&[24, 9]),
+    );
+    write_safetensors(&dir, "model.safetensors", tensors);
+    let err = match load_multimodal_model(&dir) {
+        Ok(_) => panic!("expected load to fail"),
+        Err(e) => e,
+    };
+    assert!(
+        err.contains("vision.blocks.0.attn.wqkv.weight"),
+        "err: {err}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn multimodal_missing_image_start_returns_err() {
+    let dir = unique_tmp_dir("mm-missing-delim");
+    std::fs::write(dir.join("config.json"), tiny_vision_config_json()).unwrap();
+    let mut tensors = tiny_tensor_map();
+    add_vision_tensors(&mut tensors);
+    remove(&mut tensors, "image_start");
+    write_safetensors(&dir, "model.safetensors", tensors);
+    let err = match load_multimodal_model(&dir) {
+        Ok(_) => panic!("expected load to fail"),
+        Err(e) => e,
+    };
+    assert!(err.contains("image_start"), "err: {err}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn multimodal_requires_vision_enabled_config() {
+    // A text-only config passed to load_multimodal_model must error before any
+    // tensor read.
+    let dir = unique_tmp_dir("mm-text-cfg");
+    std::fs::write(dir.join("config.json"), TINY_CONFIG_JSON).unwrap();
+    write_safetensors(&dir, "model.safetensors", tiny_tensor_map());
+    let err = match load_multimodal_model(&dir) {
+        Ok(_) => panic!("expected load to fail"),
+        Err(e) => e,
+    };
+    assert!(err.contains("vision-enabled"), "err: {err}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn text_only_load_ignores_vision_tensors_present() {
+    // Even when a vision-enabled tensor set is present, a text-only load must
+    // succeed and leave the vision surfaces unpopulated.
+    let dir = unique_tmp_dir("text-ignores-vision");
+    std::fs::write(dir.join("config.json"), tiny_vision_config_json()).unwrap();
+    let mut tensors = tiny_tensor_map();
+    add_vision_tensors(&mut tensors);
+    write_safetensors(&dir, "model.safetensors", tensors);
+    let model = load_text_model(&dir).expect("text-only load ignores vision");
+    assert!(model.vision.is_none());
+    assert!(model.image_start.is_none());
+    assert!(model.layers[0].ffn.gate.bias_vl.is_none());
+    std::fs::remove_dir_all(dir).unwrap();
+}
