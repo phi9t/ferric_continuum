@@ -57,7 +57,12 @@ build:hardened --copt=-fstack-protector-strong
 build:hardened --copt=-fstack-clash-protection
 build:hardened --copt=-U_FORTIFY_SOURCE
 build:hardened --copt=-D_FORTIFY_SOURCE=2
-build:hardened --copt=-fPIE
+# Use -fPIC (not -fPIE): these copts apply to cc_library objects, some of which
+# Bazel links into shared libraries (.so). -fPIE-compiled objects cannot be
+# linked into a shared library (ld.lld: relocation R_X86_64_PC32 ... recompile
+# with -fPIC). -fPIC works for both shared objects and PIE executables when
+# combined with the -pie linkopt below.
+build:hardened --copt=-fPIC
 build:hardened --copt=-Wformat
 build:hardened --copt=-Wformat-security
 build:hardened --copt=-Werror=format-security
