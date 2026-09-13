@@ -48,23 +48,9 @@ jobs:
           libstdc++-12-dev \
           libncurses6 \
           libtinfo6
-        # The hermetic LLVM 18.1.8 toolchain binaries (clang, etc.) are linked
-        # against libtinfo.so.5, which Ubuntu 24.04 dropped. Provide a stable
-        # .so.5 compat symlink in the standard multiarch dir and refresh the
-        # loader cache BEFORE Bazel runs so sandboxed actions resolve it.
-        TINFO6="$(ldconfig -p | awk '/\blibtinfo\.so\.6\b/{print $NF; exit}')"
-        if [ -z "$TINFO6" ]; then
-          echo "::error::libtinfo.so.6 not found; cannot create .so.5 compat symlink"
-          exit 1
-        fi
-        sudo ln -sf "$TINFO6" /usr/lib/x86_64-linux-gnu/libtinfo.so.5
-        sudo ldconfig
-        # Verify the loader can now resolve libtinfo.so.5 (fail fast otherwise).
-        ldconfig -p | grep -q 'libtinfo\.so\.5' || {
-          echo "::error::libtinfo.so.5 still unresolved after symlink+ldconfig"
-          exit 1
-        }
-        echo "LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+        # Install the libtinfo.so.5 compat shim the hermetic LLVM toolchain
+        # needs on Ubuntu 24.04, and export LD_LIBRARY_PATH for Bazel actions.
+        bash .github/scripts/setup-libtinfo-shim.sh >> "$GITHUB_ENV"
 
     - name: Setup Bazel
       uses: bazel-contrib/setup-bazel@0.8.1
@@ -185,18 +171,7 @@ jobs:
           libstdc++-12-dev \
           libncurses6 \
           libtinfo6
-        TINFO6="$(ldconfig -p | awk '/\blibtinfo\.so\.6\b/{print $NF; exit}')"
-        if [ -z "$TINFO6" ]; then
-          echo "::error::libtinfo.so.6 not found; cannot create .so.5 compat symlink"
-          exit 1
-        fi
-        sudo ln -sf "$TINFO6" /usr/lib/x86_64-linux-gnu/libtinfo.so.5
-        sudo ldconfig
-        ldconfig -p | grep -q 'libtinfo\.so\.5' || {
-          echo "::error::libtinfo.so.5 still unresolved after symlink+ldconfig"
-          exit 1
-        }
-        echo "LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+        bash .github/scripts/setup-libtinfo-shim.sh >> "$GITHUB_ENV"
 
     - name: Setup Bazel
       uses: bazel-contrib/setup-bazel@0.8.1
