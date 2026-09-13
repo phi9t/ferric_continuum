@@ -179,18 +179,24 @@ build --@rules_cuda//cuda:enable=False
 # //...`, `bazel test //...`) never analyzes cuda_library rules (which fail
 # when `@rules_cuda//cuda:enable=False`). Explicit labels still honor this
 # filter; use `--config=cuda` (which replaces these filters below).
-build --build_tag_filters=-cuda
-test --test_tag_filters=-cuda
+build --build_tag_filters=-cuda,-requires-gpu
+# `local-only` marks heavyweight integration tests that need real assets not
+# present in CI (e.g. full DeepSeek-V4.1 weights) or an on-device GPU. They stay
+# runnable via an explicit label or `--test_tag_filters=` locally, but plain
+# `bazel test //...` and GitHub CI skip them. Keep this in sync with ci.yml
+# (CI_TEST_TAG_FILTERS) and tnsr/CONTEXT.md.
+test --test_tag_filters=-cuda,-requires-gpu,-local-only
 
 # Opt in with `--config=cuda`. Override the target arch list on the command
 # line, e.g. `--config=cuda --cuda_archs=compute_80:compute_80,sm_80`.
 #
 # Last --build_tag_filters / --test_tag_filters wins, so this replaces the
-# default `-cuda` exclusion and allows CUDA-tagged wildcards. Student `:grade`
-# targets keep the Bazel `manual` tag so wildcards skip them while explicit
-# labels still run (they fail until student.cu is filled).
+# default `-cuda` exclusion and allows CUDA-tagged wildcards. `local-only` stays
+# excluded even under CUDA: those tests need real assets, not just a GPU.
+# Student `:grade` targets keep the Bazel `manual` tag so wildcards skip them
+# while explicit labels still run (they fail until student.cu is filled).
 build:cuda --build_tag_filters=
-test:cuda --test_tag_filters=
+test:cuda --test_tag_filters=-local-only
 build:cuda --@rules_cuda//cuda:enable=True
 # Default to nvcc; switch to clang with `--cuda_compiler=clang`. nvcc uses the
 # registered LLVM clang as its host compiler (`-ccbin`). The LLVM toolchain is
