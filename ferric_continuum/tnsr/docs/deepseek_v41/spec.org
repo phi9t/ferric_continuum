@@ -136,12 +136,28 @@ resolution below):
 Not in scope for Wave 3: the outer generation/acceptance loop and real
 released-weight parity (SKIP until local weights exist).
 
-** Wave 4: performance and device TODO
+** Wave 4: performance and device (accounting + CUDA-gated parity)
 
-TODO after correctness:
+Wave 4 lands two seams and defers the rest as explicit TODOs:
+
+- *Cost accounting* (=src/deepseek_v41/cost.rs=): a symbolic
+  parameter/FLOP/activation-byte model derived directly from
+  =DeepSeekV41TextConfig=, so a caller can size the model and its
+  per-forward cost without loading a 510GB checkpoint. MoE sparsity is
+  reflected (only =num_experts_per_tok= routed experts run per token).
+- *CUDA-gated forward-agreement test*
+  (=tests/deepseek_v41_cuda_forward_test.rs=, tags =cuda=/=requires-gpu=):
+  builds one tiny DeepSeek V4.1 block + LM head and asserts that the same
+  =forward_token_ids= agrees to =1e-4= between the forced-CPU host path
+  (=FERRIC_TNSR_DEVICE=cpu=) and the default GPU path (=cuda_ffi= gemm/softmax).
+  This proves the DeepSeek forward composes correctly on top of the GPU
+  kernels — not just the standalone kernels in =cuda_forward_test.rs=.
+  GitHub CI excludes =cuda=/=requires-gpu= tags, so this runs only on a GPU
+  host under =--config=cuda=.
+
+TODO after this wave (explicitly deferred):
 
 - Native quantized kernels for FP8/FP4 instead of eager dequantized CPU math.
-- CUDA verifier integration under =--config=cuda=.
 - Tensor-parallel serving parity beyond static shard-layout validation.
 
 * Non-goals for Wave 1
@@ -564,6 +580,34 @@ Tiny DSpark parity: =output_ids= match, confidence max/mean-abs =0=,
 =cosine=1.0=, top5 5/5. Focused Bazel tests (=deepseek_v41_config_tests=,
 =_math_tests=, =_model_tests=, =lib_tests=) pass under
 =/data02/home/philip.yang/.local/bin/bazel-9.2.0=.
+
+** Wave 4 performance and device
+
+- [[file:issues/26-cost-accounting-seam.org][26-cost-accounting-seam]]
+- [[file:issues/27-cuda-gated-forward-parity.org][27-cuda-gated-forward-parity]]
+- [[file:issues/28-perf-device-closure.org][28-perf-device-closure]]
+
+*** Wave 4 resolution
+
+All Wave-4 tickets (26-28) are =done=. =src/deepseek_v41/cost.rs= computes
+symbolic per-block/whole-model parameter, forward-FLOP, and activation-byte
+counts from =DeepSeekV41TextConfig= (MoE sparsity reflected: only
+=num_experts_per_tok= routed experts costed per token); four unit tests in the
+=lib_tests= crate hand-check the tiny geometry and guard the release-shape
+order of magnitude. =tests/deepseek_v41_cuda_forward_test.rs= (tags
+=cuda=/=requires-gpu=) builds a tiny block + LM head and asserts
+=forward_token_ids= agrees to =max_abs_diff < 1e-4= between the forced-CPU host
+path and the default GPU path. Native FP8/FP4 kernels and tensor-parallel
+serving parity remain explicit deferred TODOs.
+
+Evidence: =tools/verify_deepseek_v41_perf_compat.sh= on the B200 GPU host →
+P0-comparator/L1-sources/L2-config/L3-ops/L4-model/L5-cost-accounting
+=PASS=, =L6-cuda-forward-parity= =PASS= (=max_abs_diff < 1e-4=);
+=L6-real-parity= =SKIP= (no local weights; never presented as PASS). On a
+CPU-only host =L6-cuda-forward-parity= is =SKIP= (no CUDA runtime). Focused
+Bazel tests (=deepseek_v41_config_tests=, =_math_tests=, =_model_tests=,
+=lib_tests=) pass under =/data02/home/philip.yang/.local/bin/bazel-9.2.0=; the
+GPU test passes under =--config=cuda=.
 
 * Acceptance
 

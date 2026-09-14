@@ -1,0 +1,66 @@
+#+TITLE: CUDA-gated DeepSeek V4.1 forward-agreement parity
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 26-cost-accounting-seam
+#+PARENT: ../spec.org
+
+* Context
+
+The standalone kernels (=cuda_forward_test.rs=) prove gemm/softmax agree on the
+GPU, but nothing proves the *DeepSeek V4.1 forward* composes correctly on top of
+them. Wave 4 adds a GPU-gated whole-model forward-agreement test: build a tiny
+DeepSeek V4.1 block + LM head, run the same =forward_token_ids= on the host and
+GPU paths, and assert the two logits rows agree to a tight tolerance. It is
+tagged =cuda=/=requires-gpu= so GitHub CI (which filters those tags) never runs
+it; it runs only on a GPU host under =--config=cuda=.
+
+Read first:
+
+- =../spec.org= (Wave 4, Verifier ladder)
+- =ferric_continuum/tnsr/tests/cuda_forward_test.rs= (existing kernel parity)
+- =ferric_continuum/tnsr/src/cuda_ffi.rs= (=use_cuda=, =FERRIC_TNSR_DEVICE=)
+- =ferric_continuum/tnsr/src/deepseek_v41/model.rs= (=forward_token_ids=)
+
+* Requirements
+
+- Add =tests/deepseek_v41_cuda_forward_test.rs=: a tiny in-test model
+  (=DeepSeekV41Block= + =DeepSeekV41TextModel=), run =forward_token_ids= once
+  with =FERRIC_TNSR_DEVICE=cpu= and once on the default GPU path, assert
+  =max_abs_diff < 1e-4=. Assert =use_cuda()= so a mis-invocation without
+  =--config=cuda= fails loudly rather than passing vacuously.
+- Add a =rust_test= target =deepseek_v41_cuda_forward_tests= tagged
+  =["cuda","requires-gpu"]= so it is excluded from GitHub CI's tag filters and
+  runs only on a GPU host under =--config=cuda=.
+- Fix the =.bazelrc= =build:cuda= config so =--config=cuda= works on the pinned
+  bazel-9.2.0 (the =--incompatible_sandbox_hermetic_tmp= flag is unrecognized on
+  Bazel 9.x; hermetic /tmp is the default there).
+
+* Out of scope
+
+- No native FP8/FP4 matmul kernels (the test uses f32 dequantized weights).
+- No tensor-parallel / multi-GPU parity.
+- No GitHub-CI GPU runner (the tag filters keep this host-only).
+
+* Verification
+
+- =bazel test --config=cuda //ferric_continuum/tnsr:deepseek_v41_cuda_forward_tests=
+  on a GPU host → PASS (=max_abs_diff < 1e-4=).
+- =rustfmt --check= on the test.
+
+* Resolution
+
+Added =tests/deepseek_v41_cuda_forward_test.rs= building a tiny DIM=4/N_HEADS=2/
+HEAD_DIM=2/Q_LORA=3/O_LORA=2/O_GROUPS=2/INTER=3/EXPERTS=2/HC_MULT=2/VOCAB=5
+DeepSeek V4.1 block + LM head; =forward_token_ids(&[1,3],1,2)= is run once with
+=FERRIC_TNSR_DEVICE=cpu= and once on the default GPU path and the two
+=[1,2,vocab]= logits rows are compared. The test asserts =use_cuda()= up front
+so running it without =--config=cuda= fails loudly. Added the =rust_test= target
+=deepseek_v41_cuda_forward_tests= tagged =["cuda","requires-gpu"]= (excluded by
+the CI tag filters =-cuda,-requires-gpu=). Removed the unrecognized
+=--incompatible_sandbox_hermetic_tmp= from =.bazelrc='s =build:cuda= (default on
+Bazel 9.x) so =--config=cuda= builds succeed on the pinned toolchain.
+
+Evidence (B200 GPU host):
+- =bazel test --config=cuda //ferric_continuum/tnsr:deepseek_v41_cuda_forward_tests=
+  → =PASSED= (1 test; =max_abs_diff < 1e-4=)
+- =rustfmt --edition 2021 --check tests/deepseek_v41_cuda_forward_test.rs= → clean

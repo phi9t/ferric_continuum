@@ -228,8 +228,8 @@ build:cuda --@rules_cuda//cuda:archs=compute_80:compute_80,sm_80;compute_86:sm_8
 
 # nvcc uses PIDs for temp-file names; under the Linux sandbox those collide at
 # high parallelism ("No such file or directory" from cc1plus). A hermetic /tmp
-# per sandbox avoids it (default on Bazel 7+, set explicitly for safety).
-build:cuda --incompatible_sandbox_hermetic_tmp
+# per sandbox avoids it. This is the default (and no longer a recognized flag)
+# on Bazel 9.x — the pinned toolchain is bazel-9.2.0 — so it is not set here.
 
 ###############################################################################
 # Testing Configuration

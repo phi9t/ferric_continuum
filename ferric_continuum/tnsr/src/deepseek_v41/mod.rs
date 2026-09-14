@@ -2,6 +2,7 @@
 
 pub mod attention;
 pub mod config;
+pub mod cost;
 pub mod dspark;
 pub mod engram;
 pub mod hc_tensor;
