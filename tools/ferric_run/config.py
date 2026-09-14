@@ -48,7 +48,9 @@ def find_repo_root(start: Path) -> Path:
 def resolve_repo_host(value: str, *, repo_root: Path) -> Path:
     if value == "repo://self":
         return repo_root.resolve()
-    return Path(value).expanduser().resolve()
+    # Expand environment variables (e.g. ${HOME}) and ~ so profiles stay
+    # portable and free of hard-coded per-user absolute paths.
+    return Path(os.path.expandvars(value)).expanduser().resolve()
 
 
 def _require_workspace(data: object) -> dict[str, object]:

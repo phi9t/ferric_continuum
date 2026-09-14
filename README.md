@@ -126,6 +126,29 @@ ferric_continuum/
 
 ---
 
+## Repository hygiene (desensitization)
+
+Tracked files must not leak personally- or machine-identifiable data (user
+home absolute paths, real usernames, MAC addresses, routable IPv4 literals, or
+personal emails). This is enforced by a dependency-free checker:
+
+```
+# Scan tracked files (exit 1 on any finding)
+python3 tools/desensitize_check.py
+
+# Auto-fix the safe substitutions (home abspaths -> ${HOME}, pinned bazel
+# launcher path -> plain `bazel`), then re-run the scan
+python3 tools/desensitize_check.py --fix
+
+# Install the local pre-commit hook that scans staged content
+scripts/install-git-hooks.sh
+```
+
+The same scan runs as the blocking `Desensitize` job in CI. Allowlisted
+intended-public tokens live in `tools/desensitize_allowlist.txt`.
+
+---
+
 ## License
 
 This project is licensed under the MIT License - see the `LICENSE` file for details.

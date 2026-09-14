@@ -6,7 +6,7 @@
 
 * Context
 
-`ferric_continuum/tnsr/src/debug.rs` is the monorepo-owned debug surface. The external repo's web viewer parser at `/data02/home/philip.yang/workspace/tnsr/web/src/trace.ts` is reference material only; the Rust schema should be owned by the monorepo API.
+`ferric_continuum/tnsr/src/debug.rs` is the monorepo-owned debug surface. The external repo's web viewer parser at `${HOME}/workspace/tnsr/web/src/trace.ts` is reference material only; the Rust schema should be owned by the monorepo API.
 
 This ticket should land before any future viewer work so downstream tooling can target a stable trace format.
 
@@ -20,7 +20,7 @@ This ticket should land before any future viewer work so downstream tooling can 
 
 * Out of scope
 
-- Importing `/data02/home/philip.yang/workspace/tnsr/web`.
+- Importing `${HOME}/workspace/tnsr/web`.
 - Adding frontend, npm, Vite, Three.js, Playwright, browser, WebGL, or screenshot checks.
 - Replacing `debug.rs` with the external implementation.
 

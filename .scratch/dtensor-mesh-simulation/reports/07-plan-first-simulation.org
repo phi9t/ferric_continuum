@@ -152,7 +152,7 @@ value or native tensor metadata.
 Red bar:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
 Result: FAIL at 2026-08-21 23:25 UTC. The new tests failed to build because
@@ -161,7 +161,7 @@ Result: FAIL at 2026-08-21 23:25 UTC. The new tests failed to build because
 Focused green:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
 Result: PASS at 2026-08-21 23:28 UTC.
@@ -169,7 +169,7 @@ Result: PASS at 2026-08-21 23:28 UTC.
 Final required command:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+bazel test --cache_test_results=no \
   //ferric_continuum/tnsr:mesh_sim_tests \
   //ferric_continuum/tnsr:distributed_tests \
   //ferric_continuum/tnsr:lib_tests
@@ -214,7 +214,7 @@ Compatibility note:
 Round-1 red bar:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
 Result: FAIL at 2026-08-21 23:35 UTC. The adjusted tests failed to build
@@ -224,7 +224,7 @@ because ~FailureRecord~ had no ~layout~ field and
 Round-1 focused green:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
 Result: PASS at 2026-08-21 23:39 UTC.
@@ -232,7 +232,7 @@ Result: PASS at 2026-08-21 23:39 UTC.
 Round-1 final verification:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+bazel test --cache_test_results=no \
   //ferric_continuum/tnsr:mesh_sim_tests \
   //ferric_continuum/tnsr:distributed_tests \
   //ferric_continuum/tnsr:lib_tests

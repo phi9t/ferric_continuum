@@ -9,10 +9,10 @@ and target layout.
 Use the pinned Bazel binary first:
 
 ```sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:lib_tests
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --help
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- \
+bazel build //ferric_continuum/tnsr:tnsr
+bazel test //ferric_continuum/tnsr:lib_tests
+bazel run //ferric_continuum/tnsr:tnsr_demo -- --help
+bazel run //ferric_continuum/tnsr:tnsr_demo -- \
   --dot /tmp/tnsr/block.dot \
   --trace-json /tmp/tnsr/trace.json
 ```
@@ -20,15 +20,15 @@ Use the pinned Bazel binary first:
 Feature targets:
 
 ```sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:debug_trace_tests
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:inference_tests
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:mesh_sim_tests
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:scaling_tests
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:scaling_memory_tests
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:distributed_tests
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:qwen3_tests
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:context_parallel_gqa_tests
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:playground_cli_tests
+bazel test //ferric_continuum/tnsr:debug_trace_tests
+bazel test //ferric_continuum/tnsr:inference_tests
+bazel test //ferric_continuum/tnsr:mesh_sim_tests
+bazel test //ferric_continuum/tnsr:scaling_tests
+bazel test //ferric_continuum/tnsr:scaling_memory_tests
+bazel test //ferric_continuum/tnsr:distributed_tests
+bazel test //ferric_continuum/tnsr:qwen3_tests
+bazel test //ferric_continuum/tnsr:context_parallel_gqa_tests
+bazel test //ferric_continuum/tnsr:playground_cli_tests
 ```
 
 Cargo can be useful for editor-oriented local checks when the host environment
@@ -94,7 +94,7 @@ The easiest LLDB path is to build the Bazel binary, then debug the output path
 under `bazel-bin`:
 
 ```sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr_demo
+bazel build //ferric_continuum/tnsr:tnsr_demo
 rust-lldb bazel-bin/ferric_continuum/tnsr/tnsr_demo
 (lldb) breakpoint set --name tnsr::transformer::TransformerBlock::forward
 (lldb) breakpoint set --name tnsr::autograd::Engine::backward
@@ -107,7 +107,7 @@ To focus on a test binary, build the relevant target and use the path printed by
 Bazel under `bazel-bin`:
 
 ```sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:debug_trace_tests
+bazel build //ferric_continuum/tnsr:debug_trace_tests
 rust-lldb bazel-bin/ferric_continuum/tnsr/debug_trace_tests
 (lldb) breakpoint set --name tnsr::debug::DebugRecorder::trace_json
 (lldb) run
@@ -120,7 +120,7 @@ inspect both artifact kinds:
 
 ```sh
 rm -rf /tmp/tnsr-debug-smoke
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- \
+bazel run //ferric_continuum/tnsr:tnsr_demo -- \
   --dot /tmp/tnsr-debug-smoke/block.dot \
   --trace-json /tmp/tnsr-debug-smoke/trace.json
 head -n 1 /tmp/tnsr-debug-smoke/block.dot

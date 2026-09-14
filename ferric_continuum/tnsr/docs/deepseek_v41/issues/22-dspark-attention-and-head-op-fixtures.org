@@ -42,7 +42,7 @@ Read first:
 
 * Verification
 
-- =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_math_tests=
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_math_tests=
 - =python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family dspark=
 
 * Resolution

@@ -384,7 +384,7 @@ def resolve_config(
 Create ~tools/ferric_run/profiles/gpu-kernel-study.json~ with Ferric,
 Modular, Torchtitan, Monarch, NCCL, and Cutlass entries. Ferric is required
 ~rw~ with ~repo://self~. Peers are optional ~ro~ with absolute host paths under
-~/data02/home/philip.yang/workspace/~.
+~${HOME}/workspace/~.
 
 - [ ] Step 6: Run tests.
 

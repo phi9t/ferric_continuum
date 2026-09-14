@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -41,6 +42,18 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
             self.assertEqual(resolve_repo_host("repo://self", repo_root=root), root)
+
+    def test_repo_host_expands_env_vars(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            os.environ["FERRIC_TEST_HOME"] = str(root)
+            try:
+                resolved = resolve_repo_host(
+                    "${FERRIC_TEST_HOME}/workspace/x", repo_root=root
+                )
+            finally:
+                del os.environ["FERRIC_TEST_HOME"]
+            self.assertEqual(resolved, (root / "workspace" / "x").resolve())
 
     def test_resolve_config_prefers_cli_over_environment(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -215,7 +215,7 @@ the autograd and op blast radius at zero for this tracer bullet.
 Initial focused red bar:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
 Result: FAIL at 2026-08-21 23:04 UTC. The new tests failed to build because
@@ -226,7 +226,7 @@ not exist.
 Second focused red bar:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
 Result: FAIL at 2026-08-21 23:06 UTC. The added native harness tests failed to
@@ -236,7 +236,7 @@ exist.
 Focused green runs:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
 Result: PASS at 2026-08-21 23:07 UTC.
@@ -244,7 +244,7 @@ Result: PASS at 2026-08-21 23:07 UTC.
 Final required command:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+bazel test --cache_test_results=no \
   //ferric_continuum/tnsr:mesh_sim_tests \
   //ferric_continuum/tnsr:lib_tests \
   //ferric_continuum/tnsr:tnsr_tests
@@ -275,7 +275,7 @@ Fix:
 Red evidence:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
 Result: FAIL at 2026-08-21 23:16 UTC. Expected missing-fix failure: the new
@@ -285,7 +285,7 @@ exist.
 Focused green:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
 Result: PASS at 2026-08-21 23:16 UTC.
@@ -293,7 +293,7 @@ Result: PASS at 2026-08-21 23:16 UTC.
 Final verification after the fix:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+bazel test --cache_test_results=no \
   //ferric_continuum/tnsr:mesh_sim_tests \
   //ferric_continuum/tnsr:lib_tests \
   //ferric_continuum/tnsr:tnsr_tests

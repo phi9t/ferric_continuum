@@ -1,0 +1,9 @@
+# Desensitization checker allowlist.
+#
+# One entry per line. Lines beginning `re:` are treated as regexes matched
+# against the offending token; all other non-comment lines are literal tokens.
+# Blank lines and `#` comments are ignored.
+#
+# The default allowlist (intended-public project identity) is baked into
+# tools/desensitize_check.py: phi9t, noreply@bytedance.com, git@github.com, and
+# the sandbox user /home/ferric. Add reviewed false positives below.

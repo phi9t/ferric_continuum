@@ -76,12 +76,12 @@ Review and repair:
 - Fixed public memory rounding so `training_memory_report` and `zero_partitioned_memory` both use ceil-rounded sharded byte ownership.
 - Scoped re-review found no remaining blocker.
 
-Verification run from `/data02/home/philip.yang/workspace/ferric_continuum`:
+Verification run from `${HOME}/workspace/ferric_continuum`:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:distributed_tests
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr_doc
+bazel build //ferric_continuum/tnsr:tnsr
+bazel test //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:distributed_tests
+bazel build //ferric_continuum/tnsr:tnsr_doc
 git diff --check
 #+end_src
 
@@ -110,7 +110,7 @@ Full Ferric code review follow-up:
 - Focused re-verification:
 
 #+begin_src text
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests
+bazel test //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests
 Test cases: finished with 2 passing, 0 skipped and 0 failing out of 2 test cases.
 #+end_src
 

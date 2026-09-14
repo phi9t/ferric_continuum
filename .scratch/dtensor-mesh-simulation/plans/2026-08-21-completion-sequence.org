@@ -52,7 +52,7 @@ true:
 - Use the pinned Bazel binary:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0
+bazel
 #+end_src
 
 - Preserve unrelated dirty ~tnsr~ incorporation work.
@@ -77,7 +77,7 @@ Actions:
 - Run the current focused smoke target before changing status:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+bazel test --cache_test_results=no \
   //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
@@ -107,7 +107,7 @@ Actions:
 Verification:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+bazel test --cache_test_results=no \
   //ferric_continuum/tnsr:mesh_sim_tests \
   //ferric_continuum/tnsr:distributed_tests \
   //ferric_continuum/tnsr:context_parallel_gqa_tests \
@@ -239,7 +239,7 @@ Required DualPipe-level schedule granularity:
 Verification:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+bazel test --cache_test_results=no \
   //ferric_continuum/tnsr:mesh_sim_tests \
   //ferric_continuum/tnsr:distributed_tests \
   //ferric_continuum/tnsr:lib_tests
@@ -291,7 +291,7 @@ Exit criteria:
 Before calling the DTensor mesh simulation effort complete, run:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+bazel test --cache_test_results=no \
   //ferric_continuum/tnsr:mesh_sim_tests \
   //ferric_continuum/tnsr:distributed_tests \
   //ferric_continuum/tnsr:context_parallel_gqa_tests \

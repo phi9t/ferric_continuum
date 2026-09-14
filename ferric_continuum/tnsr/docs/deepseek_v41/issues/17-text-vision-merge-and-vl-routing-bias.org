@@ -54,7 +54,7 @@ Read first:
 * Verification
 
 - =python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family merge,vl-gate=
-- =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_model_tests=
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_model_tests=
 
 * Comments
 
@@ -86,7 +86,7 @@ Command evidence:
 #+begin_example
 $ python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family vl-gate
 $ python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family merge
-$ /data02/home/philip.yang/.local/bin/bazel-9.2.0 test \
+$ bazel test \
     //ferric_continuum/tnsr:deepseek_v41_config_tests \
     //ferric_continuum/tnsr:deepseek_v41_math_tests \
     //ferric_continuum/tnsr:deepseek_v41_model_tests

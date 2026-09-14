@@ -56,7 +56,7 @@ substrate.
 Focused test target:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:mesh_sim_tests
+bazel test //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
 Verification evidence:

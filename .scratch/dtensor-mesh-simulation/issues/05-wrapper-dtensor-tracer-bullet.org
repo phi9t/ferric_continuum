@@ -81,7 +81,7 @@ impl DTensor {
 - Existing local tensor tests remain valid:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+bazel test --cache_test_results=no \
   //ferric_continuum/tnsr:mesh_sim_tests \
   //ferric_continuum/tnsr:lib_tests
 #+end_src
@@ -117,7 +117,7 @@ TDD evidence:
 - Red bar:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
   Result: failed to build because ~tnsr::dtensor::DTensor~ and
@@ -127,7 +127,7 @@ TDD evidence:
 - Focused green run:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
   Result: PASS.
@@ -135,7 +135,7 @@ TDD evidence:
 Final required verification:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+bazel test --cache_test_results=no \
   //ferric_continuum/tnsr:mesh_sim_tests \
   //ferric_continuum/tnsr:lib_tests
 #+end_src

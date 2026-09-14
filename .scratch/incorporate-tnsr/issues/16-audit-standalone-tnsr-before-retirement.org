@@ -6,7 +6,7 @@
 
 * Context
 
-The standalone `/data02/home/philip.yang/workspace/tnsr` checkout is no longer intended to remain an active sibling repository after incorporation finishes. Before it can be archived and deleted, prove that Ferric Continuum either contains every selected artifact or has an explicit reason to omit it.
+The standalone `${HOME}/workspace/tnsr` checkout is no longer intended to remain an active sibling repository after incorporation finishes. Before it can be archived and deleted, prove that Ferric Continuum either contains every selected artifact or has an explicit reason to omit it.
 
 The standalone checkout was observed clean and ahead of `origin/master` by three commits during planning. Treat any standalone commits or files not represented in Ferric Continuum as retirement blockers until they are classified.
 
@@ -33,19 +33,19 @@ The standalone checkout was observed clean and ahead of `origin/master` by three
 
 - Implementing additional feature ports in this ticket. If the audit finds required missing behavior, create or reopen an implementation ticket and leave this ticket unresolved.
 - Removing `tnsr` from Ultron tracking.
-- Archiving or deleting `/data02/home/philip.yang/workspace/tnsr`.
+- Archiving or deleting `${HOME}/workspace/tnsr`.
 - Pushing standalone `tnsr` commits or changing its remotes.
 
 * Verification
 
 #+begin_src sh
-git -C /data02/home/philip.yang/workspace/tnsr fetch --prune origin
-git -C /data02/home/philip.yang/workspace/tnsr status --short
-git -C /data02/home/philip.yang/workspace/tnsr branch --show-current
-git -C /data02/home/philip.yang/workspace/tnsr remote -v
-git -C /data02/home/philip.yang/workspace/tnsr log --oneline --decorate --all -n 20
-git -C /data02/home/philip.yang/workspace/tnsr log --oneline origin/master..HEAD
-git -C /data02/home/philip.yang/workspace/tnsr diff --stat origin/master..HEAD
+git -C ${HOME}/workspace/tnsr fetch --prune origin
+git -C ${HOME}/workspace/tnsr status --short
+git -C ${HOME}/workspace/tnsr branch --show-current
+git -C ${HOME}/workspace/tnsr remote -v
+git -C ${HOME}/workspace/tnsr log --oneline --decorate --all -n 20
+git -C ${HOME}/workspace/tnsr log --oneline origin/master..HEAD
+git -C ${HOME}/workspace/tnsr diff --stat origin/master..HEAD
 #+end_src
 
 If network access is unavailable, record that fact under `* Answer` and treat
@@ -57,23 +57,23 @@ Run additional file comparison commands as needed and include their outputs or s
 
 * Answer
 
-Standalone `/data02/home/philip.yang/workspace/tnsr` was audited after ticket
+Standalone `${HOME}/workspace/tnsr` was audited after ticket
 15 final incorporation verification passed. No unclassified standalone-only
 work remains as a retirement blocker.
 
 Repository state:
 
 #+begin_src text
-git -C /data02/home/philip.yang/workspace/tnsr fetch --prune origin
+git -C ${HOME}/workspace/tnsr fetch --prune origin
 fetch completed successfully.
 
-git -C /data02/home/philip.yang/workspace/tnsr status --short
+git -C ${HOME}/workspace/tnsr status --short
 No output; active checkout is clean.
 
-git -C /data02/home/philip.yang/workspace/tnsr branch --show-current
+git -C ${HOME}/workspace/tnsr branch --show-current
 master
 
-git -C /data02/home/philip.yang/workspace/tnsr remote -v
+git -C ${HOME}/workspace/tnsr remote -v
 origin	git@github.com:phi9t/tnsr.git (fetch)
 origin	git@github.com:phi9t/tnsr.git (push)
 #+end_src

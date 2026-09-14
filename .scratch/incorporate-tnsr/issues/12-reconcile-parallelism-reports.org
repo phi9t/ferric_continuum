@@ -6,7 +6,7 @@
 
 * Context
 
-Evaluate `/data02/home/philip.yang/workspace/tnsr/scaling/parallelism.rs` only for concepts not already covered by `ferric_continuum/tnsr/src/scaling/distributed/*`.
+Evaluate `${HOME}/workspace/tnsr/scaling/parallelism.rs` only for concepts not already covered by `ferric_continuum/tnsr/src/scaling/distributed/*`.
 
 The preferred destination is small additions to existing distributed scaling modules. A new `scaling/parallelism.rs` should be added only if the concept is genuinely cross-cutting and cleaner outside `distributed`.
 
@@ -54,10 +54,10 @@ bazel build //ferric_continuum/tnsr:tnsr_doc
   - Sequence/context parallel degree is summarized as an activation shard factor and symbolic K/V exchange without adding a byte model.
 - Added `test_distributed_report_summarizes_hybrid_parallelism` to `distributed_tests`.
 - Added `test_pipeline_handoff_uses_largest_uneven_microbatch` to keep `pipeline_schedule` conservative for uneven batch splits.
-- Verification in `/data02/home/philip.yang/workspace/ferric_continuum/.worktrees/incorporate-tnsr-12`:
-  - `/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr`
-  - `/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:scaling_memory_tests`
-  - `/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr_doc`
+- Verification in `${HOME}/workspace/ferric_continuum/.worktrees/incorporate-tnsr-12`:
+  - `bazel build //ferric_continuum/tnsr:tnsr`
+  - `bazel test //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:scaling_memory_tests`
+  - `bazel build //ferric_continuum/tnsr:tnsr_doc`
   - `git diff --check`
 - Independent review by separate-context `openrouter-3o` reviewer found no blockers after the pipeline handoff accounting fix.
 - Verification repeated in the primary checkout with the same commands; all passed. `tnsr_doc` still reports pre-existing rustdoc warnings in `autograd.rs` and `qwen3_load.rs`.
@@ -80,7 +80,7 @@ Full Ferric code review follow-up:
 - Focused re-verification:
 
 #+begin_src text
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests
+bazel test //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests
 Test cases: finished with 2 passing, 0 skipped and 0 failing out of 2 test cases.
 #+end_src
 

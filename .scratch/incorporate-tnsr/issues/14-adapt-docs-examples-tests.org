@@ -100,22 +100,22 @@ Adversarial review:
 Coordinator verification after review fixes:
 
 #+begin_src text
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr
+bazel build //ferric_continuum/tnsr:tnsr
 Build completed successfully.
 
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:playground_cli_tests
+bazel test //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:playground_cli_tests
 //ferric_continuum/tnsr:lib_tests PASSED
 //ferric_continuum/tnsr:playground_cli_tests PASSED
 
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:tnsr_tests //ferric_continuum/tnsr:debug_trace_tests //ferric_continuum/tnsr:inference_tests //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:qwen3_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:playground_cli_tests //ferric_continuum/tnsr:lib_tests
+bazel test //ferric_continuum/tnsr:tnsr_tests //ferric_continuum/tnsr:debug_trace_tests //ferric_continuum/tnsr:inference_tests //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:qwen3_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:playground_cli_tests //ferric_continuum/tnsr:lib_tests
 Test cases: finished with 11 passing, 0 skipped and 0 failing out of 11 test cases.
 Executed 2 out of 11 tests: 11 tests pass.
 
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr_doc
+bazel build //ferric_continuum/tnsr:tnsr_doc
 Build completed successfully.
 
 tmpdir=$(mktemp -d /tmp/tnsr-ticket14-smoke.XXXXXX)
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --dot "$tmpdir/block.dot" --trace-json "$tmpdir/trace.json"
+bazel run //ferric_continuum/tnsr:tnsr_demo -- --dot "$tmpdir/block.dot" --trace-json "$tmpdir/trace.json"
 head -n 1 "$tmpdir/block.dot"
 python3 -m json.tool "$tmpdir/trace.json" >/dev/null
 rg -q '"schema": "tnsr.debug_trace"' "$tmpdir/trace.json"
@@ -143,18 +143,18 @@ worktree.
 Primary checkout verification after copy-back:
 
 #+begin_src text
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr
+bazel build //ferric_continuum/tnsr:tnsr
 Build completed successfully.
 
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:tnsr_tests //ferric_continuum/tnsr:debug_trace_tests //ferric_continuum/tnsr:inference_tests //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:qwen3_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:playground_cli_tests //ferric_continuum/tnsr:lib_tests
+bazel test //ferric_continuum/tnsr:tnsr_tests //ferric_continuum/tnsr:debug_trace_tests //ferric_continuum/tnsr:inference_tests //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:qwen3_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:playground_cli_tests //ferric_continuum/tnsr:lib_tests
 Test cases: finished with 11 passing, 0 skipped and 0 failing out of 11 test cases.
 Executed 9 out of 11 tests: 11 tests pass.
 
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr_doc
+bazel build //ferric_continuum/tnsr:tnsr_doc
 Build completed successfully with the known pre-existing rustdoc warnings in
 autograd.rs and qwen3_load.rs.
 
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --dot "$tmpdir/block.dot" --trace-json "$tmpdir/trace.json"
+bazel run //ferric_continuum/tnsr:tnsr_demo -- --dot "$tmpdir/block.dot" --trace-json "$tmpdir/trace.json"
 DOT began with digraph Autograd; JSON parsed and had schema tnsr.debug_trace.
 
 git diff --check
@@ -175,11 +175,11 @@ Full Ferric review follow-up:
 Post-review verification:
 
 #+begin_src text
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:tnsr_tests //ferric_continuum/tnsr:debug_trace_tests //ferric_continuum/tnsr:inference_tests //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:qwen3_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:playground_cli_tests //ferric_continuum/tnsr:lib_tests
+bazel test //ferric_continuum/tnsr:tnsr_tests //ferric_continuum/tnsr:debug_trace_tests //ferric_continuum/tnsr:inference_tests //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:qwen3_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:playground_cli_tests //ferric_continuum/tnsr:lib_tests
 Test cases: finished with 11 passing, 0 skipped and 0 failing out of 11 test cases.
 Executed 2 out of 11 tests: 11 tests pass.
 
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr_doc
+bazel build //ferric_continuum/tnsr:tnsr_doc
 Build completed successfully with the known pre-existing rustdoc warnings in
 autograd.rs and qwen3_load.rs.
 

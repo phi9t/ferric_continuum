@@ -13,7 +13,7 @@ Ultron's sync tool verifies managed files for the repositories listed in its man
 * Requirements
 
 - Confirm ticket 16 is resolved and lists no unclassified retirement blockers.
-- Remove the `tnsr` entry from `/data02/home/philip.yang/workspace/ultron/docs/agents/agentic-workflow-repos.json`.
+- Remove the `tnsr` entry from `${HOME}/workspace/ultron/docs/agents/agentic-workflow-repos.json`.
 - Confirm whether Ultron's sync-manifest regression tests contain an active `tnsr` assertion. Update or remove such an assertion only if it exists.
 - Add or retain a focused manifest assertion that proves `tnsr` is absent from the active repository list after this ticket.
 - Review the Ultron diff and confirm it is limited to the intended tracking removal and any corresponding test update.
@@ -22,7 +22,7 @@ Ultron's sync tool verifies managed files for the repositories listed in its man
 
 * Out of scope
 
-- Archiving or deleting `/data02/home/philip.yang/workspace/tnsr`.
+- Archiving or deleting `${HOME}/workspace/tnsr`.
 - Editing Ferric Continuum's `ferric_continuum/tnsr` implementation.
 - Repairing unrelated Ultron managed-file drift in other repositories.
 - Pushing branches or changing remotes.
@@ -30,7 +30,7 @@ Ultron's sync tool verifies managed files for the repositories listed in its man
 * Verification
 
 #+begin_src sh
-cd /data02/home/philip.yang/workspace/ultron
+cd ${HOME}/workspace/ultron
 python3 - <<'PY'
 import json
 from pathlib import Path
@@ -51,12 +51,12 @@ If `tools/sync_agentic_workflow.py --check` reports unrelated pre-existing drift
 
 Removed standalone `tnsr` from Ultron's active managed-repository manifest after
 ticket 16 resolved with no unclassified retirement blockers. This did not
-archive or delete `/data02/home/philip.yang/workspace/tnsr`.
+archive or delete `${HOME}/workspace/tnsr`.
 
 Files changed in Ultron:
 
-- `/data02/home/philip.yang/workspace/ultron/docs/agents/agentic-workflow-repos.json`
-- `/data02/home/philip.yang/workspace/ultron/tests/test_sync_agentic_workflow.py`
+- `${HOME}/workspace/ultron/docs/agents/agentic-workflow-repos.json`
+- `${HOME}/workspace/ultron/tests/test_sync_agentic_workflow.py`
 
 Manifest assertion:
 

@@ -78,7 +78,7 @@ mesh simulation to the distributed-training TLA+ track.
 Ticket 09 is resolved and cites passing verification:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+bazel test --cache_test_results=no \
   //ferric_continuum/tnsr:mesh_sim_tests \
   //ferric_continuum/tnsr:distributed_tests \
   //ferric_continuum/tnsr:lib_tests

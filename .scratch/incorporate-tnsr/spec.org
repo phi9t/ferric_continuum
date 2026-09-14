@@ -4,13 +4,13 @@
 
 * Goal
 
-Incorporate useful material from `/data02/home/philip.yang/workspace/tnsr` into the existing Bazel-integrated `ferric_continuum/tnsr` module by selective feature porting, then retire the standalone checkout after the monorepo implementation is verified.
+Incorporate useful material from `${HOME}/workspace/tnsr` into the existing Bazel-integrated `ferric_continuum/tnsr` module by selective feature porting, then retire the standalone checkout after the monorepo implementation is verified.
 
 The monorepo remains the source of truth. This effort should improve `ferric_continuum/tnsr` without replacing it, importing external repository history, or introducing frontend tooling. The standalone `tnsr` repository is a temporary source reference only until final verification and retirement are complete.
 
 External source snapshot used for this plan:
 
-- repo: `/data02/home/philip.yang/workspace/tnsr`
+- repo: `${HOME}/workspace/tnsr`
 - branch: `focused-transformer-visualization`
 - commit: `392e524a05d9f46ae921f5cd5e73ac2d963f600b`
 
@@ -29,7 +29,7 @@ External source snapshot used for this plan:
 Purpose:
 
 - Make the existing `DebugRecorder` trace output a stable Rust-owned JSON format that future tooling can consume.
-- Use `/data02/home/philip.yang/workspace/tnsr/web/src/trace.ts` only as reference for useful fields and viewer needs.
+- Use `${HOME}/workspace/tnsr/web/src/trace.ts` only as reference for useful fields and viewer needs.
 
 Likely destinations:
 
@@ -170,11 +170,11 @@ Acceptance:
 - External trace JSON and pretty/debug concepts extend `ferric_continuum/tnsr/src/debug.rs` plus focused tests.
 - External tests become Bazel `rust_test` targets or additions to existing tests.
 - External docs/examples become Bazel-first monorepo docs, tests, or binaries.
-- The standalone `/data02/home/philip.yang/workspace/tnsr` checkout becomes an archived historical source after all accepted material is incorporated or explicitly rejected.
+- The standalone `${HOME}/workspace/tnsr` checkout becomes an archived historical source after all accepted material is incorporated or explicitly rejected.
 
 * Out of scope
 
-- Replacing `ferric_continuum/tnsr` with `/data02/home/philip.yang/workspace/tnsr`.
+- Replacing `ferric_continuum/tnsr` with `${HOME}/workspace/tnsr`.
 - Importing external git history through subtree, filter-repo, or submodule by default.
 - Importing `web/`, `web/dist`, `web/test-results`, `web/node_modules`, Vite, Three.js, npm, Playwright, or other frontend tooling in this batch.
 - Adding web, browser, WebGL, screenshot, or frontend build checks.
@@ -224,7 +224,7 @@ bazel run //ferric_continuum/tnsr:tnsr_playground -- --help
 Qwen3 real-weight compatibility is required only when Qwen3 math, loader, tokenizer, RoPE/GQA behavior, or logits output changes:
 
 #+begin_src sh
-MODEL_DIR=/data02/home/philip.yang/models/qwen3-0.6b \
+MODEL_DIR=${HOME}/models/qwen3-0.6b \
   ferric_continuum/tnsr/tools/verify_hf_compat.sh
 #+end_src
 
@@ -243,11 +243,11 @@ cargo check --workspace
 Retirement audit before Ultron tracking removal:
 
 #+begin_src sh
-git -C /data02/home/philip.yang/workspace/tnsr fetch --prune origin
-git -C /data02/home/philip.yang/workspace/tnsr status --short
-git -C /data02/home/philip.yang/workspace/tnsr log --oneline --decorate --all -n 20
-git -C /data02/home/philip.yang/workspace/tnsr log --oneline origin/master..HEAD
-git -C /data02/home/philip.yang/workspace/tnsr diff --stat origin/master..HEAD
+git -C ${HOME}/workspace/tnsr fetch --prune origin
+git -C ${HOME}/workspace/tnsr status --short
+git -C ${HOME}/workspace/tnsr log --oneline --decorate --all -n 20
+git -C ${HOME}/workspace/tnsr log --oneline origin/master..HEAD
+git -C ${HOME}/workspace/tnsr diff --stat origin/master..HEAD
 #+end_src
 
 If network access is unavailable during the audit, record that fact and treat
@@ -257,7 +257,7 @@ Ultron tracking verification after removing `tnsr` from its managed-repo
 manifest:
 
 #+begin_src sh
-cd /data02/home/philip.yang/workspace/ultron
+cd ${HOME}/workspace/ultron
 python3 - <<'PY'
 import json
 from pathlib import Path
@@ -281,7 +281,7 @@ python3 tools/sync_agentic_workflow.py --check
 Co-authored-by: TRAE CLI <noreply@bytedance.com>
 #+end_src
 
-- Mention the external source path or commit in commit bodies when behavior is materially ported from `/data02/home/philip.yang/workspace/tnsr`.
+- Mention the external source path or commit in commit bodies when behavior is materially ported from `${HOME}/workspace/tnsr`.
 
 * Implementation tickets
 

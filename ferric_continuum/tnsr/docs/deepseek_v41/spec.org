@@ -548,7 +548,7 @@ never presented as PASS). Tiny multimodal logits parity vs the faithful upstream
 ViT/Aligner reference: =cosine=1.00000000=, =max_abs_diff=1.31e-07=, top1/top5
 match. Focused Bazel tests (=deepseek_v41_config_tests=, =_math_tests=,
 =_model_tests=, =lib_tests=) pass under
-=/data02/home/philip.yang/.local/bin/bazel-9.2.0=.
+=bazel=.
 
 
 ** Wave 3 DSpark
@@ -579,7 +579,7 @@ P0-comparator/P0-sources/L1-sources/L2-config/L3-ops/L4-model+loader/L6-tiny-par
 Tiny DSpark parity: =output_ids= match, confidence max/mean-abs =0=,
 =cosine=1.0=, top5 5/5. Focused Bazel tests (=deepseek_v41_config_tests=,
 =_math_tests=, =_model_tests=, =lib_tests=) pass under
-=/data02/home/philip.yang/.local/bin/bazel-9.2.0=.
+=bazel=.
 
 ** Wave 4 performance and device
 
@@ -606,7 +606,7 @@ P0-comparator/L1-sources/L2-config/L3-ops/L4-model/L5-cost-accounting
 =L6-real-parity= =SKIP= (no local weights; never presented as PASS). On a
 CPU-only host =L6-cuda-forward-parity= is =SKIP= (no CUDA runtime). Focused
 Bazel tests (=deepseek_v41_config_tests=, =_math_tests=, =_model_tests=,
-=lib_tests=) pass under =/data02/home/philip.yang/.local/bin/bazel-9.2.0=; the
+=lib_tests=) pass under =bazel=; the
 GPU test passes under =--config=cuda=.
 
 * Acceptance
@@ -615,7 +615,7 @@ Wave 1 is complete only when:
 
 - All Wave 0 and Wave 1 tickets are resolved.
 - The text-only Rust path rejects vision and DSpark inputs explicitly.
-- Focused Bazel tests pass under =/data02/home/philip.yang/.local/bin/bazel-9.2.0=.
+- Focused Bazel tests pass under =bazel=.
 - Source/paper/config/index verifiers pass without model weights.
 - Tiny upstream-code parity fixtures pass.
 - Real checkpoint parity has either passed with local assets or is documented as

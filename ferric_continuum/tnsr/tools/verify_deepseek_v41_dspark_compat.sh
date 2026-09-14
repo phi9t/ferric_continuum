@@ -46,17 +46,17 @@
 #   HF_PYTHON   python with torch+numpy+safetensors
 #               (default: main-checkout .venv-hf; worktrees lack it)
 #   OUT_DIR     scratch dir for JSON dumps (default: /tmp/dsv41_dspark_compat)
-#   BAZEL       bazel binary (default: ~/.local/bin/bazel-9.2.0)
+#   BAZEL       bazel binary (default: bazel; version pinned by .bazelversion)
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$REPO_ROOT"
 
 # The CPU venv lives in the MAIN checkout, not in worktrees. Default to it.
-MAIN_VENV="/data02/home/philip.yang/workspace/ferric_continuum/.venv-hf/bin/python"
+MAIN_VENV="${HOME}/workspace/ferric_continuum/.venv-hf/bin/python"
 HF_PYTHON="${HF_PYTHON:-$MAIN_VENV}"
 OUT_DIR="${OUT_DIR:-/tmp/dsv41_dspark_compat}"
-BAZEL="${BAZEL:-$HOME/.local/bin/bazel-9.2.0}"
+BAZEL="${BAZEL:-bazel}"
 TOOLS="$REPO_ROOT/ferric_continuum/tnsr/tools"
 MODEL_DIR="${DEEPSEEK_V41_MODEL_DIR:-${MODEL_DIR:-}}"
 FIXTURE="$REPO_ROOT/ferric_continuum/tnsr/testdata/deepseek_v41/dspark_tiny_model_fixture.json"

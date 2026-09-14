@@ -65,7 +65,7 @@ Implemented in the existing Bazel target
 TDD red evidence:
 
 #+begin_src text
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:playground_cli_tests
+bazel test //ferric_continuum/tnsr:playground_cli_tests
 error[E0432]: unresolved import `tnsr::playground`
   --> ferric_continuum/tnsr/tests/playground_cli_test.rs:3:11
    |
@@ -76,19 +76,19 @@ error[E0432]: unresolved import `tnsr::playground`
 Verification:
 
 #+begin_src text
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr
+bazel build //ferric_continuum/tnsr:tnsr
 Build completed successfully.
 
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --nocache_test_results //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:playground_cli_tests
+bazel test --nocache_test_results //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:playground_cli_tests
 Executed 2 out of 2 tests: 2 tests pass.
 
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo
+bazel run //ferric_continuum/tnsr:tnsr_demo
 Build completed successfully; demo ran and wrote /tmp/block.dot.
 
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --dot "$tmpdir/block.dot" --trace-json "$tmpdir/trace.json"
+bazel run //ferric_continuum/tnsr:tnsr_demo -- --dot "$tmpdir/block.dot" --trace-json "$tmpdir/trace.json"
 Build completed successfully; explicit DOT and JSON artifacts were written under /tmp.
 
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --help
+bazel run //ferric_continuum/tnsr:tnsr_demo -- --help
 Printed usage for --dot and --trace-json.
 
 git diff --check
@@ -108,16 +108,16 @@ Review:
 - Verification repeated in the primary checkout:
 
 #+begin_src text
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --nocache_test_results //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:debug_trace_tests //ferric_continuum/tnsr:playground_cli_tests
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr_doc
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --help
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --dot "$tmpdir/block.dot" --trace-json "$tmpdir/trace.json"
+bazel build //ferric_continuum/tnsr:tnsr
+bazel test --nocache_test_results //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:debug_trace_tests //ferric_continuum/tnsr:playground_cli_tests
+bazel build //ferric_continuum/tnsr:tnsr_doc
+bazel run //ferric_continuum/tnsr:tnsr_demo -- --help
+bazel run //ferric_continuum/tnsr:tnsr_demo -- --dot "$tmpdir/block.dot" --trace-json "$tmpdir/trace.json"
 python3 -m json.tool "$tmpdir/trace.json" >/dev/null
 rg -q "digraph Autograd" "$tmpdir/block.dot"
 rg -q '"schema": "tnsr.debug_trace"' "$tmpdir/trace.json"
 bad=$(mktemp -d /tmp/tnsr-demo-bad-dot-main.XXXXXX)
-if /data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --dot "$bad" >"$bad.stdout" 2>"$bad.stderr"; then exit 1; else rg -q "write DOT" "$bad.stderr" && ! rg -q "Written $bad" "$bad.stdout" "$bad.stderr"; fi
+if bazel run //ferric_continuum/tnsr:tnsr_demo -- --dot "$bad" >"$bad.stdout" 2>"$bad.stderr"; then exit 1; else rg -q "write DOT" "$bad.stderr" && ! rg -q "Written $bad" "$bad.stdout" "$bad.stderr"; fi
 git diff --check
 #+end_src
 

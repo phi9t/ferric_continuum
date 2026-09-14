@@ -46,7 +46,7 @@ Read first:
 
 * Verification
 
-- =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:deepseek_v41_model_tests=
+- =bazel test //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:deepseek_v41_model_tests=
 
 * Comments
 
@@ -86,7 +86,7 @@ Implemented in worktree =.worktrees/deepseek-v41-wave2= (branch
 Evidence:
 
 #+begin_example
-$ /data02/home/philip.yang/.local/bin/bazel-9.2.0 test \
+$ bazel test \
     //ferric_continuum/tnsr:lib_tests \
     //ferric_continuum/tnsr:deepseek_v41_model_tests \
     //ferric_continuum/tnsr:deepseek_v41_config_tests \
