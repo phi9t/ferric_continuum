@@ -176,7 +176,7 @@ does not modify autograd, and keeps all existing tensor math local.
 Focused green run before report:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
 Result: PASS.
@@ -184,7 +184,7 @@ Result: PASS.
 Final required command:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+bazel test --cache_test_results=no \
   //ferric_continuum/tnsr:mesh_sim_tests \
   //ferric_continuum/tnsr:lib_tests
 #+end_src

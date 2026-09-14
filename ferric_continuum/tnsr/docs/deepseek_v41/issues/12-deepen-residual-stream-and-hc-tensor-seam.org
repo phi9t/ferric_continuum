@@ -99,7 +99,7 @@ Read first:
 * Verification
 
 Run after Deliverable A, then again after Deliverable B, with pinned Bazel
-=/data02/home/philip.yang/.local/bin/bazel-9.2.0=:
+=bazel=:
 
 - =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests
   //ferric_continuum/tnsr:deepseek_v41_math_tests

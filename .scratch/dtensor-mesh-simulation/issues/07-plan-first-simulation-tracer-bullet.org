@@ -82,7 +82,7 @@ pub enum MeshSimStep {
   - comparison against unsharded reference where the plan executes local math
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+bazel test --cache_test_results=no \
   //ferric_continuum/tnsr:mesh_sim_tests \
   //ferric_continuum/tnsr:distributed_tests \
   //ferric_continuum/tnsr:lib_tests
@@ -120,7 +120,7 @@ Implementation notes:
 TDD red evidence:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
 Result: FAIL at 2026-08-21 23:25 UTC. The new tests failed to build with:
@@ -134,7 +134,7 @@ This was the expected missing plan-first API failure before implementation.
 Focused green evidence:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
 Result: PASS at 2026-08-21 23:28 UTC.
@@ -142,7 +142,7 @@ Result: PASS at 2026-08-21 23:28 UTC.
 Final required verification:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+bazel test --cache_test_results=no \
   //ferric_continuum/tnsr:mesh_sim_tests \
   //ferric_continuum/tnsr:distributed_tests \
   //ferric_continuum/tnsr:lib_tests
@@ -177,7 +177,7 @@ Compatibility note:
 Round-1 red evidence:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
 Result: FAIL at 2026-08-21 23:35 UTC. The adjusted tests failed to build
@@ -187,7 +187,7 @@ because ~FailureRecord~ had no ~layout~ field and
 Round-1 focused green evidence:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
+bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
 Result: PASS at 2026-08-21 23:39 UTC.
@@ -195,7 +195,7 @@ Result: PASS at 2026-08-21 23:39 UTC.
 Round-1 final verification:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+bazel test --cache_test_results=no \
   //ferric_continuum/tnsr:mesh_sim_tests \
   //ferric_continuum/tnsr:distributed_tests \
   //ferric_continuum/tnsr:lib_tests

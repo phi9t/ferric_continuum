@@ -50,7 +50,7 @@ model instead of flattening multidimensional tensors.
 - Do not start wrapper-DTensor, tensor-native, or plan-first tracer bullets.
 - Do not add CUDA, NCCL, async collectives, MoE/EP, uneven shards, or multi-axis
   shard ordering.
-- Use pinned Bazel: ~/data02/home/philip.yang/.local/bin/bazel-9.2.0~.
+- Use pinned Bazel: ~bazel~.
 
 * Planned file structure
 
@@ -237,7 +237,7 @@ fn collective_reduce_scatter_rejects_uneven_requested_dim() {
 - [ ] Run the focused red bar:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+bazel test --cache_test_results=no \
   //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
@@ -343,7 +343,7 @@ Ok(out)
 - [ ] Run the focused green bar:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+bazel test --cache_test_results=no \
   //ferric_continuum/tnsr:mesh_sim_tests
 #+end_src
 
@@ -382,7 +382,7 @@ Produces:
 - [ ] Run the required verification matrix:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+bazel test --cache_test_results=no \
   //ferric_continuum/tnsr:mesh_sim_tests \
   //ferric_continuum/tnsr:distributed_tests \
   //ferric_continuum/tnsr:context_parallel_gqa_tests \
@@ -421,7 +421,7 @@ Code commit:
   implementation commit.
 
 Verification:
-- ~/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:lib_tests~
+- ~bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:lib_tests~
 - Result: 4/4 targets passed.
 #+end_src
 

@@ -65,7 +65,7 @@ Read first:
 * Verification
 
 - Run:
-  =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_config_tests=
+  =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests=
 - Expected: tests pass and include:
   - nested HF config parse
   - flat inference config parse

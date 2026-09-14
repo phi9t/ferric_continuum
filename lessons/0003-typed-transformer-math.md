@@ -557,7 +557,7 @@ the same indexing bug make both sides agree.
 Run the architecture proof suite with:
 
 ```sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --lockfile_mode=off \
+bazel test --lockfile_mode=off \
   //ferric_continuum/tnsr:tnsr_tests \
   //ferric_continuum/tnsr:lib_tests \
   //ferric_continuum/tnsr:debug_trace_tests \

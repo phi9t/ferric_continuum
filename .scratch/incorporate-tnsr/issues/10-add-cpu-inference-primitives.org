@@ -6,7 +6,7 @@
 
 * Context
 
-The external `/data02/home/philip.yang/workspace/tnsr/src/inference.rs` contains useful generic CPU inference concepts. The destination is the existing Bazel-integrated `ferric_continuum/tnsr` module, not a replacement tree.
+The external `${HOME}/workspace/tnsr/src/inference.rs` contains useful generic CPU inference concepts. The destination is the existing Bazel-integrated `ferric_continuum/tnsr` module, not a replacement tree.
 
 Existing Qwen3, loader, tokenizer, CUDA, tensor, and ops APIs remain monorepo-owned. RoPE behavior must be reconciled with `ferric_continuum/tnsr/src/ops/rope.rs`.
 
@@ -44,7 +44,7 @@ bazel test //ferric_continuum/tnsr:qwen3_tests
 If Qwen3 math, loader, tokenizer, RoPE/GQA behavior, or logits output changes:
 
 #+begin_src sh
-MODEL_DIR=/data02/home/philip.yang/models/qwen3-0.6b \
+MODEL_DIR=${HOME}/models/qwen3-0.6b \
   ferric_continuum/tnsr/tools/verify_hf_compat.sh
 #+end_src
 

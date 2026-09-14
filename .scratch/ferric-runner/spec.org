@@ -88,19 +88,19 @@ The profile declares a primary repo and a map of visible workspace repos:
         "required": true
       },
       "modular": {
-        "host": "/data02/home/philip.yang/workspace/modular",
+        "host": "${HOME}/workspace/modular",
         "sandbox": "/workspace/modular",
         "mode": "ro",
         "required": false
       },
       "torchtitan": {
-        "host": "/data02/home/philip.yang/workspace/torchtitan",
+        "host": "${HOME}/workspace/torchtitan",
         "sandbox": "/workspace/torchtitan",
         "mode": "ro",
         "required": false
       },
       "monarch": {
-        "host": "/data02/home/philip.yang/workspace/monarch",
+        "host": "${HOME}/workspace/monarch",
         "sandbox": "/workspace/monarch",
         "mode": "ro",
         "required": false

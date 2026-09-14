@@ -65,7 +65,7 @@ pub fn reduce_scatter_sum(
 - Run:
 
 #+begin_src sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no \
+bazel test --cache_test_results=no \
   //ferric_continuum/tnsr:mesh_sim_tests \
   //ferric_continuum/tnsr:distributed_tests \
   //ferric_continuum/tnsr:context_parallel_gqa_tests \
@@ -95,13 +95,13 @@ Report:
 - [[file:../../../.superpowers/sdd/2026-08-18-remaining-architecture-options-plan.org/task-04-report.md][task-04-report.md]]
 
 TDD red evidence:
-- ~/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests~
+- ~bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests~
 - Result: failed to build with ~error[E0061]: this method takes 3 arguments but 4 arguments were supplied~ at the updated reduce-scatter test call sites.
 
 Focused green evidence:
-- ~/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests~
+- ~bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests~
 - Result: 1/1 target passed.
 
 Verification matrix:
-- ~/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:lib_tests~
+- ~bazel test --cache_test_results=no //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:lib_tests~
 - Result: 4/4 targets passed.

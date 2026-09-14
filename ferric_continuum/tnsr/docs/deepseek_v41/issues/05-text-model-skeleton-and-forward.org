@@ -93,9 +93,9 @@ Block/unit verifier requirements:
 - Regenerate model fixtures:
   =python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family layer,block,tiny-model=
 - Run:
-  =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_model_tests=
+  =bazel test //ferric_continuum/tnsr:deepseek_v41_model_tests=
 - Also run:
-  =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_math_tests=
+  =bazel test //ferric_continuum/tnsr:deepseek_v41_math_tests=
 - Expected: op, layer, block, and tiny-model tests pass.
 
 * Comments
@@ -117,8 +117,8 @@ Resolved in two implementation slices:
 Fresh evidence:
 
 - =python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family block,tiny-model= passed.
-- =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --nocache_test_results //ferric_continuum/tnsr:deepseek_v41_model_tests= passed.
-- =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --nocache_test_results //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests= passed.
+- =bazel test --nocache_test_results //ferric_continuum/tnsr:deepseek_v41_model_tests= passed.
+- =bazel test --nocache_test_results //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests= passed.
 - =git diff --check= on scoped 05B files passed.
 
 The block/model fixtures intentionally use fixture-seam provenance. They verify

@@ -13,8 +13,8 @@ Summary:
 - Added mesh simulation tests for dense product helpers, world-size validation, row-major rank coordinates, and out-of-range rank errors.
 
 Tests run with results:
-- RED: /data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:mesh_sim_tests failed to build before implementation with unresolved imports for MeshAxis, MeshError, ParallelDims5D, and RankCoord5D.
-- GREEN: /data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:mesh_sim_tests passed with 1 test target passing after implementation.
+- RED: bazel test //ferric_continuum/tnsr:mesh_sim_tests failed to build before implementation with unresolved imports for MeshAxis, MeshError, ParallelDims5D, and RankCoord5D.
+- GREEN: bazel test //ferric_continuum/tnsr:mesh_sim_tests passed with 1 test target passing after implementation.
 
 Commit hash:
 - 31f1207 Add dtensor 5D mesh semantics

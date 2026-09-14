@@ -55,7 +55,7 @@ bazel run //ferric_continuum/tnsr:tnsr_playground -- --help
 Qwen3 real-weight check, if relevant:
 
 #+begin_src sh
-MODEL_DIR=/data02/home/philip.yang/models/qwen3-0.6b \
+MODEL_DIR=${HOME}/models/qwen3-0.6b \
   ferric_continuum/tnsr/tools/verify_hf_compat.sh
 #+end_src
 
@@ -75,7 +75,7 @@ after tickets 09-14 were present.
 Required CPU build:
 
 #+begin_src text
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr
+bazel build //ferric_continuum/tnsr:tnsr
 Build completed successfully.
 #+end_src
 
@@ -83,7 +83,7 @@ Full CPU behavior matrix, including all focused targets introduced by the
 incorporation tickets:
 
 #+begin_src text
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:tnsr_tests //ferric_continuum/tnsr:debug_trace_tests //ferric_continuum/tnsr:inference_tests //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:qwen3_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:playground_cli_tests //ferric_continuum/tnsr:lib_tests
+bazel test //ferric_continuum/tnsr:tnsr_tests //ferric_continuum/tnsr:debug_trace_tests //ferric_continuum/tnsr:inference_tests //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:qwen3_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:playground_cli_tests //ferric_continuum/tnsr:lib_tests
 Test cases: finished with 11 passing, 0 skipped and 0 failing out of 11 test cases.
 Executed 9 out of 11 tests: 11 tests pass.
 #+end_src
@@ -91,7 +91,7 @@ Executed 9 out of 11 tests: 11 tests pass.
 Public docs:
 
 #+begin_src text
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr_doc
+bazel build //ferric_continuum/tnsr:tnsr_doc
 Build completed successfully.
 #+end_src
 
@@ -102,10 +102,10 @@ final docs/examples ticket.
 CLI smoke checks:
 
 #+begin_src text
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --help
+bazel run //ferric_continuum/tnsr:tnsr_demo -- --help
 Help output includes Usage: tnsr_demo [--dot PATH] [--trace-json PATH].
 
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo
+bazel run //ferric_continuum/tnsr:tnsr_demo
 Default run succeeded and wrote /tmp/block.dot.
 head -n 1 /tmp/block.dot
 digraph Autograd {
@@ -115,7 +115,7 @@ Artifact smoke for explicit DOT and trace JSON paths:
 
 #+begin_src text
 tmpdir=$(mktemp -d /tmp/tnsr-ticket14-primary-smoke.XXXXXX)
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --dot "$tmpdir/block.dot" --trace-json "$tmpdir/trace.json"
+bazel run //ferric_continuum/tnsr:tnsr_demo -- --dot "$tmpdir/block.dot" --trace-json "$tmpdir/trace.json"
 head -n 1 "$tmpdir/block.dot"
 python3 -m json.tool "$tmpdir/trace.json" >/dev/null
 rg -q '"schema": "tnsr.debug_trace"' "$tmpdir/trace.json"
@@ -136,9 +136,9 @@ Optional checks:
   final review pass:
 
 #+begin_src text
-MODEL_DIR=/data02/home/philip.yang/models/qwen3-0.6b \
+MODEL_DIR=${HOME}/models/qwen3-0.6b \
   OUT_DIR=/tmp/tnsr_hf_compat_after_review \
-  BAZEL=/data02/home/philip.yang/.local/bin/bazel-9.2.0 \
+  BAZEL=bazel \
   ferric_continuum/tnsr/tools/verify_hf_compat.sh
 
 prompt[0]: The capital of France is
@@ -186,7 +186,7 @@ Full review and post-fix verification:
 Focused post-review tests:
 
 #+begin_src text
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests
+bazel test //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests
 //ferric_continuum/tnsr:scaling_memory_tests PASSED
 //ferric_continuum/tnsr:distributed_tests PASSED
 #+end_src
@@ -194,13 +194,13 @@ Focused post-review tests:
 Full post-review matrix:
 
 #+begin_src text
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:tnsr_tests //ferric_continuum/tnsr:debug_trace_tests //ferric_continuum/tnsr:inference_tests //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:qwen3_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:playground_cli_tests //ferric_continuum/tnsr:lib_tests
+bazel test //ferric_continuum/tnsr:tnsr_tests //ferric_continuum/tnsr:debug_trace_tests //ferric_continuum/tnsr:inference_tests //ferric_continuum/tnsr:mesh_sim_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:qwen3_tests //ferric_continuum/tnsr:context_parallel_gqa_tests //ferric_continuum/tnsr:playground_cli_tests //ferric_continuum/tnsr:lib_tests
 Test cases: finished with 11 passing, 0 skipped and 0 failing out of 11 test cases.
 Bazel reported cached results for some targets in that historical run; the
 final landing pass reran the affected incorporation targets with
 ~--cache_test_results=no~ and reran the Qwen3 real-weight compatibility script.
 
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr_doc
+bazel build //ferric_continuum/tnsr:tnsr_doc
 Build completed successfully with the known pre-existing rustdoc warnings in
 autograd.rs and qwen3_load.rs.
 

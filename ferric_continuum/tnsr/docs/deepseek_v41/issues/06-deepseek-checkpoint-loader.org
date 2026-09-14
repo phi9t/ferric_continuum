@@ -73,7 +73,7 @@ Read first:
 * Verification
 
 - Run:
-  =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_model_tests=
+  =bazel test //ferric_continuum/tnsr:deepseek_v41_model_tests=
 - Required test cases:
   - tiny converted-style checkpoint loads.
   - wrong shape returns =Err= naming the offending tensor.

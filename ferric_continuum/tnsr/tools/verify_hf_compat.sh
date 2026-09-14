@@ -14,7 +14,7 @@
 #   MODEL_DIR   local Qwen3 checkpoint (default: ~/models/qwen3-0.6b)
 #   HF_PYTHON   python with torch+transformers (default: .venv-hf/bin/python)
 #   OUT_DIR     scratch dir for JSON dumps (default: /tmp/tnsr_hf_compat)
-#   BAZEL       bazel binary (default: ~/.local/bin/bazel-9.2.0)
+#   BAZEL       bazel binary (default: bazel; version pinned by .bazelversion)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -23,7 +23,7 @@ cd "$REPO_ROOT"
 MODEL_DIR="${MODEL_DIR:-$HOME/models/qwen3-0.6b}"
 HF_PYTHON="${HF_PYTHON:-$REPO_ROOT/.venv-hf/bin/python}"
 OUT_DIR="${OUT_DIR:-/tmp/tnsr_hf_compat}"
-BAZEL="${BAZEL:-$HOME/.local/bin/bazel-9.2.0}"
+BAZEL="${BAZEL:-bazel}"
 TOOLS="$REPO_ROOT/ferric_continuum/tnsr/tools"
 
 mkdir -p "$OUT_DIR"

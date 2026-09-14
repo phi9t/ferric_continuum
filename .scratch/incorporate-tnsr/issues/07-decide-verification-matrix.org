@@ -104,7 +104,7 @@ bazel build -c opt //ferric_continuum/tnsr:qwen3_infer
 Run the real-weight compatibility script only when a ticket touches Qwen3 math, loader/tokenizer code, norm/RoPE/GQA behavior, or logits output:
 
 #+begin_src sh
-MODEL_DIR=/data02/home/philip.yang/models/qwen3-0.6b \
+MODEL_DIR=${HOME}/models/qwen3-0.6b \
   ferric_continuum/tnsr/tools/verify_hf_compat.sh
 #+end_src
 

@@ -6,22 +6,22 @@
 
 * Context
 
-After Ferric Continuum becomes the sole maintained `tnsr` implementation, the standalone checkout audit is resolved, and Ultron no longer tracks `tnsr`, retire `/data02/home/philip.yang/workspace/tnsr` from the active workspace. The chosen policy is archive-first, then delete.
+After Ferric Continuum becomes the sole maintained `tnsr` implementation, the standalone checkout audit is resolved, and Ultron no longer tracks `tnsr`, retire `${HOME}/workspace/tnsr` from the active workspace. The chosen policy is archive-first, then delete.
 
 The archive must preserve both Git refs and working-tree contents. Use a Git bundle for refs/history and a separate content tarball for the exact checkout contents, including untracked files only if the pre-archive audit explicitly allows them.
 
 * Requirements
 
 - Confirm ticket 17 is resolved and Ultron no longer tracks `tnsr`.
-- Confirm `/data02/home/philip.yang/workspace/tnsr` is clean immediately before archiving.
-- Create an archive directory outside active `~/workspace`, such as `/data02/home/philip.yang/archive/tnsr-retired-<date>/`.
+- Confirm `${HOME}/workspace/tnsr` is clean immediately before archiving.
+- Create an archive directory outside active `~/workspace`, such as `${HOME}/archive/tnsr-retired-<date>/`.
 - Create a Git bundle with all refs from the standalone checkout.
 - Create a content tarball of the standalone checkout that includes `.git` and does not follow symlinks.
 - Record the archive directory, exact commands, byte sizes, and SHA-256 digests for both archive artifacts under `* Answer`.
 - Verify the bundle and list refs from the bundle before deletion.
 - Verify the content tarball contains `.git/HEAD` and representative project files before deletion.
 - Re-check both archive digests immediately before deletion.
-- Delete `/data02/home/philip.yang/workspace/tnsr` only after the user gives explicit final deletion authority in the trusted request stream.
+- Delete `${HOME}/workspace/tnsr` only after the user gives explicit final deletion authority in the trusted request stream.
 - Record the deletion command and post-delete absence check under `* Answer`.
 
 * Out of scope
@@ -37,16 +37,16 @@ The archive must preserve both Git refs and working-tree contents. Use a Git bun
 Pre-archive:
 
 #+begin_src sh
-git -C /data02/home/philip.yang/workspace/tnsr status --short
+git -C ${HOME}/workspace/tnsr status --short
 #+end_src
 
 Archive creation:
 
 #+begin_src sh
-archive_dir=/data02/home/philip.yang/archive/tnsr-retired-$(date -u +%Y%m%dT%H%M%SZ)
+archive_dir=${HOME}/archive/tnsr-retired-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p "$archive_dir"
-git -C /data02/home/philip.yang/workspace/tnsr bundle create "$archive_dir/tnsr-all-refs.bundle" --all
-tar -C /data02/home/philip.yang/workspace -czf "$archive_dir/tnsr-working-tree.tar.gz" tnsr
+git -C ${HOME}/workspace/tnsr bundle create "$archive_dir/tnsr-all-refs.bundle" --all
+tar -C ${HOME}/workspace -czf "$archive_dir/tnsr-working-tree.tar.gz" tnsr
 wc -c "$archive_dir/tnsr-all-refs.bundle" "$archive_dir/tnsr-working-tree.tar.gz"
 (
   cd "$archive_dir"
@@ -70,8 +70,8 @@ tar -tf "$archive_dir/tnsr-working-tree.tar.gz" | rg '^(tnsr/\.git/HEAD|tnsr/Car
 Post-delete:
 
 #+begin_src sh
-rm -rf /data02/home/philip.yang/workspace/tnsr
-test ! -e /data02/home/philip.yang/workspace/tnsr
+rm -rf ${HOME}/workspace/tnsr
+test ! -e ${HOME}/workspace/tnsr
 #+end_src
 
 * Comments
@@ -87,10 +87,10 @@ the archive evidence is available.
 Pre-archive state:
 
 #+begin_src text
-git -C /data02/home/philip.yang/workspace/tnsr status --short --untracked-files=all
+git -C ${HOME}/workspace/tnsr status --short --untracked-files=all
 No output; active checkout was clean.
 
-git -C /data02/home/philip.yang/workspace/tnsr status --ignored --short
+git -C ${HOME}/workspace/tnsr status --ignored --short
 !! .worktrees/
 !! target/
 !! web/dist/
@@ -106,23 +106,23 @@ working-tree tarball.
 Archive directory:
 
 #+begin_src text
-/data02/home/philip.yang/archive/tnsr-retired-20260820T202757Z
+${HOME}/archive/tnsr-retired-20260820T202757Z
 #+end_src
 
 Archive creation:
 
 #+begin_src text
-archive_dir=/data02/home/philip.yang/archive/tnsr-retired-20260820T202757Z
+archive_dir=${HOME}/archive/tnsr-retired-20260820T202757Z
 mkdir -p "$archive_dir"
-git -C /data02/home/philip.yang/workspace/tnsr bundle create "$archive_dir/tnsr-all-refs.bundle" --all
-tar -C /data02/home/philip.yang/workspace \
+git -C ${HOME}/workspace/tnsr bundle create "$archive_dir/tnsr-all-refs.bundle" --all
+tar -C ${HOME}/workspace \
   --exclude='tnsr/.worktrees' \
   --exclude='tnsr/target' \
   --exclude='tnsr/web/dist' \
   --exclude='tnsr/web/node_modules' \
   --exclude='tnsr/web/test-results' \
   -czf "$archive_dir/tnsr-working-tree.tar.gz" tnsr
-tar -C /data02/home/philip.yang/workspace/tnsr \
+tar -C ${HOME}/workspace/tnsr \
   --exclude='.worktrees/*/target' \
   --exclude='.worktrees/*/web/dist' \
   --exclude='.worktrees/*/web/node_modules' \
@@ -133,9 +133,9 @@ tar -C /data02/home/philip.yang/workspace/tnsr \
 Archive sizes:
 
 #+begin_src text
-128037 /data02/home/philip.yang/archive/tnsr-retired-20260820T202757Z/tnsr-all-refs.bundle
-398161 /data02/home/philip.yang/archive/tnsr-retired-20260820T202757Z/tnsr-working-tree.tar.gz
-316818 /data02/home/philip.yang/archive/tnsr-retired-20260820T202757Z/tnsr-linked-worktrees.tar.gz
+128037 ${HOME}/archive/tnsr-retired-20260820T202757Z/tnsr-all-refs.bundle
+398161 ${HOME}/archive/tnsr-retired-20260820T202757Z/tnsr-working-tree.tar.gz
+316818 ${HOME}/archive/tnsr-retired-20260820T202757Z/tnsr-linked-worktrees.tar.gz
 #+end_src
 
 SHA-256 digests:
@@ -150,7 +150,7 @@ Bundle verification:
 
 #+begin_src text
 git bundle verify "$archive_dir/tnsr-all-refs.bundle"
-/data02/home/philip.yang/archive/tnsr-retired-20260820T202757Z/tnsr-all-refs.bundle is okay
+${HOME}/archive/tnsr-retired-20260820T202757Z/tnsr-all-refs.bundle is okay
 The bundle contains these 10 refs:
 7c49c1912b6abced917854212371c441f8cde02e refs/heads/codex/active-work-tracker
 7c49c1912b6abced917854212371c441f8cde02e refs/heads/codex/ultron-mainline-policy
@@ -223,6 +223,6 @@ tnsr-linked-worktrees.tar.gz: OK
 Deletion pending explicit final authority:
 
 #+begin_src sh
-rm -rf /data02/home/philip.yang/workspace/tnsr
-test ! -e /data02/home/philip.yang/workspace/tnsr
+rm -rf ${HOME}/workspace/tnsr
+test ! -e ${HOME}/workspace/tnsr
 #+end_src

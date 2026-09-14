@@ -1,0 +1,54 @@
+#!/bin/bash
+# Ferric Continuum pre-commit hook: block PII / machine-identifiable data.
+# Scans the staged content of tracked files with tools/desensitize_check.py.
+# Install via scripts/install-git-hooks.sh. To bypass in an emergency, commit
+# with --no-verify (discouraged).
+
+set -eu -o pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+CHECKER="${REPO_ROOT}/tools/desensitize_check.py"
+
+if [[ ! -f "${CHECKER}" ]]; then
+  # Checker not present on this branch; do not block the commit.
+  exit 0
+fi
+
+if ! command -v python3 &> /dev/null; then
+  echo "pre-commit: python3 not found; skipping desensitization check." >&2
+  exit 0
+fi
+
+# Collect staged, non-deleted files (NUL-delimited to survive odd names).
+mapfile -d '' -t staged < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+if [[ "${#staged[@]}" -eq 0 ]]; then
+  exit 0
+fi
+
+# Materialize staged blob content into a temp tree so we scan exactly what is
+# about to be committed (not the possibly-dirtier working tree).
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "${tmpdir}"' EXIT
+
+scan_paths=()
+for f in "${staged[@]}"; do
+  [[ -n "${f}" ]] || continue
+  dst="${tmpdir}/${f}"
+  mkdir -p "$(dirname "${dst}")"
+  if git show ":${f}" > "${dst}" 2>/dev/null; then
+    scan_paths+=("${dst}")
+  fi
+done
+
+if [[ "${#scan_paths[@]}" -eq 0 ]]; then
+  exit 0
+fi
+
+if ! python3 "${CHECKER}" "${scan_paths[@]}"; then
+  echo "" >&2
+  echo "pre-commit: desensitization check failed on staged content." >&2
+  echo "  Fix with: python3 tools/desensitize_check.py --fix" >&2
+  echo "  Then re-stage and commit. (Bypass with --no-verify, discouraged.)" >&2
+  exit 1
+fi

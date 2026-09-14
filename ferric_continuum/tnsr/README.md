@@ -11,18 +11,19 @@ Bazel `--config=cuda`.
 
 ## Build and Test
 
-Start with Bazel. The pinned binary avoids host `bazel` version drift:
+Start with Bazel. The version is pinned by `.bazelversion` (honored by
+`bazelisk`/the launcher), so plain `bazel` avoids host version drift:
 
 ```sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:lib_tests
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr_doc
+bazel build //ferric_continuum/tnsr:tnsr
+bazel test //ferric_continuum/tnsr:lib_tests
+bazel build //ferric_continuum/tnsr:tnsr_doc
 ```
 
 Run the current module behavior suite with:
 
 ```sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test \
+bazel test \
   //ferric_continuum/tnsr:tnsr_tests \
   //ferric_continuum/tnsr:debug_trace_tests \
   //ferric_continuum/tnsr:inference_tests \
@@ -42,7 +43,7 @@ Run the current module behavior suite with:
 CUDA forward agreement is separate, opt-in, and requires a CUDA GPU:
 
 ```sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 test --config=cuda //ferric_continuum/tnsr:cuda_forward_tests
+bazel test --config=cuda //ferric_continuum/tnsr:cuda_forward_tests
 ```
 
 Cargo metadata exists for Rust editor tooling and local supplementary checks,
@@ -54,8 +55,8 @@ Use `tnsr_demo` when you want a single maintained example that exercises the
 current interfaces:
 
 ```sh
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --help
-/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- \
+bazel run //ferric_continuum/tnsr:tnsr_demo -- --help
+bazel run //ferric_continuum/tnsr:tnsr_demo -- \
   --dot /tmp/tnsr/block.dot \
   --trace-json /tmp/tnsr/trace.json
 ```

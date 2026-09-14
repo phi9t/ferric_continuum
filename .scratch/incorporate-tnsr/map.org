@@ -8,7 +8,7 @@ Produce a decision-backed incorporation plan for bringing useful material from `
 
 * Notes
 
-- Consult `/data02/home/philip.yang/workspace/ferric_continuum/docs/agents/domain.md` and `/data02/home/philip.yang/workspace/ferric_continuum/docs/agents/issue-tracker.org`.
+- Consult `${HOME}/workspace/ferric_continuum/docs/agents/domain.md` and `${HOME}/workspace/ferric_continuum/docs/agents/issue-tracker.org`.
 - Treat `ferric_continuum/tnsr` as the current Bazel-integrated target, not a blank destination.
 - Treat `~/workspace/tnsr` as a Cargo-first source repo containing overlapping Rust core files, CPU inference primitives, playground CLI, tests, docs, examples, and a Vite/Three.js trace viewer. It is a temporary source reference until the archive-first retirement tickets are complete.
 - Preserve the repo's Bazel-first workflow. Cargo manifests may exist for Rust tooling, but implementation landing must keep Bazel targets coherent.
@@ -39,4 +39,4 @@ Produce a decision-backed incorporation plan for bringing useful material from `
 - Importing the Vite/Three.js web trace viewer, frontend toolchain, `web/dist`, `web/test-results`, or `web/node_modules` in this incorporation batch.
 - Pushing branches or changing remotes.
 - Reworking unrelated Ferric Continuum modules outside the integration boundaries this map identifies.
-- Deleting `/data02/home/philip.yang/workspace/tnsr` before archive evidence and explicit final deletion authority exist.
+- Deleting `${HOME}/workspace/tnsr` before archive evidence and explicit final deletion authority exist.

@@ -74,9 +74,9 @@ Read first:
 - Regenerate fixtures:
   =python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family prompt=
 - Run:
-  =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_model_tests=
+  =bazel test //ferric_continuum/tnsr:deepseek_v41_model_tests=
 - Build CLI:
-  =/data02/home/philip.yang/.local/bin/bazel-9.2.0 build -c opt --@rules_rust//rust/settings:extra_rustc_flags=-Copt-level=3 //ferric_continuum/tnsr:deepseek_v41_infer=
+  =bazel build -c opt --@rules_rust//rust/settings:extra_rustc_flags=-Copt-level=3 //ferric_continuum/tnsr:deepseek_v41_infer=
 - Manual smoke with tiny fixture model:
   =bazel-bin/ferric_continuum/tnsr/deepseek_v41_infer --model-dir <tiny-fixture-dir> --token-ids 1,2,3 --max-new-tokens 0 --dump-logits /tmp/deepseek_v41_tiny_logits.json=
 

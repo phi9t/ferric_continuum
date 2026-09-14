@@ -23,7 +23,7 @@ For each group, classify the relationship to the monorepo as one of: already pre
 
 * Context
 
-Use the external repo at `/data02/home/philip.yang/workspace/tnsr` and the current monorepo module at `/data02/home/philip.yang/workspace/ferric_continuum/ferric_continuum/tnsr`.
+Use the external repo at `${HOME}/workspace/tnsr` and the current monorepo module at `${HOME}/workspace/ferric_continuum/ferric_continuum/tnsr`.
 
 Do not make source changes while resolving this ticket. The output is a source-grounded inventory that later decisions can cite.
 
