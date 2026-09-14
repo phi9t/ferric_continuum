@@ -8,7 +8,9 @@ use tnsr::{
             SharedAttentionState,
         },
         engram::DeepSeekV41Engram,
-        model::{DeepSeekV41Block, DeepSeekV41TextModel},
+        model::{
+            DeepSeekV41Block, DeepSeekV41DsparkHead, DeepSeekV41DsparkStage, DeepSeekV41TextModel,
+        },
         moe::{DeepSeekV41Expert, DeepSeekV41Gate, DeepSeekV41MoE},
         residual::ResidualStream,
     },
@@ -617,6 +619,70 @@ fn tiny_text_model_emits_bsv_logits_and_rejects_image_token_ids() {
         Err(err) => err,
     };
     assert!(err.contains("text-only"), "unexpected error: {err}");
+}
+
+/// Level-6 tiny DSpark `forward_spec` parity: builds a single-stage DSpark head
+/// from the fixture weights and checks the biased draft logits, greedy output
+/// ids, and confidence against the composed upstream reference.
+#[test]
+fn tiny_dspark_head_forward_spec_matches_reference() {
+    let fixture = fixture("dspark_tiny_model_fixture.json");
+    assert_fixture_meta(&fixture, "Transformer.forward_spec");
+    let tol = f32_field(&fixture, "absolute_tolerance");
+    let input = &fixture["input"];
+    let params = &fixture["parameters"];
+
+    let stage = DeepSeekV41DsparkStage {
+        block: {
+            // The nested block fixture pins its gate token count to its own tiny
+            // sequence; the DSpark draft stream is `batch * block_size` tokens,
+            // so retarget the MoE gate's token count to the draft grid.
+            let mut block = block_from_fixture(&params["block_fixture"]);
+            block.ffn.gate.tokens = usize_field(input, "batch") * usize_field(input, "block_size");
+            block
+        },
+        main_proj: Some(param_vec(&params["main_proj"])),
+        main_norm: Some(param_vec(&params["main_norm"])),
+        head_norm: Some(param_vec(&params["head_norm"])),
+        markov_embed: Some(param_vec(&params["markov_embed"])),
+        markov_head: Some(param_vec(&params["markov_head"])),
+        confidence_proj: Some(param_vec(&params["confidence_proj"])),
+    };
+    let head = DeepSeekV41DsparkHead {
+        vocab_size: usize_field(input, "vocab_size"),
+        dim: usize_field(input, "dim"),
+        hc_mult: usize_field(input, "hc_mult"),
+        block_size: usize_field(input, "block_size"),
+        noise_token_id: usize_field(input, "noise_token_id"),
+        markov_rank: usize_field(input, "markov_rank"),
+        head_eps: f32_field(input, "head_eps"),
+        embed_tokens: tensor_param(&params["embed_tokens"]),
+        lm_head: tensor_param(&params["lm_head"]),
+        stages: vec![stage],
+    };
+
+    let input_ids = usize_array(input, "input_ids");
+    let main_hidden = f32_array(input, "main_hidden");
+    let out = head.forward_spec(&input_ids, &main_hidden);
+
+    let expected = &fixture["expected"];
+    assert_eq!(
+        out.output_ids,
+        usize_array(expected, "output_ids"),
+        "greedy draft output ids must match"
+    );
+    assert_close(
+        &out.logits,
+        &f32_array(expected, "logits"),
+        tol,
+        "dspark biased logits",
+    );
+    assert_close(
+        &out.confidence,
+        &f32_array(expected, "confidence"),
+        tol,
+        "dspark confidence",
+    );
 }
 
 /// Level-5 prompt-string parity: the prompt fixtures are rendered by upstream

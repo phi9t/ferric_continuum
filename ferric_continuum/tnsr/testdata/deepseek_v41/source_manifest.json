@@ -168,6 +168,57 @@
         ]
       },
       "why": "Pins the text/vision merge and VL routing-bias semantics the Wave-2 model forward must match."
+    },
+    {
+      "id": "dspark-classes-surface",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py",
+      "expected": {
+        "all_phrases": [
+          "def get_dspark_topk_idxs",
+          "class DSparkAttention(Attention)",
+          "class DSparkMarkovHead(nn.Module)",
+          "class DSparkConfidenceHead(nn.Module)",
+          "class DSparkBlock(Block)",
+          "DSpark stage stored under the mtp.* checkpoint namespace"
+        ]
+      },
+      "why": "Pins the upstream DSpark class surface the Wave-3 MTP/Markov/confidence parity fixtures execute."
+    },
+    {
+      "id": "dspark-block-stage-layout",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py",
+      "expected": {
+        "all_phrases": [
+          "stage_id = layer_id - args.n_layers",
+          "self.main_proj = Linear(args.dim * len(args.dspark_target_layer_ids), args.dim)",
+          "self.main_norm = RMSNorm(args.dim, args.norm_eps)",
+          "self.markov_head = DSparkMarkovHead(args.vocab_size, args.dspark_markov_rank)",
+          "self.confidence_head = DSparkConfidenceHead(args.dim + args.dspark_markov_rank)"
+        ]
+      },
+      "why": "Records which DSpark stage owns main_proj/main_norm (stage 0) vs norm/markov_head/confidence_head (last stage) for the mtp.* loader."
+    },
+    {
+      "id": "dspark-forward-spec-unused",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py",
+      "expected": {
+        "all_phrases": [
+          "def forward_spec(self, input_ids: torch.Tensor, main_hidden: torch.Tensor, start_pos: int = 0)",
+          "h, main_x = self.mtp[0].forward_embed(main_hidden, input_ids)",
+          "return self.mtp[-1].forward_head(h, pre_mix, input_ids)"
+        ]
+      },
+      "why": "Pins forward_spec as the DSpark entry the Wave-3 parity harness executes even though generate.py never calls it."
+    },
+    {
+      "id": "dspark-generate-unused",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/generate.py",
+      "expected": {
+        "none_phrases": [
+          "forward_spec"
+        ]
+      },
+      "why": "Confirms the shipped generation loop never invokes DSpark, so Wave-3 parity is proven against forward_spec directly rather than an end-to-end sampling path."
     }
   ]
 }

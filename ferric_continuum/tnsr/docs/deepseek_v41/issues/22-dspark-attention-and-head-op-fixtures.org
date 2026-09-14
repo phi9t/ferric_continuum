@@ -1,0 +1,63 @@
+#+TITLE: DSpark attention and head op fixtures
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 21-dspark-config-and-source-verifier
+#+PARENT: ../spec.org
+
+* Context
+
+Wave 3 pins the parameter-free DSpark math before wiring the stage model, exactly
+as Wave 1A isolated the text ops. This ticket adds the Markov head, fp32
+confidence head, noise-token draft-input construction, =main_proj=/=main_norm=
+seam, the decode top-k window index math (=get_dspark_topk_idxs=), and the
+single-token draft loop, each proven against an upstream-executed fixture.
+
+Read first:
+
+- =../spec.org= (Wave 3 DSpark contract, decision D1/D2)
+- =../upstream/inference/model.py= (=DSparkMarkovHead=, =DSparkConfidenceHead=,
+  =DSparkBlock.forward_embed=, =DSparkBlock.forward_head=, =get_dspark_topk_idxs=)
+- =ferric_continuum/tnsr/src/deepseek_v41/dspark.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/sparse.rs= (=dspark_topk_indices=)
+- =ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py=
+
+* Requirements
+
+- Implement in =src/deepseek_v41/dspark.rs=: =markov_head_forward=,
+  =confidence_head_forward=, =draft_input_ids=, =main_proj_norm=, =draft_loop=
+  (returning =DraftLoopOutput { output_ids, logits, confidence }=), plus
+  =decode_topk_indices= in =sparse.rs=. CPU/f32, explicit math, no hidden state.
+- The draft loop follows decision D1: bias base logits by the Markov head,
+  temperature-0 argmax to pick the draft id, fp32 confidence per step.
+- Extend =deepseek_v41_fixture_gen.py= with a =--family dspark= emitter that
+  runs the upstream heads/seams on tiny deterministic tensors and writes
+  =dspark_{markov,confidence,draft_input,main_proj_norm,draft_loop,topk}_fixture.json=
+  with =upstream_function= metadata and an =absolute_tolerance=.
+- Add op-level assertions in =tests/deepseek_v41_math_test.rs= for each fixture.
+  Wire the fixtures into =BUILD.bazel= =deepseek_v41_math_tests= data.
+
+* Out of scope
+
+- No stage block execution / =forward_spec= (ticket 23).
+
+* Verification
+
+- =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_math_tests=
+- =python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family dspark=
+
+* Resolution
+
+Implemented the six DSpark ops in =dspark.rs= (=markov_head_forward=,
+=confidence_head_forward=, =draft_input_ids=, =main_proj_norm=, =draft_loop=) and
+=decode_topk_indices= in =sparse.rs=. The draft loop biases base logits by the
+Markov head, argmaxes at temperature 0, and emits an fp32 confidence per step.
+=deepseek_v41_fixture_gen.py --family dspark= emits the six fixtures from the
+upstream heads/seams; the math test asserts each against its
+=upstream_function= (=DSparkMarkovHead.forward=, =DSparkConfidenceHead.forward=,
+=DSparkBlock.forward_embed=, =DSparkBlock.forward_head=, =get_dspark_topk_idxs=).
+
+Evidence (pinned Bazel 9.2.0):
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_math_tests= -> PASSED (DSpark
+  markov/confidence/draft-input/main-proj-norm/draft-loop/topk cases green).
+- =python3 tools/deepseek_v41_fixture_gen.py --repo-root . --family dspark= ->
+  regenerates the six fixtures with no numeric drift.

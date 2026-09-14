@@ -3,7 +3,10 @@
 
 This is the Level-6 parity reference.  It emits the same JSON schema the Rust
 CLI (``deepseek_v41_infer --dump-logits``) writes so
-``deepseek_v41_compare_logits.py`` can diff the two.
+``deepseek_v41_compare_logits.py`` can diff the two.  The ``--dspark`` mode
+additionally emits the tiny ``forward_spec`` reference (``output_ids`` /
+``logits`` / ``confidence``) recomputed from the shared ``generate_dspark_model``
+helper, the same numeric source the Rust ``forward_spec`` parity test consumes.
 
 Two modes:
 
@@ -875,6 +878,54 @@ def _write_image_patches_json(path: Path) -> None:
     path.write_text(json.dumps([record]) + "\n")
 
 
+# --------------------------------------------------------------------------
+# DSpark tiny reference (composed forward_spec)
+# --------------------------------------------------------------------------
+#
+# The DSpark tiny reference reuses the *exact* math of
+# `deepseek_v41_fixture_gen.generate_dspark_model` (the same helper composition
+# the Rust `DeepSeekV41DsparkHead::forward_spec` is checked against in
+# `deepseek_v41_model_test.rs`).  Rather than duplicate that composition here, we
+# invoke the fixture generator into a scratch dir, read back the tiny model
+# fixture it wrote, and re-serialize the `output_ids` / `logits` / `confidence`
+# in the parity JSON schema the comparator consumes.  This keeps a single source
+# of numeric truth for the DSpark forward.
+
+
+def _dspark_reference_payload(fg, prompt: str) -> dict:
+    """Compute the tiny DSpark reference via ``generate_dspark_model``.
+
+    Returns the parity payload ``{output_ids, logits, confidence, ...}``.  The
+    numbers are the same ones ``dspark_tiny_model_fixture.json`` carries, so the
+    Rust ``forward_spec`` parity test and this Python reference share one source
+    of truth.
+    """
+    import tempfile
+
+    backend, kernel_patch = _record_upstream_backend(_repo_root_from_here(), fg)
+    with tempfile.TemporaryDirectory(prefix="dsv41_dspark_ref_") as tmp:
+        out_dir = Path(tmp)
+        # `generate_dspark_model` re-derives the tiny stage from the shared
+        # `*_ref` helpers and writes `dspark_tiny_model_fixture.json`.
+        fg.generate_dspark_model(out_dir, None, "reference-recompute")
+        fixture = json.loads((out_dir / "dspark_tiny_model_fixture.json").read_text())
+
+    expected = fixture["expected"]
+    inp = fixture["input"]
+    return {
+        "token_ids": list(inp["input_ids"]),
+        "prompt": prompt,
+        "vocab_size": inp["vocab_size"],
+        "model_type": "deepseek_v41_dspark",
+        "logits": [float(v) for v in expected["logits"]],
+        "logits_shape": list(expected["logits_shape"]),
+        "output_ids": list(expected["output_ids"]),
+        "confidence": [float(v) for v in expected["confidence"]],
+        "reference_backend": backend,
+        "kernel_patch": kernel_patch,
+    }
+
+
 def _detect_cuda_backend() -> str:
     """Record whether a CUDA torch runtime is available (B200 path).
 
@@ -916,6 +967,11 @@ def main() -> int:
         "--multimodal",
         action="store_true",
         help="compute the tiny multimodal reference logits instead of text-only",
+    )
+    p.add_argument(
+        "--dspark",
+        action="store_true",
+        help="compute the tiny DSpark forward_spec reference (output_ids/logits/confidence)",
     )
     p.add_argument("--out", type=Path, default=None, help="write reference logits JSON here")
     p.add_argument(
@@ -1001,6 +1057,17 @@ def main() -> int:
         ids = [int(x) for x in args.token_ids.split(",") if x.strip()]
     else:
         ids = list(TINY["ids"])
+
+    if args.dspark:
+        payload = _dspark_reference_payload(fg, args.prompt)
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(payload) + "\n")
+        print(
+            f"wrote dspark reference (output_ids={payload['output_ids']}, "
+            f"{len(payload['logits'])} logits, {len(payload['confidence'])} "
+            f"confidence) to {args.out} [backend={payload['reference_backend']}]"
+        )
+        return 0
 
     backend, kernel_patch = _record_upstream_backend(repo_root, fg)
     logits = _reference_logits(fg)

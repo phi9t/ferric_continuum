@@ -1,0 +1,83 @@
+{
+  "absolute_tolerance": 1e-05,
+  "expected": {
+    "out": [
+      1.73188448,
+      0.53954852,
+      -0.25645217,
+      -0.61282057,
+      -1.49980175,
+      -1.04727519,
+      -0.6542238,
+      0.16549538
+    ]
+  },
+  "input": {
+    "dim": 4,
+    "eps": 1e-06,
+    "in_dim": 8,
+    "main_hidden": [
+      -0.75,
+      -0.625,
+      -0.5,
+      -0.375,
+      -0.25,
+      -0.125,
+      0.0,
+      0.125,
+      0.25,
+      0.375,
+      0.5,
+      0.625,
+      0.75,
+      -0.75,
+      -0.625,
+      -0.5
+    ],
+    "norm_weight": [
+      1.0,
+      0.9,
+      1.1,
+      0.8
+    ],
+    "proj": [
+      -0.4,
+      -0.3,
+      -0.2,
+      -0.1,
+      0.0,
+      0.1,
+      0.2,
+      0.3,
+      0.4,
+      -0.4,
+      -0.3,
+      -0.2,
+      -0.1,
+      0.0,
+      0.1,
+      0.2,
+      0.3,
+      0.4,
+      -0.4,
+      -0.3,
+      -0.2,
+      -0.1,
+      0.0,
+      0.1,
+      0.2,
+      0.3,
+      0.4,
+      -0.4,
+      -0.3,
+      -0.2,
+      -0.1,
+      0.0
+    ]
+  },
+  "line_hint": "DSparkBlock.forward_embed main_norm(main_proj(...)) around lines 1128-1135",
+  "source_file": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py",
+  "upstream_call_status": "called-upstream:forward_embed:main_proj_norm",
+  "upstream_function": "DSparkBlock.forward_embed",
+  "upstream_import_status": "path-import-ok"
+}

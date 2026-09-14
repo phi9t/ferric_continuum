@@ -1,0 +1,29 @@
+{
+  "absolute_tolerance": 0.0,
+  "expected": {
+    "draft_input_ids": [
+      1,
+      4,
+      4,
+      4,
+      3,
+      4,
+      4,
+      4
+    ]
+  },
+  "input": {
+    "batch": 2,
+    "block_size": 4,
+    "input_ids": [
+      1,
+      3
+    ],
+    "noise_token_id": 4
+  },
+  "line_hint": "DSparkBlock.forward_embed draft ids around lines 1128-1135",
+  "source_file": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py",
+  "upstream_call_status": "fixture-seam:forward_embed:draft-ids",
+  "upstream_function": "DSparkBlock.forward_embed",
+  "upstream_import_status": "path-import-ok"
+}

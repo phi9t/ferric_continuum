@@ -1,0 +1,101 @@
+#+TITLE: DSpark parity harness (Level 6) and closure
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 24-dspark-checkpoint-loader
+#+PARENT: ../spec.org
+
+* Context
+
+Wave 3 closes with a parity ladder mirroring Waves 1 and 2, proving the Rust
+DSpark =forward_spec= path against the composed upstream reference. Parity is
+proven two ways: the in-process Bazel model test
+(=tiny_dspark_head_forward_spec_matches_reference=) is the authoritative Rust-side
+check, and a Python Level-6 recomputes the tiny DSpark reference through the
+shared fixture-gen helper and compares it to the tracked fixture. Real
+released-weight DSpark parity stays an explicit SKIP.
+
+Decision (locked): the inference CLI intentionally rejects
+=--dspark=/=--speculative=/=--mtp= (exit 2); there is no CLI logits-dump path for
+DSpark. The Rust-side DSpark parity is the in-process Bazel model test; the
+Python L6 is a reference-consistency check.
+
+Read first:
+
+- =../spec.org= (Verifier ladder, Wave 3 decisions D1-D3)
+- =ferric_continuum/tnsr/tools/deepseek_v41_reference.py=
+- =ferric_continuum/tnsr/tools/deepseek_v41_compare_logits.py=
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_dspark_compat.sh=
+
+* Requirements
+
+- Extend =deepseek_v41_reference.py= with a =--dspark= path that reuses
+  =generate_dspark_model= into a tempdir, reads back the tiny model fixture, and
+  emits =model_type:"deepseek_v41_dspark"= with =logits=, =logits_shape=,
+  =output_ids=, =confidence=, =reference_backend=, and =kernel_patch= metadata.
+- Extend =deepseek_v41_compare_logits.py= with a =--dspark= mode: allow a flat
+  =[block, vocab]= logits row (=len % vocab_size == 0=), exact =output_ids=
+  equality, and a confidence max/mean-abs check against =CONFIDENCE_ABS_TOL=;
+  chain a =_dspark_self_test= after the base mutation self-test (identical=PASS,
+  moved-id=FAIL, confidence-drift=FAIL, missing=ERROR).
+- Add =verify_deepseek_v41_dspark_compat.sh= with the ladder: P0 comparator +
+  source self-tests, L1 source surface, L2 config, L3 ops (math tests), L4 model
+  + loader tests, L6 tiny DSpark parity (recompute reference, flatten the tracked
+  fixture into the comparator schema, compare with =--dspark=), and L6* real
+  parity = SKIP unless =DEEPSEEK_V41_MODEL_DIR=/=MODEL_DIR= is set. Never present
+  SKIP as PASS; per-level PASS/SKIP/FAIL summary.
+- Closure: inspect the final diff for scope; confirm the text-only and
+  multimodal paths still reject DSpark flags; confirm every Wave-3 level has
+  evidence; append resolution notes with command evidence to tickets 21-25 and
+  =spec.org=; supersede =11-todo-dspark-v41.org=.
+
+* Out of scope
+
+- No generation loop, no acceptance sampling, no Wave-4 perf/device.
+- No real 510GB weight download.
+
+* Verification
+
+- =python3 ferric_continuum/tnsr/tools/deepseek_v41_compare_logits.py --self-test=
+  (rc 0; base + DSpark self-tests).
+- =bash ferric_continuum/tnsr/tools/verify_deepseek_v41_dspark_compat.sh=.
+- =python3 -m py_compile= on changed tools; =rustfmt= on changed Rust.
+
+* Resolution
+
+Extended =deepseek_v41_reference.py= with =_dspark_reference_payload= (reuses
+=fg.generate_dspark_model= into a tempdir and reads back
+=dspark_tiny_model_fixture.json=) behind a =--dspark= flag, emitting
+=model_type:"deepseek_v41_dspark"= with =output_ids=/=confidence=/=logits= and
+the =reference_backend=/=kernel_patch= metadata. Extended
+=deepseek_v41_compare_logits.py= with a =--dspark= mode (flat =[block, vocab]=
+logits, exact =output_ids= equality, =CONFIDENCE_ABS_TOL=1e-4=) and a chained
+=_dspark_self_test=. Added =verify_deepseek_v41_dspark_compat.sh= (P0/L1-L4 +
+L6 tiny parity + L6* real SKIP).
+
+Full DSpark verifier run on this CPU host:
+
+: P0-comparator-selftest   PASS
+: P0-sources-selftest      PASS
+: L1-sources               PASS
+: L2-config                PASS
+: L3-ops                   PASS
+: L4-model+loader          PASS
+: L6-tiny-parity           PASS
+: L6-real-parity           SKIP   (no DEEPSEEK_V41_MODEL_DIR/MODEL_DIR)
+: RESULT: PASS-WITH-SKIPS (skipped levels are NOT counted as pass)
+
+Tiny DSpark parity (Rust in-process model test + Python reference-consistency):
+=output_ids= match =True=, confidence max/mean-abs =0=, =cosine=1.0=, top5 5/5
+(the reference recomputes the exact tracked fixture). The comparator self-test
+returns rc 0: =dspark identical=PASS, moved-id=FAIL, conf=FAIL, missing=ERROR=.
+
+Evidence commands (pinned Bazel 9.2.0):
+- =python3 -m py_compile tools/deepseek_v41_reference.py tools/deepseek_v41_compare_logits.py= → OK
+- =python3 tools/deepseek_v41_compare_logits.py --self-test= → rc 0
+- =bash -n tools/verify_deepseek_v41_dspark_compat.sh= → OK
+- =bash tools/verify_deepseek_v41_dspark_compat.sh= → PASS-WITH-SKIPS (see above)
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests
+  //ferric_continuum/tnsr:deepseek_v41_math_tests
+  //ferric_continuum/tnsr:deepseek_v41_model_tests
+  //ferric_continuum/tnsr:lib_tests= → 4 tests pass
+- =rustfmt= applied to changed Rust (no residual diff).

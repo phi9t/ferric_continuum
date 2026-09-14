@@ -725,3 +725,217 @@ fn text_only_load_ignores_vision_tensors_present() {
     assert!(model.layers[0].ffn.gate.bias_vl.is_none());
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+// -- W3-04: DSpark (mtp.*) checkpoint loader --------------------------------
+
+/// A DSpark-enabled variant of `TINY_CONFIG_JSON`: 2 MTP stages, block_size=3,
+/// markov_rank=3, target layers [0] (n_targets=1 => main_proj in_dim=dim=4),
+/// and a separate 2-expert DSpark MoE geometry.
+fn tiny_dspark_config_json() -> String {
+    TINY_CONFIG_JSON
+        .replace("\"n_mtp_layers\": 0", "\"n_mtp_layers\": 2")
+        .replace("\"dspark_block_size\": 0", "\"dspark_block_size\": 3")
+        .replace(
+            "\"dspark_noise_token_id\": 0",
+            "\"dspark_noise_token_id\": 4",
+        )
+        .replace(
+            "\"dspark_target_layer_ids\": []",
+            "\"dspark_target_layer_ids\": [0]",
+        )
+        .replace("\"dspark_markov_rank\": 0", "\"dspark_markov_rank\": 3")
+        .replace(
+            "\"dspark_n_routed_experts\": 0",
+            "\"dspark_n_routed_experts\": 2",
+        )
+        .replace(
+            "\"dspark_n_activated_experts\": 0",
+            "\"dspark_n_activated_experts\": 1",
+        )
+}
+
+/// Append the `mtp.{stage_id}.*` tensors for one DSpark stage to a base tensor
+/// map. Reuses the layer-0 block geometry (dim=4, n_heads=2, head_dim=2,
+/// q_lora=3, o_lora=2, o_groups=2, inter=3, hc_mult=2 => mix_hc=8, hc_dim=8)
+/// with a 2-expert DSpark MoE, and adds `main_proj`/`main_norm` on stage 0 and
+/// the pre-head norm + Markov/confidence heads on the last stage.
+fn add_dspark_stage_tensors(
+    t: &mut Vec<(String, FixtureTensor)>,
+    stage_id: usize,
+    is_last: bool,
+    dim: usize,
+    vocab: usize,
+    rank: usize,
+    n_targets: usize,
+) {
+    let p = |s: &str| format!("mtp.{stage_id}.{s}");
+    // norms
+    t.push((p("attn_norm.weight"), FixtureTensor::f32_zeros(&[dim])));
+    t.push((p("ffn_norm.weight"), FixtureTensor::f32_zeros(&[dim])));
+    // attention (upstream [out,in])
+    t.push((p("attn.wq_a.weight"), FixtureTensor::f32_zeros(&[3, dim])));
+    t.push((p("attn.q_norm.weight"), FixtureTensor::f32_zeros(&[3])));
+    t.push((p("attn.wq_b.weight"), FixtureTensor::f32_zeros(&[4, 3])));
+    t.push((p("attn.wkv.weight"), FixtureTensor::f32_zeros(&[2, dim])));
+    t.push((p("attn.kv_norm.weight"), FixtureTensor::f32_zeros(&[2])));
+    t.push((p("attn.wo_a.weight"), FixtureTensor::f32_zeros(&[4, 2])));
+    t.push((p("attn.wo_b.weight"), FixtureTensor::f32_zeros(&[dim, 4])));
+    t.push((p("attn.attn_sink"), FixtureTensor::f32_zeros(&[2])));
+    // MoE: 2 DSpark experts
+    t.push((p("ffn.gate.weight"), FixtureTensor::f32_zeros(&[2, dim])));
+    t.push((p("ffn.gate.bias"), FixtureTensor::f32_zeros(&[2])));
+    for e in 0..2 {
+        t.push((
+            p(&format!("ffn.experts.{e}.w1.weight")),
+            FixtureTensor::f32_zeros(&[3, dim]),
+        ));
+        t.push((
+            p(&format!("ffn.experts.{e}.w2.weight")),
+            FixtureTensor::f32_zeros(&[dim, 3]),
+        ));
+        t.push((
+            p(&format!("ffn.experts.{e}.w3.weight")),
+            FixtureTensor::f32_zeros(&[3, dim]),
+        ));
+    }
+    t.push((
+        p("ffn.shared_experts.w1.weight"),
+        FixtureTensor::f32_zeros(&[3, dim]),
+    ));
+    t.push((
+        p("ffn.shared_experts.w2.weight"),
+        FixtureTensor::f32_zeros(&[dim, 3]),
+    ));
+    t.push((
+        p("ffn.shared_experts.w3.weight"),
+        FixtureTensor::f32_zeros(&[3, dim]),
+    ));
+    // hc
+    t.push((p("hc_attn_fn"), FixtureTensor::f32_zeros(&[8, 8])));
+    t.push((p("hc_attn_base"), FixtureTensor::f32_zeros(&[8])));
+    t.push((p("hc_attn_scale"), FixtureTensor::f32_zeros(&[3])));
+    t.push((p("hc_ffn_fn"), FixtureTensor::f32_zeros(&[8, 8])));
+    t.push((p("hc_ffn_base"), FixtureTensor::f32_zeros(&[8])));
+    t.push((p("hc_ffn_scale"), FixtureTensor::f32_zeros(&[3])));
+    // stage 0 owns main_proj [dim, dim*n_targets] / main_norm [dim]
+    if stage_id == 0 {
+        t.push((
+            p("main_proj.weight"),
+            FixtureTensor::f32_zeros(&[dim, dim * n_targets]),
+        ));
+        t.push((p("main_norm.weight"), FixtureTensor::f32_zeros(&[dim])));
+    }
+    // last stage owns norm + markov/confidence heads
+    if is_last {
+        t.push((p("norm.weight"), FixtureTensor::f32_zeros(&[dim])));
+        t.push((
+            p("markov_head.embed.weight"),
+            FixtureTensor::f32_zeros(&[vocab, rank]),
+        ));
+        t.push((
+            p("markov_head.head.weight"),
+            FixtureTensor::f32_zeros(&[vocab, rank]),
+        ));
+        t.push((
+            p("confidence_head.proj.weight"),
+            FixtureTensor::f32_zeros(&[1, dim + rank]),
+        ));
+    }
+}
+
+/// Build a tiny DSpark checkpoint (backbone + 2 mtp stages) in a temp dir and
+/// return the loaded text model so the DSpark loader can borrow embed/head.
+fn write_tiny_dspark_checkpoint(name: &str) -> PathBuf {
+    let dir = unique_tmp_dir(name);
+    std::fs::write(dir.join("config.json"), tiny_dspark_config_json()).unwrap();
+    let mut tensors = tiny_tensor_map();
+    add_dspark_stage_tensors(&mut tensors, 0, false, 4, 5, 3, 1);
+    add_dspark_stage_tensors(&mut tensors, 1, true, 4, 5, 3, 1);
+    write_safetensors(&dir, "model.safetensors", tensors);
+    dir
+}
+
+#[test]
+fn dspark_head_loads_from_mtp_namespace() {
+    let dir = write_tiny_dspark_checkpoint("dspark-ok");
+    let model = load_text_model(&dir).expect("text backbone loads");
+    let head = load_dspark_head(&dir, &model)
+        .expect("dspark head loads")
+        .expect("dspark enabled => Some head");
+    assert_eq!(head.stages.len(), 2);
+    assert_eq!(head.block_size, 3);
+    assert_eq!(head.markov_rank, 3);
+    assert_eq!(head.noise_token_id, 4);
+    // Stage 0 owns main_proj/main_norm; stages after it do not.
+    assert!(head.stages[0].main_proj.is_some());
+    assert!(head.stages[0].main_norm.is_some());
+    assert!(head.stages[1].main_proj.is_none());
+    // The last stage owns the heads; stage 0 does not.
+    assert!(head.stages[1].markov_head.is_some());
+    assert!(head.stages[1].confidence_proj.is_some());
+    assert!(head.stages[0].markov_head.is_none());
+    // DSpark MoE geometry (2 experts, topk 1) is used for the stage blocks.
+    assert_eq!(head.stages[0].block.ffn.experts.len(), 2);
+    assert_eq!(head.stages[0].block.ffn.gate.topk, 1);
+    // Shared embed/head are borrowed from the backbone.
+    assert_eq!(head.embed_tokens.inner.borrow().value.shape.0, vec![5, 4]);
+    assert_eq!(head.lm_head.inner.borrow().value.shape.0, vec![4, 5]);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn dspark_head_is_none_when_disabled() {
+    // The plain tiny (text-only) config leaves dspark_block_size == 0.
+    let dir = unique_tmp_dir("dspark-off");
+    std::fs::write(dir.join("config.json"), TINY_CONFIG_JSON).unwrap();
+    write_safetensors(&dir, "model.safetensors", tiny_tensor_map());
+    let model = load_text_model(&dir).expect("text backbone loads");
+    let head = load_dspark_head(&dir, &model).expect("no error when dspark disabled");
+    assert!(head.is_none(), "dspark disabled => None");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn dspark_missing_markov_head_returns_err_naming_tensor() {
+    let dir = unique_tmp_dir("dspark-missing-markov");
+    std::fs::write(dir.join("config.json"), tiny_dspark_config_json()).unwrap();
+    let mut tensors = tiny_tensor_map();
+    add_dspark_stage_tensors(&mut tensors, 0, false, 4, 5, 3, 1);
+    add_dspark_stage_tensors(&mut tensors, 1, true, 4, 5, 3, 1);
+    remove(&mut tensors, "mtp.1.markov_head.head.weight");
+    write_safetensors(&dir, "model.safetensors", tensors);
+    let model = load_text_model(&dir).expect("text backbone loads");
+    let err = match load_dspark_head(&dir, &model) {
+        Ok(_) => panic!("expected dspark load to fail"),
+        Err(e) => e,
+    };
+    assert!(err.contains("mtp.1.markov_head.head.weight"), "err: {err}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn dspark_wrong_main_proj_shape_returns_err() {
+    let dir = unique_tmp_dir("dspark-bad-mainproj");
+    std::fs::write(dir.join("config.json"), tiny_dspark_config_json()).unwrap();
+    let mut tensors = tiny_tensor_map();
+    add_dspark_stage_tensors(&mut tensors, 0, false, 4, 5, 3, 1);
+    add_dspark_stage_tensors(&mut tensors, 1, true, 4, 5, 3, 1);
+    // main_proj expected [dim, dim*n_targets] = [4, 4]; give [4, 8].
+    replace(
+        &mut tensors,
+        "mtp.0.main_proj.weight",
+        FixtureTensor::f32_zeros(&[4, 8]),
+    );
+    write_safetensors(&dir, "model.safetensors", tensors);
+    let model = load_text_model(&dir).expect("text backbone loads");
+    let err = match load_dspark_head(&dir, &model) {
+        Ok(_) => panic!("expected dspark load to fail"),
+        Err(e) => e,
+    };
+    assert!(err.contains("mtp.0.main_proj.weight"), "err: {err}");
+    assert!(
+        err.contains("[4, 4]") && err.contains("[4, 8]"),
+        "err: {err}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}

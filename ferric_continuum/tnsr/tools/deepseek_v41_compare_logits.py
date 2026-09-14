@@ -25,6 +25,10 @@ divergence of the model math:
 * ``1``  FAIL: math diverged (cosine/top-1/top-5 below threshold).
 * ``2``  ERROR: malformed input (bad JSON, missing/short logits, NaN/inf,
          vocab-size mismatch).  A parity gate must never read this as PASS.
+
+The ``--dspark`` mode additionally asserts greedy ``output_ids`` equality and
+compares the per-position ``confidence`` vector (max/mean abs diff against a
+tolerance), on top of the shared logits comparison.
 """
 
 import argparse
@@ -37,6 +41,9 @@ import numpy as np
 # closely.  These mirror the Qwen3 comparator thresholds.
 COSINE_MIN = 0.999
 TOP5_OVERLAP_MIN = 4  # of 5
+# DSpark confidence is a small scalar per draft position; the fixture pins an
+# absolute tolerance of 2e-5, so allow a hair of slack for the JSON round-trip.
+CONFIDENCE_ABS_TOL = 1e-4
 
 EXIT_PASS = 0
 EXIT_FAIL = 1
@@ -49,7 +56,7 @@ class LogitsError(ValueError):
     """A structural problem with a logits JSON file (not a numeric divergence)."""
 
 
-def load(path: str) -> dict:
+def load(path: str, dspark: bool = False) -> dict:
     """Load and structurally validate a logits JSON file.
 
     Raises ``LogitsError`` (mapped to exit code 2 by the caller) on any problem
@@ -57,6 +64,10 @@ def load(path: str) -> dict:
     JSON, missing keys, a non-list/empty ``logits`` array, a ``vocab_size`` that
     disagrees with the array length, or any non-finite entry.  This keeps a
     silently-corrupt reference from being scored as a PASS.
+
+    In ``dspark`` mode the ``logits`` array is a flattened ``[block, vocab]``
+    block rather than a single ``[vocab]`` row, so the ``vocab_size`` guard
+    requires ``len(logits) % vocab_size == 0`` instead of exact equality.
     """
     try:
         with open(path) as f:
@@ -88,7 +99,13 @@ def load(path: str) -> dict:
     if vocab is not None:
         if not isinstance(vocab, int) or vocab <= 0:
             raise LogitsError(f"{path}: 'vocab_size' must be a positive int, got {vocab!r}")
-        if vocab != logits.shape[0]:
+        if dspark:
+            if logits.shape[0] % vocab != 0:
+                raise LogitsError(
+                    f"{path}: len(logits)={logits.shape[0]} is not a multiple of "
+                    f"'vocab_size'={vocab} (expected a flat [block, vocab] block)"
+                )
+        elif vocab != logits.shape[0]:
             raise LogitsError(
                 f"{path}: 'vocab_size'={vocab} disagrees with len(logits)={logits.shape[0]}"
             )
@@ -142,10 +159,45 @@ def compare(t: dict, r: dict) -> tuple[bool, dict]:
     return math_ok, metrics
 
 
-def run_compare(tnsr_json: str, reference_json: str) -> int:
+def _dspark_extra(t: dict, r: dict) -> tuple[bool, dict]:
+    """Compare the DSpark-only ``output_ids`` and ``confidence`` fields.
+
+    Returns ``(dspark_ok, metrics)``.  ``output_ids`` must match *exactly*
+    (greedy temperature-0 draft ids are a discrete decision, not a tolerance
+    band); ``confidence`` is compared as max/mean absolute difference against
+    ``CONFIDENCE_ABS_TOL``.  Raises ``LogitsError`` if a required field is
+    missing or malformed so a truncated reference cannot slip through as PASS.
+    """
+    metrics: dict = {}
+    for name, obj in (("tnsr", t), ("reference", r)):
+        if "output_ids" not in obj or not isinstance(obj["output_ids"], list):
+            raise LogitsError(f"{name}: dspark comparison needs a list 'output_ids'")
+        if "confidence" not in obj or not isinstance(obj["confidence"], list):
+            raise LogitsError(f"{name}: dspark comparison needs a list 'confidence'")
+
+    metrics["output_ids_match"] = t["output_ids"] == r["output_ids"]
+
+    tc = np.asarray(t["confidence"], dtype=np.float64)
+    rc = np.asarray(r["confidence"], dtype=np.float64)
+    if tc.shape != rc.shape:
+        raise LogitsError(
+            f"confidence length mismatch (tnsr={tc.shape[0]}, ref={rc.shape[0]})"
+        )
+    if not (np.all(np.isfinite(tc)) and np.all(np.isfinite(rc))):
+        raise LogitsError("confidence has non-finite (NaN/inf) value(s)")
+    cdiff = np.abs(tc - rc)
+    metrics["conf_max_abs"] = float(cdiff.max()) if cdiff.size else 0.0
+    metrics["conf_mean_abs"] = float(cdiff.mean()) if cdiff.size else 0.0
+    metrics["conf_within_tol"] = metrics["conf_max_abs"] <= CONFIDENCE_ABS_TOL
+
+    dspark_ok = metrics["output_ids_match"] and metrics["conf_within_tol"]
+    return dspark_ok, metrics
+
+
+def run_compare(tnsr_json: str, reference_json: str, dspark: bool = False) -> int:
     try:
-        t = load(tnsr_json)
-        r = load(reference_json)
+        t = load(tnsr_json, dspark=dspark)
+        r = load(reference_json, dspark=dspark)
     except LogitsError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return EXIT_ERROR
@@ -166,6 +218,15 @@ def run_compare(tnsr_json: str, reference_json: str) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
+    dspark_ok = True
+    dm: dict = {}
+    if dspark:
+        try:
+            dspark_ok, dm = _dspark_extra(t, r)
+        except LogitsError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+
     print(f"token_ids match : {m['ids_match']}")
     if not m["ids_match"]:
         print(f"  tnsr ids : {t['token_ids']}")
@@ -182,17 +243,31 @@ def run_compare(tnsr_json: str, reference_json: str) -> int:
     print(f"top1 (tnsr/ref) : {m['t_top1']} / {m['r_top1']}  -> match={m['top1_match']}")
     print(f"top5 overlap    : {m['top5_overlap']}/5")
 
+    if dspark:
+        print("-" * 60)
+        print(f"output_ids match: {dm['output_ids_match']}")
+        if not dm["output_ids_match"]:
+            print(f"  tnsr output_ids : {t['output_ids']}")
+            print(f"  ref  output_ids : {r['output_ids']}")
+        print(f"confidence max  : {dm['conf_max_abs']:.6g}")
+        print(f"confidence mean : {dm['conf_mean_abs']:.6g}")
+        print(
+            f"confidence tol  : {dm['conf_within_tol']} "
+            f"(abs<= {CONFIDENCE_ABS_TOL:g})"
+        )
+
     # Verdict: model math is what we assert on.  A tokenizer mismatch is
     # reported but does not itself fail the run (the driver re-runs with
     # reference ids to test the math directly).
-    verdict = "PASS" if math_ok else "FAIL"
+    ok = math_ok and dspark_ok
+    verdict = "PASS" if ok else "FAIL"
     print("-" * 60)
-    print(
-        f"{verdict}  (cosine>={COSINE_MIN}, top1 match, "
-        f"top5 overlap>={TOP5_OVERLAP_MIN})"
-    )
+    gate = f"cosine>={COSINE_MIN}, top1 match, top5 overlap>={TOP5_OVERLAP_MIN}"
+    if dspark:
+        gate += f", output_ids exact, confidence abs<= {CONFIDENCE_ABS_TOL:g}"
+    print(f"{verdict}  ({gate})")
     print("=" * 60)
-    return EXIT_PASS if math_ok else EXIT_FAIL
+    return EXIT_PASS if ok else EXIT_FAIL
 
 
 def run_self_test() -> int:
@@ -246,6 +321,67 @@ def run_self_test() -> int:
             return 1
 
     print("SELF-TEST PASS: identical=PASS, perturbed=FAIL, non-finite=ERROR")
+    return _dspark_self_test()
+
+
+def _dspark_self_test() -> int:
+    """DSpark controls: prove output_ids and confidence gates actually bite.
+
+    Builds a synthetic DSpark reference (logits + output_ids + confidence) and
+    checks that (a) an identical row PASSes, (b) a moved output_id FAILs even
+    when logits are unchanged, (c) a confidence perturbation past tolerance
+    FAILs, and (d) a missing confidence field is rejected as ERROR.
+    """
+    import tempfile
+
+    vocab = 8
+    base = [float(i) for i in range(vocab)]  # argmax = 7
+
+    def write(tmp: str, name: str, *, logits, output_ids, confidence, drop=None) -> str:
+        path = f"{tmp}/{name}"
+        payload = {
+            "token_ids": [1],
+            "prompt": "",
+            "vocab_size": vocab,
+            "model_type": "deepseek_v41_dspark_selftest",
+            "logits": logits,
+            "output_ids": output_ids,
+            "confidence": confidence,
+        }
+        if drop is not None:
+            payload.pop(drop)
+        with open(path, "w") as f:
+            json.dump(payload, f)
+        return path
+
+    with tempfile.TemporaryDirectory(prefix="dsv41_compare_dspark_selftest_") as tmp:
+        ref = write(tmp, "ref.json", logits=base, output_ids=[1, 3, 3, 0], confidence=[0.1, 0.2, 0.3])
+
+        # (a) identical -> PASS
+        same = write(tmp, "same.json", logits=base, output_ids=[1, 3, 3, 0], confidence=[0.1, 0.2, 0.3])
+        if run_compare(same, ref, dspark=True) != EXIT_PASS:
+            print("SELF-TEST FAIL: identical dspark row did not PASS", file=sys.stderr)
+            return 1
+
+        # (b) output_id moved (logits unchanged) -> FAIL
+        moved = write(tmp, "moved.json", logits=base, output_ids=[1, 3, 2, 0], confidence=[0.1, 0.2, 0.3])
+        if run_compare(moved, ref, dspark=True) != EXIT_FAIL:
+            print("SELF-TEST FAIL: moved output_id did not FAIL", file=sys.stderr)
+            return 1
+
+        # (c) confidence past tolerance -> FAIL
+        conf_bad = write(tmp, "conf.json", logits=base, output_ids=[1, 3, 3, 0], confidence=[0.1, 0.2, 0.5])
+        if run_compare(conf_bad, ref, dspark=True) != EXIT_FAIL:
+            print("SELF-TEST FAIL: perturbed confidence did not FAIL", file=sys.stderr)
+            return 1
+
+        # (d) missing confidence -> ERROR
+        no_conf = write(tmp, "noconf.json", logits=base, output_ids=[1, 3, 3, 0], confidence=[], drop="confidence")
+        if run_compare(no_conf, ref, dspark=True) != EXIT_ERROR:
+            print("SELF-TEST FAIL: missing confidence was not rejected", file=sys.stderr)
+            return 1
+
+    print("SELF-TEST PASS: dspark identical=PASS, moved-id=FAIL, conf=FAIL, missing=ERROR")
     return 0
 
 
@@ -262,6 +398,11 @@ def main() -> int:
         action="store_true",
         help="run positive+negative controls proving the comparator bites, then exit",
     )
+    p.add_argument(
+        "--dspark",
+        action="store_true",
+        help="also assert greedy output_ids equality and compare confidence vectors",
+    )
     args = p.parse_args()
 
     if args.self_test:
@@ -270,7 +411,7 @@ def main() -> int:
     if not args.tnsr_json or not args.reference_json:
         p.error("tnsr_json and reference_json are required unless --self-test is given")
 
-    return run_compare(args.tnsr_json, args.reference_json)
+    return run_compare(args.tnsr_json, args.reference_json, dspark=args.dspark)
 
 
 if __name__ == "__main__":

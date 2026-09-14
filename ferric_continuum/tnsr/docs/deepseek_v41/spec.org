@@ -121,14 +121,20 @@ monkeypatched to pure PyTorch, and — where a GPU torch runtime is available �
 real B200 upstream forward. Real-checkpoint image parity remains an explicit
 SKIP until released weights are local, and a SKIP is never presented as PASS.
 
-** Wave 3: DSpark TODO
+** Wave 3: DSpark (implemented)
 
-TODO after text logits pass:
+DSpark/MTP speculative-draft path (see the Wave 3 tickets 21-25 and the Wave 3
+resolution below):
 
-- DSpark/MTP config parser and checkpoint namespace support.
-- DSpark attention, Markov head, confidence head, and cache seeding.
-- =forward_spec= parity against upstream for decode-only speculative drafts.
-- Integration with any later generation loop.
+- DSpark/MTP config activation (=dspark_enabled()=) and =mtp.*= checkpoint
+  namespace support.
+- DSpark Markov head, fp32 confidence head, draft-input construction, and the
+  =main_proj=/=main_norm= stage seam.
+- =forward_spec= parity against the composed upstream reference for decode-only
+  speculative drafts (CPU/f32, Markov-biased greedy drafts).
+
+Not in scope for Wave 3: the outer generation/acceptance loop and real
+released-weight parity (SKIP until local weights exist).
 
 ** Wave 4: performance and device TODO
 
@@ -529,9 +535,35 @@ match. Focused Bazel tests (=deepseek_v41_config_tests=, =_math_tests=,
 =/data02/home/philip.yang/.local/bin/bazel-9.2.0=.
 
 
-** Wave 3 TODO: DSpark
+** Wave 3 DSpark
 
-- [[file:issues/11-todo-dspark-v41.org][11-todo-dspark-v41]]
+- [[file:issues/11-todo-dspark-v41.org][11-todo-dspark-v41]] (superseded by the W3 tickets below)
+- [[file:issues/21-dspark-config-and-source-verifier.org][21-dspark-config-and-source-verifier]]
+- [[file:issues/22-dspark-attention-and-head-op-fixtures.org][22-dspark-attention-and-head-op-fixtures]]
+- [[file:issues/23-dspark-head-model-and-forward-spec.org][23-dspark-head-model-and-forward-spec]]
+- [[file:issues/24-dspark-checkpoint-loader.org][24-dspark-checkpoint-loader]]
+- [[file:issues/25-dspark-parity-harness-and-closure.org][25-dspark-parity-harness-and-closure]]
+
+*** Wave 3 resolution
+
+All Wave-3 tickets (21-25) are =done=. The Rust DSpark path activates the
+=mtp.*= config, pins the Markov/confidence/draft-input/main-proj-norm/draft-loop
+and decode top-k ops against upstream fixtures, assembles a
+=DeepSeekV41DsparkHead::forward_spec= (Markov-biased logits, temperature-0
+greedy output ids, fp32 confidence — decision D1; CPU/f32 — decision D2), and
+loads the =mtp.{stage}.*= namespace with the DSpark MoE geometry, borrowing
+=embed_tokens=/=lm_head= from the backbone (decision D3). The text-only and
+multimodal CLIs still reject =--dspark=/=--speculative=/=--mtp= (exit 2); there
+is no CLI logits-dump for DSpark, so Rust-side parity is the in-process Bazel
+model test and the Python Level-6 is a reference-consistency check.
+
+Evidence: =tools/verify_deepseek_v41_dspark_compat.sh= on this CPU host →
+P0-comparator/P0-sources/L1-sources/L2-config/L3-ops/L4-model+loader/L6-tiny-parity
+=PASS=; =L6-real-parity= =SKIP= (no local weights; never presented as PASS).
+Tiny DSpark parity: =output_ids= match, confidence max/mean-abs =0=,
+=cosine=1.0=, top5 5/5. Focused Bazel tests (=deepseek_v41_config_tests=,
+=_math_tests=, =_model_tests=, =lib_tests=) pass under
+=/data02/home/philip.yang/.local/bin/bazel-9.2.0=.
 
 * Acceptance
 

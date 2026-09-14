@@ -16,6 +16,7 @@ class Claim:
     claim_id: str
     source_path: str
     all_phrases: tuple[str, ...]
+    none_phrases: tuple[str, ...]
     why: str
 
 
@@ -65,9 +66,17 @@ def load_manifest(path: pathlib.Path) -> list[Claim]:
             raise ManifestError(f"{claim_id}: expected must be an object")
 
         phrases = expected.get("all_phrases")
-        if not isinstance(phrases, list) or not phrases:
-            raise ManifestError(f"{claim_id}: expected.all_phrases must be a non-empty list")
-        bad_phrase = next((phrase for phrase in phrases if not isinstance(phrase, str) or not phrase), None)
+        none_phrases = expected.get("none_phrases")
+        has_all = isinstance(phrases, list) and phrases
+        has_none = isinstance(none_phrases, list) and none_phrases
+        if not has_all and not has_none:
+            raise ManifestError(f"{claim_id}: expected must contain a non-empty all_phrases or none_phrases list")
+        phrases = phrases if has_all else []
+        none_phrases = none_phrases if has_none else []
+        bad_phrase = next(
+            (phrase for phrase in (*phrases, *none_phrases) if not isinstance(phrase, str) or not phrase),
+            None,
+        )
         if bad_phrase is not None:
             raise ManifestError(f"{claim_id}: expected phrases must be non-empty strings")
 
@@ -76,6 +85,7 @@ def load_manifest(path: pathlib.Path) -> list[Claim]:
                 claim_id=claim_id,
                 source_path=source_path,
                 all_phrases=tuple(phrases),
+                none_phrases=tuple(none_phrases),
                 why=why,
             )
         )
@@ -104,6 +114,12 @@ def verify_claims(repo_root: pathlib.Path, manifest_path: pathlib.Path) -> tuple
         if missing:
             missing_list = ", ".join(repr(phrase) for phrase in missing)
             errors.append(f"{claim.claim_id}: missing expected phrase(s) in {claim.source_path}: {missing_list}")
+            continue
+
+        present = [phrase for phrase in claim.none_phrases if phrase in text]
+        if present:
+            present_list = ", ".join(repr(phrase) for phrase in present)
+            errors.append(f"{claim.claim_id}: forbidden phrase(s) present in {claim.source_path}: {present_list}")
             continue
 
         checked.append(claim.claim_id)
@@ -158,7 +174,36 @@ def run_self_test() -> int:
                 print(error, file=sys.stderr)
             return 1
 
-    print("SELF-TEST PASS: missing claim fails and names selftest-missing-claim")
+        # Negative control for none_phrases: a forbidden phrase that IS present must fail.
+        forbidden_manifest = root / "forbidden.json"
+        forbidden_manifest.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "claims": [
+                        {
+                            "id": "selftest-forbidden-claim",
+                            "source_path": "source.txt",
+                            "expected": {"none_phrases": ["present upstream claim"]},
+                            "why": "Proves a forbidden phrase that is present returns nonzero and names the claim id.",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        checked, errors = verify_claims(root, forbidden_manifest)
+        status = report_verification(checked, errors)
+        if status == 0:
+            print("SELF-TEST FAIL: forbidden phrase returned success", file=sys.stderr)
+            return 1
+        if not errors or "selftest-forbidden-claim" not in errors[0]:
+            print("SELF-TEST FAIL: forbidden-claim error did not name claim id", file=sys.stderr)
+            for error in errors:
+                print(error, file=sys.stderr)
+            return 1
+
+    print("SELF-TEST PASS: missing claim and forbidden phrase both fail and name their claim ids")
     return 0
 
 
