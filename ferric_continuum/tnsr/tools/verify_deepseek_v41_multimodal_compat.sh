@@ -19,7 +19,11 @@
 #   B200     GPU tiny parity         -> PASS if a CUDA torch runtime is present,
 #                                        else SKIP (this CPU host reports SKIP)
 #
-# This verifier NEVER presents a SKIP as a PASS.
+# This verifier NEVER presents a SKIP as a PASS. It also runs negative-control
+# self-tests first (P0): the logits comparator must FAIL a perturbed row and
+# ERROR a non-finite one, and the source verifier must FAIL a missing claim.
+# Levels needing the reference interpreter (5/6/B200) SKIP honestly when the
+# CPU venv is absent, rather than failing or silently passing.
 #
 # Env:
 #   DEEPSEEK_V41_MODEL_DIR / MODEL_DIR  real checkpoint dir (optional)
@@ -48,6 +52,52 @@ ORDER=()
 record() { RESULT["$1"]="$2"; ORDER+=("$1"); }
 
 hr() { echo "------------------------------------------------------------"; }
+
+# ---------------------------------------------------------------------------
+# Preflight: is HF_PYTHON a usable reference interpreter? The Level-6 parity
+# and Level-5 encoding steps need torch+numpy+safetensors. If the CPU venv is
+# missing we record those levels as an honest SKIP (never FAIL, never a silent
+# PASS) so a bare checkout without the venv does not masquerade as verified.
+# ---------------------------------------------------------------------------
+HF_OK=1
+HF_REASON=""
+if [ ! -x "$HF_PYTHON" ] && ! command -v "$HF_PYTHON" >/dev/null 2>&1; then
+  HF_OK=0
+  HF_REASON="HF_PYTHON '$HF_PYTHON' is not an executable interpreter"
+elif ! "$HF_PYTHON" - <<'PY' >/dev/null 2>&1
+import numpy, torch, safetensors  # noqa: F401
+PY
+then
+  HF_OK=0
+  HF_REASON="HF_PYTHON '$HF_PYTHON' lacks numpy/torch/safetensors"
+fi
+if [ "$HF_OK" -eq 0 ]; then
+  echo "==> Preflight: reference interpreter unavailable ($HF_REASON)"
+  echo "    Level 5 / Level 6 / B200 will be recorded as SKIP."
+fi
+
+# ---------------------------------------------------------------------------
+# Preflight self-check: prove the logits comparator actually bites (identical
+# PASSes, perturbed FAILs, non-finite ERRORs). A parity gate that cannot fail
+# is worthless; this negative control guards against that. numpy-only, so it
+# runs with the system python even when HF_PYTHON is absent.
+# ---------------------------------------------------------------------------
+echo "==> Preflight: comparator negative control (self-test)"
+if python3 "$TOOLS/deepseek_v41_compare_logits.py" --self-test >/dev/null 2>&1; then
+  record "P0-comparator-selftest" PASS
+else
+  echo "    FAIL: comparator self-test did not behave (perturbed row not rejected)."
+  record "P0-comparator-selftest" FAIL
+fi
+
+# Likewise prove the source verifier fails a deliberately-missing claim.
+echo "==> Preflight: source-verifier negative control (self-test)"
+if python3 "$TOOLS/deepseek_v41_verify_sources.py" --self-test-negative >/dev/null 2>&1; then
+  record "P0-sources-selftest" PASS
+else
+  echo "    FAIL: source-verifier self-test did not fail a missing claim."
+  record "P0-sources-selftest" FAIL
+fi
 
 # ---------------------------------------------------------------------------
 # Level 1: source claims (text + vision + image-processor + merge/bias_vl)
@@ -90,7 +140,10 @@ fi
 # ---------------------------------------------------------------------------
 echo "==> Level 5: vl-prompt encoding parity"
 VL_FIXTURE="$REPO_ROOT/ferric_continuum/tnsr/testdata/deepseek_v41/prompt_vl_fixture.json"
-if [ ! -f "$VL_FIXTURE" ]; then
+if [ "$HF_OK" -eq 0 ]; then
+  echo "    SKIP: no reference interpreter ($HF_REASON)."
+  record "L5-vl-prompt" SKIP
+elif [ ! -f "$VL_FIXTURE" ]; then
   echo "    FAIL: tracked prompt_vl_fixture.json missing at $VL_FIXTURE"
   record "L5-vl-prompt" FAIL
 else
@@ -113,6 +166,10 @@ fi
 # Level 6: tiny multimodal logits parity (faithful upstream ViT/Aligner ref)
 # ---------------------------------------------------------------------------
 echo "==> Level 6: tiny multimodal logits parity"
+if [ "$HF_OK" -eq 0 ]; then
+  echo "    SKIP: no reference interpreter ($HF_REASON); cannot compute reference."
+  record "L6-tiny-mm-parity" SKIP
+else
 echo "==> building deepseek_v41_infer (opt)"
 INFER_BIN="$REPO_ROOT/bazel-bin/ferric_continuum/tnsr/deepseek_v41_infer"
 if ! "$BAZEL" build -c opt \
@@ -151,8 +208,15 @@ else
 
   if [ "$mm_ok" -eq 1 ]; then
     echo "==> compare (tiny multimodal)"
-    if ! "$HF_PYTHON" "$TOOLS/deepseek_v41_compare_logits.py" \
-        "$MM_RUST" "$MM_REF"; then
+    # The comparator exits 0=PASS, 1=numeric FAIL, 2=harness/malformed ERROR.
+    # Only exit 0 counts as parity; both 1 and 2 fail this level.
+    "$HF_PYTHON" "$TOOLS/deepseek_v41_compare_logits.py" \
+        "$MM_RUST" "$MM_REF"
+    cmp_rc=$?
+    if [ "$cmp_rc" -eq 2 ]; then
+      echo "    ERROR: comparator reported a malformed/non-finite logits input."
+      mm_ok=0
+    elif [ "$cmp_rc" -ne 0 ]; then
       mm_ok=0
     fi
   fi
@@ -163,6 +227,7 @@ else
     record "L6-tiny-mm-parity" FAIL
   fi
 fi
+fi
 
 # ---------------------------------------------------------------------------
 # B200: GPU tiny multimodal parity. The tiny reference runs identical math on
@@ -171,6 +236,10 @@ fi
 # host (torch cpu-only) there is nothing to run, so this is an honest SKIP.
 # ---------------------------------------------------------------------------
 echo "==> B200: GPU tiny multimodal parity"
+if [ "$HF_OK" -eq 0 ]; then
+  echo "    SKIP: no reference interpreter ($HF_REASON)."
+  record "B200-gpu-parity" SKIP
+else
 GPU_DEVICE="$("$HF_PYTHON" - <<'PY'
 try:
     import torch
@@ -194,6 +263,7 @@ if [[ "$GPU_DEVICE" == cuda:* ]]; then
 else
   echo "    SKIP: no CUDA torch runtime on this host (device=$GPU_DEVICE)."
   record "B200-gpu-parity" SKIP
+fi
 fi
 
 # ---------------------------------------------------------------------------
