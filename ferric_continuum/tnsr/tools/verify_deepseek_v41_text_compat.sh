@@ -12,7 +12,11 @@
 #   Level 6* real-checkpoint parity -> SKIP unless DEEPSEEK_V41_MODEL_DIR /
 #                                       MODEL_DIR points at real weights
 #
-# This verifier NEVER presents a SKIP as a PASS. Real-checkpoint parity is
+# This verifier NEVER presents a SKIP as a PASS. It also runs negative-control
+# self-tests first (P0): the logits comparator must FAIL a perturbed row and
+# ERROR a non-finite one, and the source verifier must FAIL a missing claim.
+# Levels needing the reference interpreter (6) SKIP honestly when the CPU venv
+# is absent, rather than failing or silently passing. Real-checkpoint parity is
 # skipped when no local weights are configured, and reported as SKIP.
 #
 # Env:
@@ -33,6 +37,7 @@ OUT_DIR="${OUT_DIR:-/tmp/dsv41_text_compat}"
 BAZEL="${BAZEL:-$HOME/.local/bin/bazel-9.2.0}"
 TOOLS="$REPO_ROOT/ferric_continuum/tnsr/tools"
 MODEL_DIR="${DEEPSEEK_V41_MODEL_DIR:-${MODEL_DIR:-}}"
+INFER_BIN="$REPO_ROOT/bazel-bin/ferric_continuum/tnsr/deepseek_v41_infer"
 
 mkdir -p "$OUT_DIR"
 
@@ -42,6 +47,52 @@ ORDER=()
 record() { RESULT["$1"]="$2"; ORDER+=("$1"); }
 
 hr() { echo "------------------------------------------------------------"; }
+
+# ---------------------------------------------------------------------------
+# Preflight: is HF_PYTHON a usable reference interpreter? The Level-6 parity
+# step needs torch+numpy+safetensors. If the CPU venv is missing we record that
+# level as an honest SKIP (never FAIL, never a silent PASS) so a bare checkout
+# without the venv does not masquerade as verified.
+# ---------------------------------------------------------------------------
+HF_OK=1
+HF_REASON=""
+if [ ! -x "$HF_PYTHON" ] && ! command -v "$HF_PYTHON" >/dev/null 2>&1; then
+  HF_OK=0
+  HF_REASON="HF_PYTHON '$HF_PYTHON' is not an executable interpreter"
+elif ! "$HF_PYTHON" - <<'PY' >/dev/null 2>&1
+import numpy, torch, safetensors  # noqa: F401
+PY
+then
+  HF_OK=0
+  HF_REASON="HF_PYTHON '$HF_PYTHON' lacks numpy/torch/safetensors"
+fi
+if [ "$HF_OK" -eq 0 ]; then
+  echo "==> Preflight: reference interpreter unavailable ($HF_REASON)"
+  echo "    Level 6 tiny parity will be recorded as SKIP."
+fi
+
+# ---------------------------------------------------------------------------
+# Preflight self-check: prove the logits comparator actually bites (identical
+# PASSes, perturbed FAILs, non-finite ERRORs). A parity gate that cannot fail
+# is worthless; this negative control guards against that. numpy-only, so it
+# runs with the system python even when HF_PYTHON is absent.
+# ---------------------------------------------------------------------------
+echo "==> Preflight: comparator negative control (self-test)"
+if python3 "$TOOLS/deepseek_v41_compare_logits.py" --self-test >/dev/null 2>&1; then
+  record "P0-comparator-selftest" PASS
+else
+  echo "    FAIL: comparator self-test did not behave (perturbed row not rejected)."
+  record "P0-comparator-selftest" FAIL
+fi
+
+# Likewise prove the source verifier fails a deliberately-missing claim.
+echo "==> Preflight: source-verifier negative control (self-test)"
+if python3 "$TOOLS/deepseek_v41_verify_sources.py" --self-test-negative >/dev/null 2>&1; then
+  record "P0-sources-selftest" PASS
+else
+  echo "    FAIL: source-verifier self-test did not fail a missing claim."
+  record "P0-sources-selftest" FAIL
+fi
 
 # ---------------------------------------------------------------------------
 # Level 1: source claims
@@ -81,13 +132,15 @@ fi
 # Level 6: tiny logits parity (upstream-executed reference on a tiny model)
 # ---------------------------------------------------------------------------
 echo "==> Level 6: tiny logits parity"
-echo "==> building deepseek_v41_infer (opt)"
-if ! "$BAZEL" build -c opt \
+if [ "$HF_OK" -eq 0 ]; then
+  echo "    SKIP: no reference interpreter ($HF_REASON); cannot compute reference."
+  record "L6-tiny-parity" SKIP
+elif ! "$BAZEL" build -c opt \
     --@rules_rust//rust/settings:extra_rustc_flags=-Copt-level=3 \
     //ferric_continuum/tnsr:deepseek_v41_infer; then
+  echo "==> building deepseek_v41_infer (opt)"
   record "L6-tiny-parity" FAIL
 else
-  INFER_BIN="$REPO_ROOT/bazel-bin/ferric_continuum/tnsr/deepseek_v41_infer"
   TINY_CKPT="$OUT_DIR/tiny_ckpt"
   REF_JSON="$OUT_DIR/tiny_ref.json"
   RUST_JSON="$OUT_DIR/tiny_rust.json"
@@ -113,8 +166,15 @@ else
 
   if [ "$tiny_ok" -eq 1 ]; then
     echo "==> compare (tiny)"
-    if ! "$HF_PYTHON" "$TOOLS/deepseek_v41_compare_logits.py" \
-        "$RUST_JSON" "$REF_JSON"; then
+    # The comparator exits 0=PASS, 1=numeric FAIL, 2=harness/malformed ERROR.
+    # Only exit 0 counts as parity; both 1 and 2 fail this level.
+    "$HF_PYTHON" "$TOOLS/deepseek_v41_compare_logits.py" \
+        "$RUST_JSON" "$REF_JSON"
+    cmp_rc=$?
+    if [ "$cmp_rc" -eq 2 ]; then
+      echo "    ERROR: comparator reported a malformed/non-finite logits input."
+      tiny_ok=0
+    elif [ "$cmp_rc" -ne 0 ]; then
       tiny_ok=0
     fi
   fi
@@ -144,7 +204,12 @@ else
   # this is a smoke check, not numeric parity -> reported as SKIP, never PASS.
   REAL_RUST="$OUT_DIR/real_rust.json"
   echo "==> tnsr dump (real, --token-ids 1,2,3) [smoke only]"
-  if "$INFER_BIN" --model-dir "$MODEL_DIR" --token-ids 1,2,3 \
+  if [ ! -x "$INFER_BIN" ]; then
+    "$BAZEL" build -c opt \
+      --@rules_rust//rust/settings:extra_rustc_flags=-Copt-level=3 \
+      //ferric_continuum/tnsr:deepseek_v41_infer || true
+  fi
+  if [ -x "$INFER_BIN" ] && "$INFER_BIN" --model-dir "$MODEL_DIR" --token-ids 1,2,3 \
       --text-only --dump-logits "$REAL_RUST"; then
     echo "    Rust loader consumed the checkpoint and dumped logits."
     echo "    SKIP: no faithful CPU reference for numeric parity (out of scope)."
