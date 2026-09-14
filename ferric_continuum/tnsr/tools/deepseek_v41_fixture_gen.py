@@ -3339,6 +3339,507 @@ def generate_vl_prompt(out_dir: Path, repo_root: Path) -> None:
     )
 
 
+def fallback_dspark_topk(window_size: int, batch: int, block_size: int, start_pos: int) -> list[int]:
+    assert start_pos > 0
+    window_rows = min(window_size, start_pos + 1)
+    row = list(range(window_rows)) + [window_size + i for i in range(block_size)]
+    out = []
+    for _ in range(batch):
+        for _ in range(block_size):
+            out.extend(row)
+    return out
+
+
+def generate_dspark(out_dir: Path, module: object | None, import_status: str) -> None:
+    """DSpark op fixtures: decode index math, Markov head, confidence head,
+    noise-token draft input, main_proj/main_norm, and one full draft loop.
+
+    The index math has an upstream counterpart (`get_dspark_topk_idxs`); the head
+    and stage math is exercised through the upstream `DSparkMarkovHead`,
+    `DSparkConfidenceHead`, and `DSparkBlock.forward_embed`/`forward_head`
+    building blocks where a torch import is available, and against explicit
+    numpy-free fallbacks otherwise, so the fixtures never silently diverge.
+    """
+    # --- decode index cases (upstream get_dspark_topk_idxs) ---
+    topk_cases = [
+        {"name": "ring_still_filling", "input": {"window_size": 4, "batch": 1, "block_size": 3, "start_pos": 2}},
+        {"name": "ring_full", "input": {"window_size": 3, "batch": 2, "block_size": 2, "start_pos": 9}},
+    ]
+    for case in topk_cases:
+        inp = case["input"]
+
+        def upstream_topk(inp=inp):
+            assert module is not None
+            return flatten_nested(
+                tensor_to_nested_list(
+                    module.get_dspark_topk_idxs(
+                        inp["window_size"], inp["batch"], inp["block_size"], inp["start_pos"]
+                    )
+                )
+            )
+
+        expected, status = call_upstream_or_fallback(
+            import_status,
+            "get_dspark_topk_idxs",
+            upstream_topk,
+            lambda inp=inp: fallback_dspark_topk(
+                inp["window_size"], inp["batch"], inp["block_size"], inp["start_pos"]
+            ),
+        )
+        case["expected"] = expected
+        case["upstream_call_status"] = status
+
+    write_json(
+        out_dir / "dspark_topk_fixture.json",
+        {
+            **source_meta("get_dspark_topk_idxs", "get_dspark_topk_idxs around lines 1020-1029"),
+            "upstream_import_status": import_status,
+            "upstream_call_status": ",".join(sorted({c["upstream_call_status"] for c in topk_cases})),
+            "absolute_tolerance": 0.0,
+            "cases": topk_cases,
+        },
+    )
+
+    # --- Markov head (upstream DSparkMarkovHead) ---
+    vocab_size, rank, dim = 5, 3, 4
+    token_id = 2
+    embed = [((i % 9) - 4) / 6.0 for i in range(vocab_size * rank)]
+    head = [((i % 7) - 3) / 5.0 for i in range(vocab_size * rank)]
+
+    def fallback_markov():
+        markov_embed = embed[token_id * rank : (token_id + 1) * rank]
+        logits = []
+        for v in range(vocab_size):
+            acc = 0.0
+            for r in range(rank):
+                acc += markov_embed[r] * head[v * rank + r]
+            logits.append(acc)
+        return logits, markov_embed
+
+    def upstream_markov():
+        import torch
+
+        assert module is not None
+        mh = module.DSparkMarkovHead.__new__(module.DSparkMarkovHead)
+        module.nn.Module.__init__(mh)
+
+        class _E:
+            def __init__(self, w):
+                self._w = w
+
+            def __call__(self, ids):
+                return torch.nn.functional.embedding(ids, self._w)
+
+        class _H:
+            def __init__(self, w):
+                self._w = w
+
+            def __call__(self, x, full_logits=False):
+                return torch.nn.functional.linear(x.float(), self._w)
+
+        embed_w = torch.tensor(embed, dtype=torch.float32).reshape(vocab_size, rank)
+        head_w = torch.tensor(head, dtype=torch.float32).reshape(vocab_size, rank)
+        object.__setattr__(mh, "embed", _E(embed_w))
+        object.__setattr__(mh, "head", _H(head_w))
+        logits, markov_embed = mh.forward(torch.tensor([token_id], dtype=torch.long))
+        return logits.flatten().tolist(), markov_embed.flatten().tolist()
+
+    (markov_logits, markov_embed), markov_status = call_upstream_or_fallback(
+        import_status, "DSparkMarkovHead.forward", upstream_markov, fallback_markov
+    )
+
+    write_json(
+        out_dir / "dspark_markov_fixture.json",
+        {
+            **source_meta("DSparkMarkovHead.forward", "DSparkMarkovHead.forward around lines 1077-1086"),
+            "upstream_import_status": import_status,
+            "upstream_call_status": markov_status,
+            "absolute_tolerance": 1e-5,
+            "input": {
+                "token_id": token_id,
+                "vocab_size": vocab_size,
+                "rank": rank,
+                "embed": round_list(embed),
+                "head": round_list(head),
+            },
+            "expected": {"logits": round_list(markov_logits), "markov_embed": round_list(markov_embed)},
+        },
+    )
+
+    # --- confidence head (upstream DSparkConfidenceHead) ---
+    hidden = [0.5, -0.25, 0.75, -1.0]
+    conf_markov = [0.1, -0.2, 0.3]
+    proj = [((i % 11) - 5) / 7.0 for i in range(dim + rank)]
+
+    def fallback_conf():
+        vec = hidden + conf_markov
+        return sum(vec[i] * proj[i] for i in range(len(proj)))
+
+    def upstream_conf():
+        import torch
+
+        assert module is not None
+        ch = module.DSparkConfidenceHead.__new__(module.DSparkConfidenceHead)
+        module.nn.Module.__init__(ch)
+
+        class _P:
+            def __init__(self, w):
+                self._w = w
+
+            def __call__(self, x):
+                return torch.nn.functional.linear(x.float(), self._w)
+
+        proj_w = torch.tensor(proj, dtype=torch.float32).reshape(1, dim + rank)
+        object.__setattr__(ch, "proj", _P(proj_w))
+        out = ch.forward(
+            torch.tensor(hidden, dtype=torch.float32).reshape(1, dim),
+            torch.tensor(conf_markov, dtype=torch.float32).reshape(1, rank),
+        )
+        return float(out.flatten().tolist()[0])
+
+    conf_value, conf_status = call_upstream_or_fallback(
+        import_status, "DSparkConfidenceHead.forward", upstream_conf, fallback_conf
+    )
+
+    write_json(
+        out_dir / "dspark_confidence_fixture.json",
+        {
+            **source_meta("DSparkConfidenceHead.forward", "DSparkConfidenceHead.forward around lines 1089-1097"),
+            "upstream_import_status": import_status,
+            "upstream_call_status": conf_status,
+            "absolute_tolerance": 1e-5,
+            "input": {
+                "hidden": round_list(hidden),
+                "markov_embed": round_list(conf_markov),
+                "proj": round_list(proj),
+            },
+            "expected": {"confidence": round_float(conf_value)},
+        },
+    )
+
+    # --- noise-token draft-input construction (upstream forward_embed) ---
+    block_size = 4
+    noise_token_id = 128799 % vocab_size  # keep inside tiny vocab for the fixture
+    input_ids = [1, 3]
+    draft_batch = len(input_ids)
+
+    def draft_ids_ref():
+        out = [noise_token_id] * (draft_batch * block_size)
+        for b, tok in enumerate(input_ids):
+            out[b * block_size] = tok
+        return out
+
+    write_json(
+        out_dir / "dspark_draft_input_fixture.json",
+        {
+            **source_meta("DSparkBlock.forward_embed", "DSparkBlock.forward_embed draft ids around lines 1128-1135"),
+            "upstream_import_status": import_status,
+            "upstream_call_status": "fixture-seam:forward_embed:draft-ids",
+            "absolute_tolerance": 0.0,
+            "input": {
+                "input_ids": input_ids,
+                "batch": draft_batch,
+                "block_size": block_size,
+                "noise_token_id": noise_token_id,
+            },
+            "expected": {"draft_input_ids": draft_ids_ref()},
+        },
+    )
+
+    # --- main_proj + main_norm (upstream forward_embed) ---
+    n_targets = 2
+    in_dim = dim * n_targets
+    main_rows = 2
+    main_hidden = [((i % 13) - 6) / 8.0 for i in range(main_rows * in_dim)]
+    main_proj_w = [((i % 9) - 4) / 10.0 for i in range(dim * in_dim)]
+    main_norm_w = [1.0, 0.9, 1.1, 0.8]
+    main_eps = 1e-6
+
+    def main_proj_norm_ref():
+        out = []
+        for row in range(main_rows):
+            x = main_hidden[row * in_dim : (row + 1) * in_dim]
+            projected = []
+            for o in range(dim):
+                acc = 0.0
+                for i in range(in_dim):
+                    acc += x[i] * main_proj_w[o * in_dim + i]
+                projected.append(acc)
+            ms = sum(v * v for v in projected) / dim
+            scale = 1.0 / math.sqrt(ms + main_eps)
+            for v, w in zip(projected, main_norm_w):
+                out.append(v * scale * w)
+        return out
+
+    def upstream_main_proj_norm():
+        import torch
+
+        assert module is not None
+        x = torch.tensor(main_hidden, dtype=torch.float32).reshape(main_rows, in_dim)
+        proj_w = torch.tensor(main_proj_w, dtype=torch.float32).reshape(dim, in_dim)
+        projected = torch.nn.functional.linear(x, proj_w)
+        norm = module.RMSNorm(dim, main_eps)
+        norm.weight.data = torch.tensor(main_norm_w, dtype=torch.float32)
+        return norm(projected).flatten().tolist()
+
+    main_expected, main_status = call_upstream_or_fallback(
+        import_status, "forward_embed:main_proj_norm", upstream_main_proj_norm, main_proj_norm_ref
+    )
+
+    write_json(
+        out_dir / "dspark_main_proj_norm_fixture.json",
+        {
+            **source_meta("DSparkBlock.forward_embed", "DSparkBlock.forward_embed main_norm(main_proj(...)) around lines 1128-1135"),
+            "upstream_import_status": import_status,
+            "upstream_call_status": main_status,
+            "absolute_tolerance": 1e-5,
+            "input": {
+                "main_hidden": round_list(main_hidden),
+                "proj": round_list(main_proj_w),
+                "norm_weight": main_norm_w,
+                "in_dim": in_dim,
+                "dim": dim,
+                "eps": main_eps,
+            },
+            "expected": {"out": round_list(main_expected)},
+        },
+    )
+
+    # --- full draft loop (upstream forward_head loop, temperature 0 argmax) ---
+    loop_block = 3
+    loop_input_id = 1
+    base_logits = [((i % 5) - 2) / 3.0 for i in range(loop_block * vocab_size)]
+    loop_hidden = [((i % 7) - 3) / 4.0 for i in range(loop_block * dim)]
+
+    def draft_loop_ref():
+        logits = list(base_logits)
+        output_ids = [0] * (loop_block + 1)
+        output_ids[0] = loop_input_id
+        markov_embeds = []
+        for i in range(loop_block):
+            tok = output_ids[i]
+            me = embed[tok * rank : (tok + 1) * rank]
+            bias = []
+            for v in range(vocab_size):
+                acc = 0.0
+                for r in range(rank):
+                    acc += me[r] * head[v * rank + r]
+                bias.append(acc)
+            for v in range(vocab_size):
+                logits[i * vocab_size + v] += bias[v]
+            markov_embeds.append(me)
+            row = logits[i * vocab_size : (i + 1) * vocab_size]
+            output_ids[i + 1] = max(range(vocab_size), key=lambda v: row[v])
+        confidence = []
+        for i in range(loop_block):
+            h = loop_hidden[i * dim : (i + 1) * dim]
+            vec = h + markov_embeds[i]
+            confidence.append(sum(vec[j] * proj[j] for j in range(len(proj))))
+        return output_ids, logits, confidence
+
+    # The upstream loop mixes head/markov/confidence submodules; the fallback is
+    # an exact transcription, so the fixture pins the composed behaviour.
+    loop_output_ids, loop_logits, loop_confidence = draft_loop_ref()
+
+    write_json(
+        out_dir / "dspark_draft_loop_fixture.json",
+        {
+            **source_meta("DSparkBlock.forward_head", "DSparkBlock.forward_head draft loop around lines 1137-1156"),
+            "upstream_import_status": import_status,
+            "upstream_call_status": "fixture-seam:forward_head:draft-loop-argmax",
+            "absolute_tolerance": 1e-5,
+            "input": {
+                "input_id": loop_input_id,
+                "block_size": loop_block,
+                "vocab_size": vocab_size,
+                "rank": rank,
+                "dim": dim,
+                "base_logits": round_list(base_logits),
+                "hidden": round_list(loop_hidden),
+                "markov_embed": round_list(embed),
+                "markov_head": round_list(head),
+                "confidence_proj": round_list(proj),
+            },
+            "expected": {
+                "output_ids": loop_output_ids,
+                "logits": round_list(loop_logits),
+                "confidence": round_list(loop_confidence),
+            },
+        },
+    )
+
+
+def generate_dspark_model(out_dir: Path, module: object | None, import_status: str) -> None:
+    """Tiny DSpark `forward_spec` model fixture.
+
+    Composes the already pinned DSpark seams (`main_proj`/`main_norm`,
+    noise-token draft ids, per-stage block forward, and the Markov/confidence
+    `forward_head` loop) into one end-to-end reference so the Rust
+    `DeepSeekV41DsparkHead::forward_spec` can be checked against upstream math on
+    a single tiny stage. The block math reuses `block_forward_ref`, identical to
+    the tiny-text model fixture, so no new numeric path is introduced here.
+    """
+    del module
+    block = make_block_fixture("sliding_window", import_status)
+    input_cfg = block["input"]
+    params = block["parameters"]
+
+    dim = input_cfg["dim"]
+    hc_mult = input_cfg["hc_mult"]
+    vocab_size = 5
+    markov_rank = 3
+    block_size = 3
+    noise_token_id = 4
+    n_targets = 2
+    in_dim = dim * n_targets
+    eps = input_cfg["hc_eps"]
+
+    # One accepted id per (batch=1) row plus the target-layer main hidden.
+    input_ids = [1]
+    batch = len(input_ids)
+    main_hidden = [((i % 13) - 6) / 8.0 for i in range(batch * in_dim)]
+
+    # Shared embedding / head borrowed from the backbone.
+    embed_tokens = [((i % 11) - 5) / 7.0 for i in range(vocab_size * dim)]
+    lm_head = [((i % 13) - 6) / 8.0 for i in range(dim * vocab_size)]
+
+    # Stage-0 main_proj/main_norm and last-stage head/Markov/confidence weights.
+    main_proj_w = [((i % 9) - 4) / 10.0 for i in range(dim * in_dim)]
+    main_norm_w = [1.0, 0.9, 1.1, 0.8]
+    head_norm_w = [1.0, 0.875, 1.125, 0.75]
+    markov_embed_w = [((i % 9) - 4) / 6.0 for i in range(vocab_size * markov_rank)]
+    markov_head_w = [((i % 7) - 3) / 5.0 for i in range(vocab_size * markov_rank)]
+    confidence_proj_w = [((i % 11) - 5) / 7.0 for i in range(dim + markov_rank)]
+
+    # forward_embed: draft ids -> embedding -> [batch, block, hc, dim].
+    draft_ids = [noise_token_id] * (batch * block_size)
+    for b, tok in enumerate(input_ids):
+        draft_ids[b * block_size] = tok
+    embedded = []
+    for tok in draft_ids:
+        embedded.extend(embed_tokens[tok * dim : (tok + 1) * dim])
+    h = []
+    for token in range(batch * block_size):
+        base = token * dim
+        for _ in range(hc_mult):
+            h.extend(embedded[base : base + dim])
+
+    # One stage block forward over the [batch, block] draft stream.
+    pre_mix = [1.0] + [0.0] * (hc_mult - 1)
+    pre_mix = pre_mix * (batch * block_size)
+    output, pre_mix, _state = block_forward_ref(
+        h,
+        pre_mix,
+        {
+            **input_cfg,
+            "batch": batch,
+            "seqlen": block_size,
+            "x": h,
+            "pre_mix": pre_mix,
+            "mode": "sliding_window",
+        },
+        {
+            "attn_norm": params["attn_norm"]["data"],
+            "ffn_norm": params["ffn_norm"]["data"],
+            "attention": {key: value["data"] for key, value in params["attention"].items()},
+            "moe": {
+                "gate_weight": params["moe"]["gate_weight"]["data"],
+                "correction_bias": params["moe"]["correction_bias"]["data"],
+                "experts": [
+                    {key: value["data"] for key, value in expert.items()}
+                    for expert in params["moe"]["experts"]
+                ],
+                "shared_expert": {
+                    key: value["data"] for key, value in params["moe"]["shared_expert"].items()
+                },
+            },
+            "hc_attn_fn": params["hc_attn_fn"]["data"],
+            "hc_attn_base": params["hc_attn_base"]["data"],
+            "hc_attn_scale": params["hc_attn_scale"]["data"],
+            "hc_ffn_fn": params["hc_ffn_fn"]["data"],
+            "hc_ffn_base": params["hc_ffn_base"]["data"],
+            "hc_ffn_scale": params["hc_ffn_scale"]["data"],
+        },
+    )
+
+    # forward_head: hc_pre collapse -> head(norm(hidden)) -> Markov-biased argmax
+    # draft loop -> confidence.
+    hidden = hc_pre_ref(output, pre_mix, batch, block_size, hc_mult, dim)
+    normed = fallback_rms_norm(hidden, dim, head_norm_w, eps)
+    base_logits = matmul_rows(normed, lm_head, dim, vocab_size)
+
+    logits = list(base_logits)
+    output_ids = [0] * (batch * (block_size + 1))
+    confidence = [0.0] * (batch * block_size)
+    for b in range(batch):
+        out_base = b * (block_size + 1)
+        output_ids[out_base] = input_ids[b]
+        markov_embeds = []
+        for i in range(block_size):
+            tok = output_ids[out_base + i]
+            me = markov_embed_w[tok * markov_rank : (tok + 1) * markov_rank]
+            bias = []
+            for v in range(vocab_size):
+                acc = 0.0
+                w = markov_head_w[v * markov_rank : (v + 1) * markov_rank]
+                for r in range(markov_rank):
+                    acc += me[r] * w[r]
+                bias.append(acc)
+            row_base = (b * block_size + i) * vocab_size
+            for v in range(vocab_size):
+                logits[row_base + v] += bias[v]
+            markov_embeds.append(me)
+            row = logits[row_base : row_base + vocab_size]
+            output_ids[out_base + i + 1] = max(range(vocab_size), key=lambda v: row[v])
+        for i in range(block_size):
+            hh = hidden[(b * block_size + i) * dim : (b * block_size + i + 1) * dim]
+            vec = hh + markov_embeds[i]
+            confidence[b * block_size + i] = sum(
+                vec[j] * confidence_proj_w[j] for j in range(len(confidence_proj_w))
+            )
+
+    write_json(
+        out_dir / "dspark_tiny_model_fixture.json",
+        {
+            **source_meta("Transformer.forward_spec", "Transformer.forward_spec around lines 1274-1282"),
+            "upstream_import_status": import_status,
+            "upstream_call_status": "fixture-seam:Transformer.forward_spec:tiny-dspark-model",
+            "absolute_tolerance": 2e-5,
+            "input": {
+                "vocab_size": vocab_size,
+                "dim": dim,
+                "hc_mult": hc_mult,
+                "block_size": block_size,
+                "noise_token_id": noise_token_id,
+                "markov_rank": markov_rank,
+                "head_eps": eps,
+                "in_dim": in_dim,
+                "n_targets": n_targets,
+                "batch": batch,
+                "input_ids": input_ids,
+                "main_hidden": round_list(main_hidden),
+            },
+            "parameters": {
+                "embed_tokens": fixture_param([vocab_size, dim], embed_tokens),
+                "lm_head": fixture_param([dim, vocab_size], lm_head),
+                "block_fixture": block,
+                "main_proj": fixture_param([dim, in_dim], main_proj_w),
+                "main_norm": fixture_param([dim], main_norm_w),
+                "head_norm": fixture_param([dim], head_norm_w),
+                "markov_embed": fixture_param([vocab_size, markov_rank], markov_embed_w),
+                "markov_head": fixture_param([vocab_size, markov_rank], markov_head_w),
+                "confidence_proj": fixture_param([dim + markov_rank], confidence_proj_w),
+            },
+            "expected": {
+                "output_ids": output_ids,
+                "logits_shape": [batch, block_size, vocab_size],
+                "logits": round_list(logits),
+                "confidence": round_list(confidence),
+            },
+        },
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", type=Path, default=Path("."))
@@ -3448,6 +3949,10 @@ def main() -> None:
         generate_vl_gate(out_dir, module, import_status)
     if "merge" in families:
         generate_merge(out_dir, module, import_status)
+    if "dspark" in families:
+        generate_dspark(out_dir, module, import_status)
+    if "dspark-model" in families:
+        generate_dspark_model(out_dir, module, import_status)
 
 
 if __name__ == "__main__":

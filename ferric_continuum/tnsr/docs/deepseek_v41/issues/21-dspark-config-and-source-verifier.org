@@ -1,0 +1,62 @@
+#+TITLE: DSpark config activation and source verifier
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 09-text-compatibility-closure
+#+PARENT: ../spec.org
+
+* Context
+
+Wave 1 parsed the DSpark/MTP scalar fields into =DeepSeekV41DsparkConfig= but did
+not act on them. Wave 3 activates the config (a =dspark_enabled()= predicate the
+loader and stage model gate on) and extends the source verifier to pin the
+upstream DSpark class surface the Wave-3 op/head fixtures execute.
+
+Read first:
+
+- =../spec.org= (Wave 3 DSpark contract)
+- =../research/upstream-architecture.md=
+- =../upstream/inference/model.py= classes =DSparkAttention=, =DSparkBlock=,
+  =DSparkMarkovHead=, =DSparkConfidenceHead=, and =get_dspark_topk_idxs=.
+- =ferric_continuum/tnsr/src/deepseek_v41/config.rs=
+- =ferric_continuum/tnsr/testdata/deepseek_v41/source_manifest.json=
+
+* Requirements
+
+- Add =DeepSeekV41DsparkConfig::dspark_enabled()= derived from
+  =dspark_block_size > 0= (upstream builds the =mtp.*= stages only when the draft
+  block is non-empty), keeping the existing scalar fields.
+- Parse the DSpark fields from both the HF nested schema and the flat
+  =inference/config.json= (=dspark_n_activated_experts= maps to
+  =dspark_num_experts_per_tok=), matching the text-config dual-path style.
+- Extend the source manifest / =deepseek_v41_verify_sources.py= to assert the
+  upstream DSpark surface: =get_dspark_topk_idxs=, =DSparkAttention(Attention)=,
+  =DSparkMarkovHead=, =DSparkConfidenceHead=, =DSparkBlock(Block)=, the
+  =mtp.*= checkpoint namespace, and the =main_proj=/=main_norm= stage layout.
+- Add a =config.dspark.dspark_enabled()= assertion covering both the
+  release-derived enabled case and the tiny disabled default.
+
+* Out of scope
+
+- No stage math or =forward_spec= (tickets 22-23).
+- No checkpoint loading (ticket 24).
+
+* Verification
+
+- =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_config_tests=
+- =bash ferric_continuum/tnsr/tools/verify_deepseek_v41_sources.sh= passes with
+  the new DSpark anchors.
+
+* Resolution
+
+Added =dspark_enabled()= to =DeepSeekV41DsparkConfig= (=dspark_block_size > 0=),
+kept all scalar fields, and populated the config from both schemas
+(=dspark_n_activated_experts= -> =dspark_num_experts_per_tok= on the flat path).
+Extended =testdata/deepseek_v41/source_manifest.json= with the
+=dspark-classes-surface= and =dspark-block-stage-layout= claims pinning
+=get_dspark_topk_idxs=, the four DSpark classes, the =mtp.*= namespace, and the
+=main_proj = Linear(dim * len(dspark_target_layer_ids), dim)= stage layout.
+
+Evidence (pinned Bazel 9.2.0):
+- =bash tools/verify_deepseek_v41_sources.sh= -> PASS (text + vision + DSpark
+  source claims).
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests= -> PASSED.

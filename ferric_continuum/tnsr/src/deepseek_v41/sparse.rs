@@ -56,6 +56,39 @@ pub fn window_topk_indices(
     out
 }
 
+/// DSpark decode-step candidate indices, mirroring upstream
+/// `get_dspark_topk_idxs`. The row concatenates the window ring positions
+/// `0..min(window_size, start_pos+1)` with the freshly written draft positions
+/// `window_size + (0..block_size)`, then expands over `[batch, block_size, -1]`.
+/// Upstream asserts `start_pos > 0` because prefill only seeds the window cache.
+pub fn dspark_topk_indices(
+    window_size: usize,
+    batch: usize,
+    block_size: usize,
+    start_pos: usize,
+) -> Vec<i32> {
+    assert!(window_size > 0, "window_size must be positive");
+    assert!(block_size > 0, "block_size must be positive");
+    assert!(start_pos > 0, "DSpark decode requires start_pos > 0");
+
+    let window_rows = window_size.min(start_pos + 1);
+    let mut row = Vec::with_capacity(window_rows + block_size);
+    for idx in 0..window_rows {
+        row.push(idx as i32);
+    }
+    for idx in 0..block_size {
+        row.push((window_size + idx) as i32);
+    }
+
+    let mut out = Vec::with_capacity(batch * block_size * row.len());
+    for _ in 0..batch {
+        for _ in 0..block_size {
+            out.extend_from_slice(&row);
+        }
+    }
+    out
+}
+
 pub fn select_candidate_blocks(
     logits: &[f32],
     shape: CandidateShape,

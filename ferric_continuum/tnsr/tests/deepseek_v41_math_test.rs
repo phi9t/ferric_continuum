@@ -3,6 +3,10 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use tnsr::deepseek_v41::{
     config::DeepSeekV41TextConfig,
+    dspark::{
+        confidence_head_forward, decode_topk_indices, draft_input_ids, draft_loop, main_proj_norm,
+        markov_head_forward, DraftLoopOutput,
+    },
     engram::{
         compressed_token_map_from_vocab_entries, engram_update, ngram_hashes, EngramLayout,
         NgramHashState,
@@ -149,6 +153,7 @@ fn assert_fixture_meta(fixture: &Value, upstream_function: &str) {
     assert!(
         status.starts_with("called-upstream:")
             || status.starts_with("fallback:")
+            || status.starts_with("fixture-seam:")
             || status.starts_with("path-import-skipped"),
         "unexpected upstream status {status:?}"
     );
@@ -402,6 +407,118 @@ fn candidate_block_selection_pins_newest_and_drops_unreachable_blocks() {
 }
 
 #[test]
+fn dspark_topk_indices_match_decode_window_and_draft_positions() {
+    let fixture = fixture("dspark_topk_fixture.json");
+    assert_fixture_meta(&fixture, "get_dspark_topk_idxs");
+
+    for case in fixture["cases"].as_array().expect("cases array") {
+        let input = &case["input"];
+        let got = decode_topk_indices(
+            usize_field(input, "window_size"),
+            usize_field(input, "batch"),
+            usize_field(input, "block_size"),
+            usize_field(input, "start_pos"),
+        );
+        assert_eq!(got, i32_array(case, "expected"));
+    }
+}
+
+#[test]
+fn dspark_markov_head_matches_upstream() {
+    let fixture = fixture("dspark_markov_fixture.json");
+    assert_fixture_meta(&fixture, "DSparkMarkovHead.forward");
+    let tol = f32_field(&fixture, "absolute_tolerance");
+    let input = &fixture["input"];
+    let (logits, markov_embed) = markov_head_forward(
+        usize_field(input, "token_id"),
+        &f32_array(input, "embed"),
+        &f32_array(input, "head"),
+        usize_field(input, "vocab_size"),
+        usize_field(input, "rank"),
+    );
+    let expected = &fixture["expected"];
+    assert_close_slice(&logits, &f32_array(expected, "logits"), tol);
+    assert_close_slice(&markov_embed, &f32_array(expected, "markov_embed"), tol);
+}
+
+#[test]
+fn dspark_confidence_head_matches_upstream() {
+    let fixture = fixture("dspark_confidence_fixture.json");
+    assert_fixture_meta(&fixture, "DSparkConfidenceHead.forward");
+    let tol = f32_field(&fixture, "absolute_tolerance");
+    let input = &fixture["input"];
+    let got = confidence_head_forward(
+        &f32_array(input, "hidden"),
+        &f32_array(input, "markov_embed"),
+        &f32_array(input, "proj"),
+    );
+    let want = f32_field(&fixture["expected"], "confidence");
+    assert!(
+        (got - want).abs() <= tol,
+        "confidence mismatch got {got} want {want}"
+    );
+}
+
+#[test]
+fn dspark_draft_input_ids_place_accepted_tokens_then_noise() {
+    let fixture = fixture("dspark_draft_input_fixture.json");
+    assert_fixture_meta(&fixture, "DSparkBlock.forward_embed");
+    let input = &fixture["input"];
+    let got = draft_input_ids(
+        &usize_array(input, "input_ids"),
+        usize_field(input, "batch"),
+        usize_field(input, "block_size"),
+        usize_field(input, "noise_token_id"),
+    );
+    assert_eq!(got, usize_array(&fixture["expected"], "draft_input_ids"));
+}
+
+#[test]
+fn dspark_main_proj_norm_matches_upstream() {
+    let fixture = fixture("dspark_main_proj_norm_fixture.json");
+    assert_fixture_meta(&fixture, "DSparkBlock.forward_embed");
+    let tol = f32_field(&fixture, "absolute_tolerance");
+    let input = &fixture["input"];
+    let got = main_proj_norm(
+        &f32_array(input, "main_hidden"),
+        &f32_array(input, "proj"),
+        &f32_array(input, "norm_weight"),
+        usize_field(input, "in_dim"),
+        usize_field(input, "dim"),
+        f32_field(input, "eps"),
+    );
+    assert_close_slice(&got, &f32_array(&fixture["expected"], "out"), tol);
+}
+
+#[test]
+fn dspark_draft_loop_matches_upstream_forward_head() {
+    let fixture = fixture("dspark_draft_loop_fixture.json");
+    assert_fixture_meta(&fixture, "DSparkBlock.forward_head");
+    let tol = f32_field(&fixture, "absolute_tolerance");
+    let input = &fixture["input"];
+    let DraftLoopOutput {
+        output_ids,
+        logits,
+        confidence,
+    } = draft_loop(
+        usize_field(input, "input_id"),
+        &f32_array(input, "base_logits"),
+        &f32_array(input, "hidden"),
+        &f32_array(input, "markov_embed"),
+        &f32_array(input, "markov_head"),
+        &f32_array(input, "confidence_proj"),
+        usize_field(input, "block_size"),
+        usize_field(input, "vocab_size"),
+        usize_field(input, "rank"),
+        usize_field(input, "dim"),
+    );
+    let expected = &fixture["expected"];
+    assert_eq!(output_ids, usize_array(expected, "output_ids"));
+    assert_close_slice(&logits, &f32_array(expected, "logits"), tol);
+    assert_close_slice(&confidence, &f32_array(expected, "confidence"), tol);
+}
+
+#[test]
 fn compressor_ratio_one_and_prefill_pooling_match_upstream() {
     let fixture = fixture("compressor_fixture.json");
     assert_fixture_meta(&fixture, "Compressor.forward");
@@ -625,7 +742,7 @@ fn engram_layout_primes_and_offsets_match_upstream() {
         image_token_id: usize_field(config_value, "image_token_id"),
         dtype: string_field(config_value, "dtype"),
         expert_dtype: string_field(config_value, "expert_dtype"),
-        dspark: tnsr::deepseek_v41::config::DeepSeekV41DeferredDsparkConfig {
+        dspark: tnsr::deepseek_v41::config::DeepSeekV41DsparkConfig {
             n_mtp_layers: usize_field(&config_value["dspark"], "n_mtp_layers"),
             dspark_block_size: usize_field(&config_value["dspark"], "dspark_block_size"),
             dspark_noise_token_id: usize_field(&config_value["dspark"], "dspark_noise_token_id"),

@@ -1,0 +1,72 @@
+{
+  "absolute_tolerance": 0.0,
+  "cases": [
+    {
+      "expected": [
+        0,
+        1,
+        2,
+        4,
+        5,
+        6,
+        0,
+        1,
+        2,
+        4,
+        5,
+        6,
+        0,
+        1,
+        2,
+        4,
+        5,
+        6
+      ],
+      "input": {
+        "batch": 1,
+        "block_size": 3,
+        "start_pos": 2,
+        "window_size": 4
+      },
+      "name": "ring_still_filling",
+      "upstream_call_status": "called-upstream:get_dspark_topk_idxs"
+    },
+    {
+      "expected": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        0,
+        1,
+        2,
+        3,
+        4,
+        0,
+        1,
+        2,
+        3,
+        4,
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "input": {
+        "batch": 2,
+        "block_size": 2,
+        "start_pos": 9,
+        "window_size": 3
+      },
+      "name": "ring_full",
+      "upstream_call_status": "called-upstream:get_dspark_topk_idxs"
+    }
+  ],
+  "line_hint": "get_dspark_topk_idxs around lines 1020-1029",
+  "source_file": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py",
+  "upstream_call_status": "called-upstream:get_dspark_topk_idxs",
+  "upstream_function": "get_dspark_topk_idxs",
+  "upstream_import_status": "path-import-ok"
+}

@@ -1,0 +1,64 @@
+#+TITLE: DSpark head model and forward_spec
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 22-dspark-attention-and-head-op-fixtures
+#+PARENT: ../spec.org
+
+* Context
+
+With the DSpark ops pinned (ticket 22), Wave 3 assembles the stage model and the
+=forward_spec= entry point that turns accepted ids + the main model's target-layer
+hidden into the biased draft logits, greedy output ids, and per-step confidence.
+This mirrors upstream =Transformer.forward_spec= for a single-stage tiny head.
+
+Read first:
+
+- =../spec.org= (Wave 3 DSpark contract)
+- =../upstream/inference/model.py= (=Transformer.forward_spec=, =DSparkBlock=)
+- =ferric_continuum/tnsr/src/deepseek_v41/model.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/dspark.rs=
+
+* Requirements
+
+- Add =DeepSeekV41DsparkStage= (a hyper-connection block plus optional
+  =main_proj=/=main_norm=, pre-head =head_norm=, and Markov/confidence head
+  weights) and =DeepSeekV41DsparkHead= (shared =embed_tokens=/=lm_head=, stage
+  list, vocab/dim/block geometry).
+- Implement =DeepSeekV41DsparkHead::forward_spec(input_ids, main_hidden) ->
+  DsparkSpecOutput { output_ids, logits, confidence }=: stage 0 builds the draft
+  embedding via =main_proj=/=main_norm=, runs the block stack, and the last stage
+  applies the pre-head norm + Markov/confidence heads over the draft grid.
+- Follow decision D1 (Markov-biased logits, temperature-0 argmax output ids,
+  fp32 confidence) and D2 (CPU/f32).
+- Emit =dspark_tiny_model_fixture.json= via
+  =deepseek_v41_fixture_gen.py --family dspark-model= (upstream
+  =Transformer.forward_spec=) and assert Rust parity in
+  =tests/deepseek_v41_model_test.rs= (=tiny_dspark_head_forward_spec_matches_reference=).
+  Wire the fixture into =BUILD.bazel= =deepseek_v41_model_tests= data.
+
+* Out of scope
+
+- No checkpoint loading (ticket 24); the model test builds the stage from fixture
+  parameters directly.
+- No generation loop / acceptance sampling beyond greedy drafts.
+
+* Verification
+
+- =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_model_tests=
+- =python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family dspark-model=
+
+* Resolution
+
+Added =DeepSeekV41DsparkStage= and =DeepSeekV41DsparkHead= to =model.rs= with
+=forward_spec= mirroring =Transformer.forward_spec=: stage 0 projects the
+target-layer hidden through =main_proj=/=main_norm=, the block stack runs the
+draft grid, and the last stage applies =head_norm= + the Markov/confidence heads.
+=deepseek_v41_fixture_gen.py --family dspark-model= emits
+=dspark_tiny_model_fixture.json= (=Transformer.forward_spec=, vocab=5, dim=4,
+block_size=3, output_ids=[1,3,3,0]); =tiny_dspark_head_forward_spec_matches_reference=
+asserts biased logits, greedy output ids, and confidence within tolerance.
+
+Evidence (pinned Bazel 9.2.0):
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_model_tests= -> PASSED.
+- =python3 tools/deepseek_v41_fixture_gen.py --repo-root . --family dspark-model=
+  -> regenerates the tiny model fixture with no drift.

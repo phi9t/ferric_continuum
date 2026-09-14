@@ -45,7 +45,9 @@ use safetensors::tensor::{Dtype, SafeTensors, TensorView};
 use super::attention::{DeepSeekV41Attention, DeepSeekV41Compressor, DeepSeekV41Indexer};
 use super::config::DeepSeekV41TextConfig;
 use super::engram::DeepSeekV41Engram;
-use super::model::{DeepSeekV41Block, DeepSeekV41TextModel};
+use super::model::{
+    DeepSeekV41Block, DeepSeekV41DsparkHead, DeepSeekV41DsparkStage, DeepSeekV41TextModel,
+};
 use super::moe::{DeepSeekV41Expert, DeepSeekV41Gate, DeepSeekV41MoE};
 use super::vision::{OwnedVisionBlock, OwnedVisionModel};
 use crate::tensor::{Shape, Tensor, TensorValue};
@@ -578,6 +580,57 @@ fn load_block(
     layer_id: usize,
     engram_layers: &std::collections::BTreeSet<usize>,
 ) -> Result<DeepSeekV41Block, String> {
+    let p = format!("layers.{layer_id}.");
+    load_block_at(
+        cfg,
+        ckpt,
+        layer_id,
+        engram_layers,
+        &p,
+        BlockMoeShape::backbone(cfg),
+    )
+}
+
+/// Which MoE geometry a block should be loaded with. Backbone layers use the
+/// text config's routed-expert counts; DSpark `mtp.*` stages use the separate
+/// `dspark_n_routed_experts` / `dspark_num_experts_per_tok`.
+#[derive(Clone, Copy)]
+struct BlockMoeShape {
+    experts: usize,
+    topk: usize,
+}
+
+impl BlockMoeShape {
+    fn backbone(cfg: &DeepSeekV41TextConfig) -> Self {
+        Self {
+            experts: cfg.n_routed_experts,
+            topk: cfg.num_experts_per_tok,
+        }
+    }
+
+    fn dspark(cfg: &DeepSeekV41TextConfig) -> Self {
+        Self {
+            experts: cfg.dspark.dspark_n_routed_experts,
+            topk: cfg.dspark.dspark_num_experts_per_tok,
+        }
+    }
+}
+
+/// Load one hyper-connection block from a tensor-name prefix (`layers.N.` for
+/// the backbone, `mtp.N.` for a DSpark stage), with the given MoE geometry.
+///
+/// `layer_id` is the block's own id (used for engram-layer membership and the
+/// stored `DeepSeekV41Block::layer_id`); the tensor prefix is passed separately
+/// because DSpark stages live under a different namespace than their upstream
+/// `layer_id = n_layers + stage_id`.
+fn load_block_at(
+    cfg: &DeepSeekV41TextConfig,
+    ckpt: &Checkpoint,
+    layer_id: usize,
+    engram_layers: &std::collections::BTreeSet<usize>,
+    prefix: &str,
+    moe: BlockMoeShape,
+) -> Result<DeepSeekV41Block, String> {
     let d = cfg.hidden_size;
     let hc = cfg.hc_mult;
     let n_heads = cfg.num_attention_heads;
@@ -586,12 +639,12 @@ fn load_block(
     let o_lora = cfg.o_lora_rank;
     let o_groups = cfg.o_groups;
     let inter = cfg.moe_intermediate_size;
-    let experts = cfg.n_routed_experts;
+    let experts = moe.experts;
     let mix_hc = (2 + hc) * hc;
     let hc_dim = hc * d;
     let eps = cfg.rms_norm_eps as f32;
 
-    let p = |s: &str| format!("layers.{layer_id}.{s}");
+    let p = |s: &str| format!("{prefix}{s}");
 
     // -- norms --
     let attn_norm = param_from(&[d], ckpt.float_exact(&p("attn_norm.weight"), &[d])?);
@@ -708,7 +761,7 @@ fn load_block(
             tokens: 0,     // set per-forward by callers building from config
             dim: d,
             experts,
-            topk: cfg.num_experts_per_tok,
+            topk: moe.topk,
             gate_temp: 1.0,
             norm_topk_prob: cfg.norm_topk_prob,
             route_scale: cfg.routed_scaling_factor as f32,
@@ -906,6 +959,130 @@ fn load_vision(cfg: &DeepSeekV41TextConfig, ckpt: &Checkpoint) -> Result<OwnedVi
         downsample_ratio: r,
         patch_flat,
     })
+}
+
+/// Load the DSpark (MTP speculative-decoding) head from a checkpoint directory.
+///
+/// Returns `Ok(None)` when the config does not enable DSpark
+/// (`dspark_block_size == 0`), so text-only callers pay nothing.  When enabled,
+/// this reads the `mtp.{stage_id}.*` namespace for each of `n_mtp_layers`
+/// stages (each a full hyper-connection block loaded with the DSpark expert
+/// geometry), plus the stage-scoped heads:
+///
+/// * **stage 0** owns `mtp.0.main_proj.weight` `[dim, dim*n_targets]` (upstream
+///   `Linear` `[out,in]`, kept row-major here as `main_proj_norm` expects) and
+///   `mtp.0.main_norm.weight` `[dim]`.
+/// * the **last stage** (`stage_id == n_mtp_layers - 1`) owns `norm.weight`
+///   `[dim]`, `markov_head.embed.weight` / `markov_head.head.weight`
+///   `[vocab, markov_rank]`, and `confidence_head.proj.weight` `[1, dim+rank]`.
+///
+/// The shared `embed` and `head` are tied to the backbone in upstream
+/// (`convert.py` drops the `mtp.*.embed/head` tensors), so this borrows them
+/// from the already-loaded [`DeepSeekV41TextModel`].
+pub fn load_dspark_head(
+    model_dir: &Path,
+    model: &DeepSeekV41TextModel,
+) -> Result<Option<DeepSeekV41DsparkHead>, String> {
+    let cfg = read_config(model_dir)?;
+    let ckpt = open_checkpoint(model_dir)?;
+    build_dspark_head(&cfg, &ckpt, model)
+}
+
+fn build_dspark_head(
+    cfg: &DeepSeekV41TextConfig,
+    ckpt: &Checkpoint,
+    model: &DeepSeekV41TextModel,
+) -> Result<Option<DeepSeekV41DsparkHead>, String> {
+    if !cfg.dspark.dspark_enabled() {
+        return Ok(None);
+    }
+    let d = cfg.hidden_size;
+    let vocab = cfg.vocab_size;
+    let rank = cfg.dspark.dspark_markov_rank;
+    let n_stages = cfg.dspark.n_mtp_layers;
+    let n_targets = cfg.dspark.dspark_target_layer_ids.len();
+    if n_stages == 0 {
+        return Err("dspark enabled but n_mtp_layers == 0".to_string());
+    }
+    if n_targets == 0 {
+        return Err("dspark enabled but dspark_target_layer_ids is empty".to_string());
+    }
+    let in_dim = d * n_targets;
+
+    // DSpark stages carry no engram layers (the `mtp.*` namespace has none).
+    let no_engram = std::collections::BTreeSet::new();
+    let moe = BlockMoeShape::dspark(cfg);
+
+    let mut stages = Vec::with_capacity(n_stages);
+    for stage_id in 0..n_stages {
+        let prefix = format!("mtp.{stage_id}.");
+        // The upstream block id is n_layers + stage_id; the tnsr block only uses
+        // layer_id for engram membership and diagnostics, so pass that id.
+        let block = load_block_at(
+            cfg,
+            ckpt,
+            cfg.num_hidden_layers + stage_id,
+            &no_engram,
+            &prefix,
+            moe,
+        )?;
+
+        // Stage 0 owns main_proj/main_norm. main_proj is a torch Linear
+        // `[out=dim, in=in_dim]`; `main_proj_norm` applies it row-major so we
+        // keep the `[dim, in_dim]` layout as-is.
+        let (main_proj, main_norm) = if stage_id == 0 {
+            let proj = ckpt.float_exact(&format!("{prefix}main_proj.weight"), &[d, in_dim])?;
+            let norm = ckpt.float_exact(&format!("{prefix}main_norm.weight"), &[d])?;
+            (Some(proj), Some(norm))
+        } else {
+            (None, None)
+        };
+
+        // The last stage owns the pre-head norm and the Markov/confidence heads.
+        let (head_norm, markov_embed, markov_head, confidence_proj) = if stage_id == n_stages - 1 {
+            let head_norm = ckpt.float_exact(&format!("{prefix}norm.weight"), &[d])?;
+            let markov_embed =
+                ckpt.float_exact(&format!("{prefix}markov_head.embed.weight"), &[vocab, rank])?;
+            let markov_head =
+                ckpt.float_exact(&format!("{prefix}markov_head.head.weight"), &[vocab, rank])?;
+            // confidence proj is a Linear(dim+rank -> 1): [1, dim+rank].
+            let confidence_proj = ckpt.float_exact(
+                &format!("{prefix}confidence_head.proj.weight"),
+                &[1, d + rank],
+            )?;
+            (
+                Some(head_norm),
+                Some(markov_embed),
+                Some(markov_head),
+                Some(confidence_proj),
+            )
+        } else {
+            (None, None, None, None)
+        };
+
+        stages.push(DeepSeekV41DsparkStage {
+            block,
+            main_proj,
+            main_norm,
+            head_norm,
+            markov_embed,
+            markov_head,
+            confidence_proj,
+        });
+    }
+
+    Ok(Some(DeepSeekV41DsparkHead {
+        vocab_size: vocab,
+        dim: d,
+        hc_mult: cfg.hc_mult,
+        block_size: cfg.dspark.dspark_block_size,
+        noise_token_id: cfg.dspark.dspark_noise_token_id,
+        markov_rank: rank,
+        head_eps: cfg.rms_norm_eps as f32,
+        embed_tokens: model.embed_tokens.clone(),
+        lm_head: model.lm_head.clone(),
+        stages,
+    }))
 }
 
 /// Convenience: run a text-only forward that seeds the per-layer MoE token

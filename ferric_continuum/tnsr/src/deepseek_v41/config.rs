@@ -11,7 +11,7 @@ use std::path::Path;
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct DeepSeekV41DeferredDsparkConfig {
+pub struct DeepSeekV41DsparkConfig {
     pub n_mtp_layers: usize,
     pub dspark_block_size: usize,
     pub dspark_noise_token_id: usize,
@@ -20,6 +20,18 @@ pub struct DeepSeekV41DeferredDsparkConfig {
     pub dspark_n_routed_experts: usize,
     pub dspark_num_experts_per_tok: usize,
 }
+
+impl DeepSeekV41DsparkConfig {
+    /// DSpark/MTP draft head is present iff it has at least one draft block
+    /// (upstream builds the `mtp.*` stages only when `dspark_block_size > 0`).
+    pub fn dspark_enabled(&self) -> bool {
+        self.dspark_block_size > 0
+    }
+}
+
+/// Deprecated alias retained for one release; use [`DeepSeekV41DsparkConfig`].
+/// Wave 1 read but did not execute these fields, hence the old "Deferred" name.
+pub type DeepSeekV41DeferredDsparkConfig = DeepSeekV41DsparkConfig;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeepSeekV41VisionConfig {
@@ -98,7 +110,7 @@ pub struct DeepSeekV41TextConfig {
     pub image_token_id: usize,
     pub dtype: String,
     pub expert_dtype: String,
-    pub dspark: DeepSeekV41DeferredDsparkConfig,
+    pub dspark: DeepSeekV41DsparkConfig,
     pub vision: DeepSeekV41VisionConfig,
 }
 
@@ -167,7 +179,7 @@ impl DeepSeekV41TextConfig {
             image_token_id: usize_field(root, "image_token_id")?,
             dtype: string_field(quant, "quant_method")?,
             expert_dtype: string_field(quant, "expert_dtype")?,
-            dspark: DeepSeekV41DeferredDsparkConfig {
+            dspark: DeepSeekV41DsparkConfig {
                 n_mtp_layers: usize_field(text, "num_nextn_predict_layers")?,
                 dspark_block_size: usize_field(text, "dspark_block_size")?,
                 dspark_noise_token_id: usize_field(text, "dspark_noise_token_id")?,
@@ -245,7 +257,7 @@ impl DeepSeekV41TextConfig {
             image_token_id: usize_field(root, "image_token_id")?,
             dtype: string_field(root, "dtype")?,
             expert_dtype: string_field(root, "expert_dtype")?,
-            dspark: DeepSeekV41DeferredDsparkConfig {
+            dspark: DeepSeekV41DsparkConfig {
                 n_mtp_layers: usize_field(root, "n_mtp_layers")?,
                 dspark_block_size: usize_field(root, "dspark_block_size")?,
                 dspark_noise_token_id: usize_field(root, "dspark_noise_token_id")?,

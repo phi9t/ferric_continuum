@@ -1,0 +1,61 @@
+#+TITLE: DSpark checkpoint loader (mtp.* namespace)
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 23-dspark-head-model-and-forward-spec
+#+PARENT: ../spec.org
+
+* Context
+
+With the DSpark stage model in place (ticket 23), Wave 3 teaches the loader to
+read the =mtp.{stage_id}.*= checkpoint namespace and build a
+=DeepSeekV41DsparkHead=, reusing the existing block loader with the DSpark MoE
+geometry. Text-only callers pay nothing: the loader returns =Ok(None)= when
+DSpark is disabled.
+
+Read first:
+
+- =../spec.org= (Wave 3 DSpark contract, decision D3)
+- =ferric_continuum/tnsr/src/deepseek_v41/load.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/model.rs= (=DeepSeekV41DsparkHead=)
+- =../upstream/inference/convert.py= (drops =mtp.*.embed/head=)
+
+* Requirements
+
+- Add =load_dspark_head(dir, model) -> Result<Option<DeepSeekV41DsparkHead>,String>=
+  returning =Ok(None)= when =dspark_block_size == 0=.
+- Reuse the per-block loader on the =mtp.N.= prefix (decision D3) with the DSpark
+  routed-expert geometry (=dspark_n_routed_experts= / =dspark_num_experts_per_tok=).
+  Stage 0 owns =main_proj= =[dim, dim*len(target_layer_ids)]= / =main_norm=
+  =[dim]=; the last stage owns the pre-head =norm= + =markov_head.embed/head= and
+  =confidence_head.proj=.
+- =convert.py= drops =mtp.*.embed/head=, so the head borrows =embed_tokens= /
+  =lm_head= from the loaded backbone.
+- Error loudly on missing required DSpark tensors, naming the tensor. Text-only
+  loads must still reject vision/DSpark tensor requests.
+- Loader tests in =src/deepseek_v41/load_test.rs= using tiny in-test safetensors:
+  a 2-stage DSpark checkpoint loads (stage-0 main_proj/norm present, later stages
+  absent; last stage owns the heads; DSpark MoE geometry applied; embed/head
+  borrowed); disabled config => =Ok(None)=; missing tensor => named =Err=.
+
+* Out of scope
+
+- No generation loop; no acceptance sampling.
+
+* Verification
+
+- =/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:lib_tests=
+  (loader unit tests) and =deepseek_v41_model_tests=.
+
+* Resolution
+
+Added =load_dspark_head= (+ private =build_dspark_head=) to =load.rs=: returns
+=Ok(None)= when =dspark_enabled()= is false, else loads each =mtp.{stage_id}.=
+stage through the shared block loader with =BlockMoeShape::dspark(cfg)=. Stage 0
+loads =main_proj=/=main_norm=; the last stage loads the pre-head =norm= and the
+Markov/confidence head weights; =embed_tokens=/=lm_head= are borrowed from the
+backbone (=convert.py= drops =mtp.*.embed/head=). Missing tensors error by name.
+
+Evidence (pinned Bazel 9.2.0):
+- =bazel test //ferric_continuum/tnsr:lib_tests= -> PASSED
+  (=dspark_head_loads_from_mtp_namespace= and the disabled/missing cases green).
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_model_tests= -> PASSED.

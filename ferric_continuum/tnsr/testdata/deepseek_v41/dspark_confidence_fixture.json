@@ -1,0 +1,33 @@
+{
+  "absolute_tolerance": 1e-05,
+  "expected": {
+    "confidence": -0.22142854
+  },
+  "input": {
+    "hidden": [
+      0.5,
+      -0.25,
+      0.75,
+      -1.0
+    ],
+    "markov_embed": [
+      0.1,
+      -0.2,
+      0.3
+    ],
+    "proj": [
+      -0.71428571,
+      -0.57142857,
+      -0.42857143,
+      -0.28571429,
+      -0.14285714,
+      0.0,
+      0.14285714
+    ]
+  },
+  "line_hint": "DSparkConfidenceHead.forward around lines 1089-1097",
+  "source_file": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py",
+  "upstream_call_status": "called-upstream:DSparkConfidenceHead.forward",
+  "upstream_function": "DSparkConfidenceHead.forward",
+  "upstream_import_status": "path-import-ok"
+}
