@@ -34,6 +34,7 @@ _TNSR_SRCS = [
     "src/qwen3_load.rs",
     "src/deepseek_v41/config.rs",
     "src/deepseek_v41/attention.rs",
+    "src/deepseek_v41/cost.rs",
     "src/deepseek_v41/dspark.rs",
     "src/deepseek_v41/engram.rs",
     "src/deepseek_v41/hc_tensor.rs",
@@ -409,6 +410,21 @@ rust_test(
     name = "cuda_forward_tests",
     srcs = ["tests/cuda_forward_test.rs"],
     crate_name = "cuda_forward_test",
+    edition = "2021",
+    tags = [
+        "cuda",
+        "requires-gpu",
+    ],
+    deps = [":tnsr"],
+)
+
+# DeepSeek V4.1 whole-model forward agreement CPU vs CUDA (Wave 4). Proves the
+# DeepSeek forward composes on the GPU gemm/softmax kernels; native FP8/FP4
+# matmul and TP serving parity are deferred (see Wave 4 tickets).
+rust_test(
+    name = "deepseek_v41_cuda_forward_tests",
+    srcs = ["tests/deepseek_v41_cuda_forward_test.rs"],
+    crate_name = "deepseek_v41_cuda_forward_test",
     edition = "2021",
     tags = [
         "cuda",

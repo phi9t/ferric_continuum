@@ -1,0 +1,65 @@
+#+TITLE: Wave 4 performance/device closure and review
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 27-cuda-gated-forward-parity
+#+PARENT: ../spec.org
+
+* Context
+
+Wave 4 closes the DeepSeek V4.1 performance/device track for the two seams that
+are in scope (cost accounting + CUDA-gated forward parity). Native FP8/FP4
+matmul kernels and tensor-parallel serving parity remain explicit deferred
+TODOs. This ticket is the scope/standards/spec review and the landing.
+
+Read first:
+
+- =../spec.org= (Wave 4 section + Wave 4 resolution)
+- =issues/26-cost-accounting-seam.org=, =issues/27-cuda-gated-forward-parity.org=
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_perf_compat.sh=
+
+* Requirements
+
+- Add =tools/verify_deepseek_v41_perf_compat.sh=: P0 comparator self-test, L1
+  sources, L2 config, L3 ops, L4 model, L5 cost accounting (=lib_tests=), L6 CUDA
+  forward parity (=--config=cuda=; SKIP on a CPU host), L6* real parity SKIP.
+  Never present SKIP as PASS; per-level PASS/SKIP/FAIL summary.
+- Update =spec.org= Wave 4 section + add a Wave 4 resolution block.
+- Confirm scope: the change touches only =cost.rs= (new), =mod.rs= (one line),
+  =BUILD.bazel= (glob + one test target), =tests/deepseek_v41_cuda_forward_test.rs=
+  (new), =.bazelrc= (CUDA config fix), docs/issues, and the verifier. Qwen3
+  untouched; CUDA opt-in; small modules; pinned Bazel 9.2.0.
+- Land as a SEPARATE Wave-4 PR on =ultron/mainline= via rebase (linear history),
+  only after CI green.
+
+* Out of scope
+
+- Native FP8/FP4 matmul kernels (deferred TODO).
+- Tensor-parallel serving parity beyond static shard-layout validation (deferred).
+- No commit trailer beyond the single =Co-authored-by: TRAE CLI= line.
+
+* Verification
+
+- =bash -n tools/verify_deepseek_v41_perf_compat.sh= → OK
+- =bash tools/verify_deepseek_v41_perf_compat.sh= on the B200 host → all levels
+  PASS, =L6-real-parity= SKIP.
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests
+  //ferric_continuum/tnsr:deepseek_v41_math_tests
+  //ferric_continuum/tnsr:deepseek_v41_model_tests
+  //ferric_continuum/tnsr:lib_tests= → pass.
+- =bazel test --config=cuda //ferric_continuum/tnsr:deepseek_v41_cuda_forward_tests=
+  → PASS on GPU host.
+- CI green on the Wave-4 PR before rebase-landing on =ultron/mainline=.
+
+* Resolution
+
+Added =tools/verify_deepseek_v41_perf_compat.sh= (P0/L1-L5 + L6 CUDA forward
+parity + L6* real SKIP; honest CUDA preflight via =nvidia-smi=; never SKIP-as-
+PASS). Updated =spec.org='s Wave 4 section (two seams + deferred TODOs) and added
+a Wave 4 resolution block. Scope confirmed limited to =cost.rs=, one line in
+=mod.rs=, the =BUILD.bazel= glob + one GPU-tagged test target, the new GPU test,
+the =.bazelrc= CUDA-config fix, docs/issues 26-28, and this verifier; Qwen3 is
+untouched and CUDA stays opt-in.
+
+Evidence (B200 GPU host, pinned Bazel 9.2.0) — see the Wave 4 resolution block in
+=spec.org= for the full per-level summary; =L6-real-parity= is a documented SKIP
+(no local weights; native FP8/FP4 + TP parity deferred), never presented as PASS.

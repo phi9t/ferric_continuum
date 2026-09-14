@@ -1,0 +1,64 @@
+#+TITLE: DeepSeek V4.1 cost-accounting seam (params / FLOPs / bytes)
+#+TYPE: task
+#+STATUS: done
+#+PARENT: ../spec.org
+
+* Context
+
+Wave 4 opens the performance/device track. Its first seam is a *symbolic* cost
+model that sizes DeepSeek V4.1 (parameters, forward FLOPs, activation bytes)
+directly from =DeepSeekV41TextConfig= — with no device, no executed forward, and
+no need to load the released 510GB checkpoint. This mirrors the =scaling=
+module's convention (multiply-accumulate = 2 FLOPs, f32 activation bytes) so a
+CLI, report, or roofline lookup can reason about the model analytically.
+
+Read first:
+
+- =../spec.org= (Wave 4, Text-only architecture contract — MLA/MoE shapes)
+- =ferric_continuum/tnsr/src/deepseek_v41/config.rs=
+- =ferric_continuum/tnsr/src/scaling/= (F32_BYTES / FLOP conventions)
+
+* Requirements
+
+- Add =src/deepseek_v41/cost.rs= exposing =block_params(cfg)=,
+  =block_forward(cfg, batch, seq)=, =model_forward(cfg, batch, seq)= and the
+  structs =BlockParams= / =BlockForward= / =ModelForward=.
+- Count only matmul weights in the "N" used by the training-FLOPs rule; fold
+  norms/RoPE/softmax/HyperConnection mixing into the activation-byte estimate.
+- Model MLA exactly: query =wq_a [D,q_lora]= + =wq_b [q_lora,H*head_dim]=; shared
+  KV =wkv [D,head_dim]= (=num_key_value_heads == 1=); grouped output
+  =wo_a [H*head_dim, o_groups*o_lora]= + =wo_b [o_groups*o_lora, D]=.
+- Model MoE sparsity: gate =[D,n_routed]= costed over all tokens, then only
+  =num_experts_per_tok= routed + =n_shared_experts= shared experts per token,
+  each a 3-matmul SwiGLU.
+- Register =pub mod cost;= in =src/deepseek_v41/mod.rs= and add =cost.rs= to the
+  =tnsr= srcs glob in =BUILD.bazel=.
+- Unit tests (in the =lib_tests= crate) hand-check a tiny geometry and guard the
+  release-shape order of magnitude (hundreds of billions of params; active FLOPs
+  far below the full-bank param count, proving sparsity is modeled).
+
+* Out of scope
+
+- No device, no executed forward, no native FP8/FP4 kernel accounting.
+- No CLI wiring (the seam is a library API; a report consumer is future work).
+
+* Verification
+
+- =bazel test //ferric_continuum/tnsr:lib_tests= (cost tests pass).
+- =rustfmt --check= on =cost.rs= / =mod.rs=.
+
+* Resolution
+
+Added =src/deepseek_v41/cost.rs= with =block_params= / =block_forward= /
+=model_forward= and the three result structs. MLA and grouped-output shapes are
+counted exactly; MoE costs only =num_experts_per_tok= routed + =n_shared_experts=
+shared experts per token. Registered =pub mod cost;= and added the source to the
+=tnsr= glob. Four unit tests hand-check the tiny geometry
+(=block_params_match_hand_computed=, =block_forward_flops_match_hand_computed=,
+=model_forward_aggregates_layers_and_head=) and guard the release shape
+(=release_config_is_within_expected_magnitude=: =params_total > 1e11=, and
+=total_flops < full_bank_flops/10= so MoE sparsity is provably reflected).
+
+Evidence commands (pinned Bazel 9.2.0):
+- =bazel test //ferric_continuum/tnsr:lib_tests= → PASS (cost tests included)
+- =rustfmt --edition 2021 --check src/deepseek_v41/cost.rs src/deepseek_v41/mod.rs= → clean
