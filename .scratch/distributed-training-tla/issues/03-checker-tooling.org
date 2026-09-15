@@ -132,3 +132,43 @@ The same final verification command also ran both executable models through
 
 - good fixture: exit ~0~, JSON result ~success~
 - bad fixture: exit ~12~, JSON result ~invariant_violation~
+
+* Follow-up: Option C hermetic Bazel integration (2026-09-15)
+
+The deferred "Bazel integration as a later hardening ticket" is now done, so the
+checker is hermetic and does not depend on a host jar or a host ~java~.
+
+Changes:
+
+- ~MODULE.bazel~ pins ~tla2tools.jar~ (TLA+ 1.8.0 "Clarke") via ~http_jar~
+  (~@tla2tools//jar~), verified by sha256
+  ~0d48829d541d5b70844a39d7fc5032679411730da17b12d017ae5cade7f249c3~. Added
+  ~bazel_dep(rules_java 9.3.0)~ for the JDK toolchain.
+- ~tools/tla_check.py~ gained ~--java-bin~ (falls back to ~JAVA~ env, then
+  ~java~ on ~PATH~) and now emits ~-XX:+UseParallelGC~; this lets a hermetic
+  caller point at a bundled JDK. Exposed as ~//tools:tla_check~ (~py_library~).
+- ~formal/distributed_training/BUILD.bazel~ adds ~mesh_plan_tlc_test~
+  (~py_test~) driven by ~tlc_bazel_test.py~: it runs the good model (expect
+  ~success~/exit 0) and the bad model (expect ~invariant_violation~; TLC exits
+  12, which is the expected outcome) using ~@tla2tools//jar~ + Bazel's
+  ~$(JAVA)~ from ~@bazel_tools//tools/jdk:current_java_runtime~, resolved through
+  the ~rules_python~ runfiles library. Tagged ~local-only~ + ~manual~ (needs
+  network at fetch time).
+- ~.bazelrc~ adds ~--config=formal~ pinning ~remotejdk_17~ (the auto-detected
+  host ~local_jdk~ can be Java 8, too old for modern tla2tools).
+- ~formal/tools/verify_formal_mesh_plan.sh~ is the ladder verifier (L1 runner
+  unit tests, L2 hermetic TLC good/bad). It SKIPs the TLC level honestly when
+  the jar cannot be fetched offline and NEVER presents a SKIP as PASS.
+- ~.github/workflows/ci.yml~ gains a dedicated ~formal~ job running the verifier.
+
+Verification evidence (2026-09-15):
+
+#+begin_src sh
+bazel test //tests/tla_check:tla_check_test                  # PASS
+bazel test --config=formal \
+  //formal/distributed_training:mesh_plan_tlc_test           # PASS
+bash formal/tools/verify_formal_mesh_plan.sh                 # RESULT: PASS (all levels)
+#+end_src
+
+Hermetic TLC output: ~[good] exit=0 result=success ok=True~ /
+~[bad] exit=12 result=invariant_violation ok=False~.

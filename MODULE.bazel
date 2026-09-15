@@ -31,6 +31,11 @@ bazel_dep(name = "protobuf", version = "33.4")
 # gRPC will be added later when needed for distributed systems
 # bazel_dep(name = "grpc", version = "1.65.5")
 
+# Java rules: used to run the TLA+ model checker (TLC, tlc2.TLC) hermetically
+# from the pinned tla2tools.jar via Bazel's own JDK. See the http_jar repo and
+# formal/distributed_training/BUILD.bazel.
+bazel_dep(name = "rules_java", version = "9.3.0")
+
 # Testing frameworks
 bazel_dep(name = "googletest", version = "1.17.0.bcr.2")
 
@@ -188,4 +193,29 @@ cuda.toolkit(
     toolkit_path = "",
 )
 use_repo(cuda, "cuda")
+
+###############################################################################
+# TLA+ model checker (opt-in, hermetic)
+###############################################################################
+#
+# The distributed-training formal models under `formal/` are checked with TLC
+# (`tlc2.TLC`) from the official `tla2tools.jar`. Pinning the jar via `http_jar`
+# keeps the checker hermetic: Bazel fetches exactly this artifact (verified by
+# sha256) at repo-rule time and runs it with its own JDK, so no host Java or
+# `TLA_TOOLS_JAR` is required. `tools/tla_check.py` still supports a host jar
+# for ad-hoc local runs, but the Bazel path is the canonical one.
+#
+# Version: TLA+ 1.8.0 ("Clarke"). The sha256 below (hex
+# 0d48829d541d5b70844a39d7fc5032679411730da17b12d017ae5cade7f249c3) is the
+# value Bazel verifies; pinning it makes the build reproducible and detects any
+# upstream asset re-upload (the v1.8.0 jar has been re-published before).
+http_jar = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_jar")
+
+http_jar(
+    name = "tla2tools",
+    integrity = "sha256-DUiCnVQdW3CESjnX/FAyZ5QRcw2hexLQF65crefyScM=",
+    urls = [
+        "https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar",
+    ],
+)
 

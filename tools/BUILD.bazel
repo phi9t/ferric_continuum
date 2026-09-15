@@ -1,0 +1,11 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+package(default_visibility = ["//visibility:public"])
+
+# TLA+ model-check runner. Exposed as a library so both the formal BUILD driver
+# and the tla_check unit tests import it as `tools.tla_check`.
+py_library(
+    name = "tla_check",
+    srcs = ["tla_check.py"],
+    imports = [".."],
+)

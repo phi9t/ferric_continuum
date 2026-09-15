@@ -1,0 +1,58 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+package(default_visibility = ["//visibility:private"])
+
+# The MeshPlan formal models and their TLC configs. MeshPlan.tla is the shared
+# base module that MeshPlanGood/MeshPlanBad `INSTANCE`, so all three .tla files
+# must land in the same runfiles directory.
+filegroup(
+    name = "mesh_plan_models",
+    srcs = [
+        "MeshPlan.tla",
+        "MeshPlanBad.cfg",
+        "MeshPlanBad.tla",
+        "MeshPlanGood.cfg",
+        "MeshPlanGood.tla",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+exports_files([
+    "MeshPlan.tla",
+    "MeshPlanGood.tla",
+    "MeshPlanGood.cfg",
+    "MeshPlanBad.tla",
+    "MeshPlanBad.cfg",
+    "README.org",
+])
+
+# Hermetic TLC model check: runs both mesh models with Bazel's own JDK
+# (`$(JAVA)` from the current Java runtime toolchain) against the pinned
+# `@tla2tools//jar`. No host `java` or `TLA_TOOLS_JAR` is required. The good
+# model must complete cleanly; the bad model must surface the invariant
+# violation. Tagged `manual` + `local-only` so CPU-only `bazel test //...` and
+# the CI tag filters skip it unless explicitly requested (it needs network at
+# fetch time and a JDK at run time).
+py_test(
+    name = "mesh_plan_tlc_test",
+    srcs = ["tlc_bazel_test.py"],
+    args = [
+        "$(JAVA)",
+        "$(location @tla2tools//jar)",
+    ],
+    data = [
+        ":mesh_plan_models",
+        "@bazel_tools//tools/jdk:current_java_runtime",
+        "@tla2tools//jar",
+    ],
+    main = "tlc_bazel_test.py",
+    tags = [
+        "local-only",
+        "manual",
+    ],
+    toolchains = ["@bazel_tools//tools/jdk:current_java_runtime"],
+    deps = [
+        "//tools:tla_check",
+        "@rules_python//python/runfiles",
+    ],
+)
