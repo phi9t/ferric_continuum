@@ -1,6 +1,6 @@
 #+TITLE: Ferric MeshTrace -> StepTxn.tla refinement bridge
 #+TYPE: task
-#+STATUS: open
+#+STATUS: resolved
 #+BLOCKED_BY: 05-step-transaction-model
 #+PARENT: ../map.org
 
@@ -60,3 +60,61 @@ Chosen by the 2026-09-15 wayfinder session:
 - The dependency edge from ~StepTxn.tla~ to the trace behavior module.
 
 * Answer
+
+Landed on branch ~formal-trace-bridge~ (cut from ~ultron/mainline~).
+
+** How a recorded trace is checked to refine StepTxn.tla
+
+1. Rust emits the real trace. ~MeshTrace::trace_json()~ (added to
+   ~ferric_continuum/tnsr/src/dtensor/trace.rs~) serializes the graduated
+   DTensor mesh simulation to the ~tnsr.mesh_sim_trace.v0~ schema; the
+   ~//ferric_continuum/tnsr:dtensor_trace_dump~ binary writes it to disk
+   (~--inject-failure~ adds a MissingParticipant injection on
+   Backward/rank0/DpReplicate/AllReduce).
+2. ~formal/distributed_training/trace_bridge.py~ classifies the trace
+   (~classify_trace~) and renders a self-contained TLA+ behavior module +
+   cfg (~render_behavior_module~ / ~render_config~) that ~INSTANCE~s
+   ~StepTxn.tla~ over one rank, pins ~overflow~ to the observed value via
+   ~ComputeObserved~, and asserts ~INVARIANT Inv~ + ~INVARIANT TraceConsumed~.
+3. ~formal/distributed_training/trace_refine_bazel_test.py~ drives TLC
+   hermetically (Bazel ~$(JAVA)~ + pinned ~@tla2tools//jar~) on both fixtures
+   under ~--config=formal~ via
+   ~//formal/distributed_training:trace_refine_tlc_test~.
+
+** Variant-subset table (rationale)
+
+| MeshTraceEvent variant | Observed? | Maps to / rationale                                  |
+|------------------------+-----------+------------------------------------------------------|
+| Collective             | yes       | -> synchronizing (AllReduce/AllGather = the barrier) |
+| Failure                | yes       | -> aborting/aborted; sets ~overflow~ (abort path)    |
+| phase == Optimizer     | yes       | -> committing/committed (the mutating commit)        |
+| LayoutTransition       | no        | refines issue 04 (provenance), not the txn machine   |
+| Injection              | no        | a stimulus, not a transition; effect shows as Failure|
+
+** Good/bad fixtures and TLC exit codes
+
+- ~trace_good.json~: real emitted commit-path trace (no failure). Refines
+  StepTxn cleanly -> TLC success, exit 0.
+- ~trace_bad.json~: synthetic commit-after-failure (collective + failure +
+  optimizer-phase commit under an abort decision). Violates ~TraceConsumed~
+  -> TLC "Error: Invariant TraceConsumed is violated", exit 12 with a
+  counterexample. The Bazel driver additionally fails if the bad fixture is
+  not the ~commit_after_failure~ case.
+
+** Dependency edge
+
+The generated behavior module ~INSTANCE StepTxn WITH Ranks<-{"r0"}, ...~ and
+sets ~Inv==S!Inv~, ~TraceConsumed==CanAdvance \/ ENABLED DecideStep \/
+(k>ObservedLen /\ S!Resolved)~, so the trace behavior module depends on
+~StepTxn.tla~ (issue 05) as its refinement target.
+
+** Verification
+
+- ~bazel test --config=formal //formal/distributed_training:trace_refine_tlc_test~
+  -> PASSED.
+- ~formal/tools/verify_formal_mesh_plan.sh~ now runs Level 4
+  (trace-refinement) alongside L1-L3: all PASS.
+- New Rust test ~mesh_trace_json_emits_stable_schema_and_ordered_event_kinds~
+  in ~ferric_continuum/tnsr/tests/mesh_sim_test.rs~ -> green.
+
+#+STATUS: resolved

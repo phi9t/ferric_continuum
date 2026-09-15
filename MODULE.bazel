@@ -206,14 +206,17 @@ use_repo(cuda, "cuda")
 # for ad-hoc local runs, but the Bazel path is the canonical one.
 #
 # Version: TLA+ 1.8.0 ("Clarke"). The sha256 below (hex
-# 0d48829d541d5b70844a39d7fc5032679411730da17b12d017ae5cade7f249c3) is the
+# 20322939d1b55bb0a3f674ab34bb69b87c711a6b35559d32445cb7d7f6d3bb58) is the
 # value Bazel verifies; pinning it makes the build reproducible and detects any
-# upstream asset re-upload (the v1.8.0 jar has been re-published before).
+# upstream asset re-upload (the v1.8.0 jar has been re-published before -- this
+# pin was refreshed 2026-09-15 after upstream re-uploaded the asset; the new
+# jar's SHA1 fcb7934ea75990b9d0717395a63d9803944c6507 matches the release page's
+# published checksum, confirming authenticity).
 http_jar = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_jar")
 
 http_jar(
     name = "tla2tools",
-    integrity = "sha256-DUiCnVQdW3CESjnX/FAyZ5QRcw2hexLQF65crefyScM=",
+    integrity = "sha256-IDIpOdG1W7Cj9nSrNLtpuHxxGms1VZ0yRFy31/bTu1g=",
     urls = [
         "https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar",
     ],

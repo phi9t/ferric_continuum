@@ -647,6 +647,46 @@ fn canonical_plan_first_entrypoint_runs_tiny_dense_training() {
 }
 
 #[test]
+fn mesh_trace_json_emits_stable_schema_and_ordered_event_kinds() {
+    let dims = ParallelDims5D::new(1, 2, 2, 1, 2);
+
+    let report = run_tiny_dense_mesh_simulation(dims, None).unwrap();
+    let json = report.trace.trace_json();
+
+    assert_eq!(json["schema"], MESH_SIM_TRACE_SCHEMA);
+    let events = json["events"].as_array().expect("events array");
+    assert_eq!(events.len(), report.trace.events.len());
+    assert!(!events.is_empty());
+
+    // Every emitted event carries a recognized `kind`, and every recorded
+    // event is faithfully reflected in the JSON view (order-preserving).
+    for (value, event) in events.iter().zip(report.trace.events.iter()) {
+        let kind = value["kind"].as_str().expect("event kind string");
+        let expected_kind = match event {
+            MeshTraceEvent::LayoutTransition { .. } => "layout_transition",
+            MeshTraceEvent::Collective { .. } => "collective",
+            MeshTraceEvent::Injection { .. } => "injection",
+            MeshTraceEvent::Failure(_) => "failure",
+        };
+        assert_eq!(kind, expected_kind);
+        assert!(value["phase"].is_string(), "phase label present: {value}");
+    }
+
+    // A canonical dense run must observe at least one collective (the bridge's
+    // primary observable) with a labeled axis + collective kind.
+    assert!(events.iter().any(|value| {
+        value["kind"] == "collective"
+            && value["collective"].is_string()
+            && value["axis"].is_string()
+    }));
+
+    // Pretty form is valid JSON round-tripping to the same value.
+    let pretty = report.trace.trace_json_pretty();
+    let reparsed: serde_json::Value = serde_json::from_str(&pretty).unwrap();
+    assert_eq!(reparsed, json);
+}
+
+#[test]
 fn dualpipe_forward_chunk_exposes_component_order() {
     let schedule = DualPipeSchedule::tiny_dense_training();
 

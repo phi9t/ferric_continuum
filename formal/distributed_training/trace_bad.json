@@ -1,0 +1,8 @@
+{
+  "schema": "tnsr.mesh_sim_trace.v0",
+  "events": [
+    {"kind": "collective", "phase": "backward", "collective": "all_reduce", "axis": "dp_replicate", "tensor": "grad", "bytes": 16, "ranks": [0,1]},
+    {"kind": "failure", "phase": "backward", "message": "corrupt_grad", "rank": 0, "axis": "dp_replicate", "tensor": "grad", "layout": null, "collective": "all_reduce"},
+    {"kind": "collective", "phase": "optimizer", "collective": "all_reduce", "axis": "dp_replicate", "tensor": "opt_state", "bytes": 16, "ranks": [0,1]}
+  ]
+}

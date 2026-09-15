@@ -1,0 +1,94 @@
+{
+  "events": [
+    {
+      "dst": "Local",
+      "kind": "layout_transition",
+      "phase": "forward",
+      "src": "Replicate",
+      "tensor": "plan_activation"
+    },
+    {
+      "dst": "Tp:Shard(2)",
+      "kind": "layout_transition",
+      "phase": "forward",
+      "src": "Tp:Replicate",
+      "tensor": "plan_activation"
+    },
+    {
+      "axis": "tp",
+      "bytes": 64,
+      "collective": "all_gather",
+      "kind": "collective",
+      "phase": "forward",
+      "ranks": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "tensor": "plan_activation"
+    },
+    {
+      "dst": "Tp:Replicate",
+      "kind": "layout_transition",
+      "phase": "forward",
+      "src": "Tp:Shard(2)",
+      "tensor": "plan_activation"
+    },
+    {
+      "axis": "dp_shard",
+      "bytes": 16,
+      "collective": "reduce_scatter",
+      "kind": "collective",
+      "phase": "backward",
+      "ranks": [
+        0,
+        2,
+        1,
+        3,
+        4,
+        6,
+        5,
+        7
+      ],
+      "tensor": "plan_grad_partial"
+    },
+    {
+      "dst": "DpShard:Shard(1)",
+      "kind": "layout_transition",
+      "phase": "backward",
+      "src": "DpShard:Partial(sum)",
+      "tensor": "plan_grad_partial"
+    },
+    {
+      "axis": "dp_replicate",
+      "bytes": 32,
+      "collective": "all_reduce",
+      "kind": "collective",
+      "phase": "backward",
+      "ranks": [
+        0,
+        4,
+        1,
+        5,
+        2,
+        6,
+        3,
+        7
+      ],
+      "tensor": "plan_ddp_partial"
+    },
+    {
+      "dst": "DpReplicate:Replicate",
+      "kind": "layout_transition",
+      "phase": "backward",
+      "src": "DpReplicate:Partial(sum)",
+      "tensor": "plan_ddp_partial"
+    }
+  ],
+  "schema": "tnsr.mesh_sim_trace.v0"
+}

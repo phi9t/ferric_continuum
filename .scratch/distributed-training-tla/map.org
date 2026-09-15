@@ -136,11 +136,11 @@ Decisions:
 Re-sequenced by the 2026-09-15 wayfinder session (arm = "invariants then
 trace", trace source = Ferric synthetic). Issue 05 is the refinement target
 and is now resolved (StepTxn.tla landed + hermetic TLC green); 08 is the trace
-bridge that depends on it; 04 and 06 are refinements sequenced after the first
-trace bridge.
+bridge that depends on it and is now resolved (Rust trace JSON emission +
+trace_bridge.py translator + hermetic Level-4 TLC check green); 04 and 06 are
+refinements sequenced after the first trace bridge.
 
-- [[file:issues/08-trace-refinement-bridge.org][08-trace-refinement-bridge]] (next actionable — Ferric MeshTrace -> StepTxn.tla)
-- [[file:issues/04-layout-provenance-boundary.org][04-layout-provenance-boundary]] (refinement, after 08)
+- [[file:issues/04-layout-provenance-boundary.org][04-layout-provenance-boundary]] (next actionable — refinement, after 08)
 - [[file:issues/06-pipeline-buffer-lifecycle.org][06-pipeline-buffer-lifecycle]] (refinement, after 08)
 - [[file:issues/07-recovery-checkpoint-trace-validation.org][07-recovery-checkpoint-trace-validation]] (recovery/checkpoint extension, after 08)
 
@@ -151,6 +151,7 @@ Already resolved:
 - [[file:issues/02-mesh-plan-model.org][02-mesh-plan-model]]
 - [[file:issues/03-checker-tooling.org][03-checker-tooling]]
 - [[file:issues/05-step-transaction-model.org][05-step-transaction-model]] (StepTxn.tla, resolved 2026-09-15)
+- [[file:issues/08-trace-refinement-bridge.org][08-trace-refinement-bridge]] (MeshTrace -> StepTxn.tla, resolved 2026-09-15)
 
 * Fog
 

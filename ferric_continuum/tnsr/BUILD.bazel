@@ -123,6 +123,18 @@ rust_binary(
     ],
 )
 
+# Dump a real tnsr.mesh_sim_trace.v0 trace for the TLA+ trace-refinement bridge
+# (formal/distributed_training/trace_bridge.py). Emits the Rust-owned JSON so
+# the bridge consumes exactly what the DTensor mesh simulation recorded.
+rust_binary(
+    name = "dtensor_trace_dump",
+    srcs = ["src/bin/dtensor_trace_dump.rs"],
+    crate_name = "dtensor_trace_dump",
+    edition = "2021",
+    visibility = ["//visibility:public"],
+    deps = [":tnsr"],
+)
+
 # Qwen3 op-closure tracer: Rust analog of docs/trace_qwen3.py — forward and
 # forward+backward OpKind closures with per-component attribution.
 rust_binary(
@@ -254,7 +266,10 @@ rust_test(
     srcs = ["tests/mesh_sim_test.rs"],
     crate_name = "mesh_sim_test",
     edition = "2021",
-    deps = [":tnsr"],
+    deps = [
+        ":tnsr",
+        "@crates//:serde_json",
+    ],
 )
 
 # Golden-value tests for the scaling / FLOPs accounting module

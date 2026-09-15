@@ -20,6 +20,14 @@
 #                                   VersionMonotone violation (the Layer-0
 #                                   step-transaction contract and refinement
 #                                   target for the trace bridge).
+#   Level 4  hermetic TLC check  -> //formal/distributed_training:trace_refine_tlc_test
+#                                   under --config=formal: the real recorded
+#                                   `tnsr.mesh_sim_trace.v0` good trace must
+#                                   refine StepTxn cleanly and the synthetic bad
+#                                   (commit-after-failure) trace must violate
+#                                   TraceConsumed with a counterexample. Closes
+#                                   the Ferric MeshTrace -> StepTxn refinement
+#                                   bridge (issue 08).
 #
 # The TLC level SKIPs honestly (never PASS, never FAIL) when the jar cannot be
 # fetched (e.g. no network in a sandbox) rather than masking a real failure.
@@ -91,6 +99,22 @@ elif "$BAZEL" test --config=formal \
   record "L3-step-txn-tlc" PASS
 else
   record "L3-step-txn-tlc" FAIL
+fi
+
+# ---------------------------------------------------------------------------
+# Level 4: hermetic mesh-trace -> StepTxn refinement check. The recorded good
+# trace must refine StepTxn cleanly; the synthetic commit-after-failure trace
+# must violate TraceConsumed with a counterexample.
+# ---------------------------------------------------------------------------
+echo "==> Level 4: hermetic TLC trace-refinement check"
+if [ "$JAR_OK" -eq 0 ]; then
+  echo "    SKIP: $JAR_REASON."
+  record "L4-trace-refine-tlc" SKIP
+elif "$BAZEL" test --config=formal \
+    //formal/distributed_training:trace_refine_tlc_test; then
+  record "L4-trace-refine-tlc" PASS
+else
+  record "L4-trace-refine-tlc" FAIL
 fi
 
 # ---------------------------------------------------------------------------

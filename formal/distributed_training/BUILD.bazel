@@ -1,4 +1,4 @@
-load("@rules_python//python:defs.bzl", "py_test")
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
 
 package(default_visibility = ["//visibility:private"])
 
@@ -37,6 +37,30 @@ filegroup(
         "StepTxnBad.tla",
         "StepTxnGood.cfg",
         "StepTxnGood.tla",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# The mesh-trace -> StepTxn refinement bridge (issue 08). trace_bridge.py
+# translates a recorded tnsr.mesh_sim_trace.v0 JSON into a self-contained TLA+
+# behavior module that drives StepTxn.tla along the observed step.
+py_library(
+    name = "trace_bridge",
+    srcs = ["trace_bridge.py"],
+    imports = ["../.."],
+    visibility = ["//visibility:public"],
+)
+
+# Real (good) + synthetic (bad) recorded traces plus the shared StepTxn.tla base
+# the generated modules INSTANCE. trace_good.json is emitted verbatim by the
+# graduated DTensor mesh simulation (//ferric_continuum/tnsr:dtensor_trace_dump);
+# trace_bad.json is the canonical illegal commit-after-failure observation.
+filegroup(
+    name = "trace_fixtures",
+    srcs = [
+        "StepTxn.tla",
+        "trace_bad.json",
+        "trace_good.json",
     ],
     visibility = ["//visibility:public"],
 )
@@ -100,6 +124,41 @@ py_test(
     ],
     toolchains = ["@bazel_tools//tools/jdk:current_java_runtime"],
     deps = [
+        "//tools:tla_check",
+        "@rules_python//python/runfiles",
+    ],
+)
+
+# Hermetic mesh-trace -> StepTxn refinement check (issue 08). Translates the
+# recorded good/bad traces into StepTxn behavior modules and runs TLC on each:
+# the good trace must refine StepTxn cleanly and the bad trace must violate
+# TraceConsumed with a counterexample. Same hermetic scaffolding (Bazel $(JAVA)
+# + pinned @tla2tools//jar) and the same manual + local-only tags as the other
+# TLC checks (fetches the jar over the network at repo-rule time).
+py_test(
+    name = "trace_refine_tlc_test",
+    srcs = ["trace_refine_bazel_test.py"],
+    args = [
+        "$(JAVA)",
+        "$(location @tla2tools//jar)",
+        "--good",
+        "trace_good.json",
+        "--bad",
+        "trace_bad.json",
+    ],
+    data = [
+        ":trace_fixtures",
+        "@bazel_tools//tools/jdk:current_java_runtime",
+        "@tla2tools//jar",
+    ],
+    main = "trace_refine_bazel_test.py",
+    tags = [
+        "local-only",
+        "manual",
+    ],
+    toolchains = ["@bazel_tools//tools/jdk:current_java_runtime"],
+    deps = [
+        ":trace_bridge",
         "//tools:tla_check",
         "@rules_python//python/runfiles",
     ],

@@ -94,14 +94,17 @@ bazel test --config=formal //formal/distributed_training:mesh_plan_tlc_test
 # The Layer-0 step-transaction contract (StepTxn good/bad pair):
 bazel test --config=formal //formal/distributed_training:step_txn_tlc_test
 
+# The mesh-trace -> StepTxn refinement bridge (real recorded trace):
+bazel test --config=formal //formal/distributed_training:trace_refine_tlc_test
+
 # Runner unit tests only (pure Python, no jar/JDK):
 bazel test //tests/tla_check:tla_check_test
 #+end_src
 
-The ~mesh_plan_tlc_test~ and ~step_txn_tlc_test~ targets are tagged
-~local-only~ + ~manual~ because they fetch the jar over the network at
-repo-rule time, so plain ~bazel test //...~ skips them. GitHub CI runs them in
-the dedicated ~formal~ job via the verifier above.
+The ~mesh_plan_tlc_test~, ~step_txn_tlc_test~, and ~trace_refine_tlc_test~
+targets are tagged ~local-only~ + ~manual~ because they fetch the jar over the
+network at repo-rule time, so plain ~bazel test //...~ skips them. GitHub CI
+runs them in the dedicated ~formal~ job via the verifier above.
 
 Expected behavior:
 
@@ -130,6 +133,26 @@ For ~StepTxn~:
 commit/abort governs every rank), ~NoMutationAfterAbort~, ~VersionMonotone~
 (version rises at most once and only under a commit decision), and ~NoSkipSync~
 (no rank commits/aborts without a resolved global decision).
+
+For the mesh-trace -> StepTxn refinement bridge (issue 08):
+
+- ~trace_good.json~ is a real ~tnsr.mesh_sim_trace.v0~ trace emitted verbatim
+  by ~//ferric_continuum/tnsr:dtensor_trace_dump~ (the graduated DTensor mesh
+  simulation). ~trace_bridge.py~ translates it into a self-contained behavior
+  module that ~INSTANCE~s ~StepTxn.tla~ over one rank, pins ~overflow~ to the
+  observed value, and asserts ~INVARIANT Inv~ + ~INVARIANT TraceConsumed~. The
+  observed commit-path behavior refines ~StepTxn~ cleanly (~result = success~,
+  TLC exit ~0~).
+- ~trace_bad.json~ is the canonical illegal commit-after-failure observation
+  (a collective + a failure + an optimizer-phase commit under an abort
+  decision). It violates ~TraceConsumed~ (~result = invariant_violation~, TLC
+  exit ~12~) with a counterexample.
+
+Variant-subset (first refinement): the bridge observes ~Collective~ (->
+synchronizing barrier), ~Failure~ (-> abort path / sets ~overflow~), and phase
+~Optimizer~ (-> committing/committed). It ignores ~LayoutTransition~ (refines
+issue 04, not the txn machine) and ~Injection~ (a stimulus, not a transition;
+its effect shows up as ~Failure~).
 
 If no checker is installed, a non-dry run exits with code ~2~ and writes
 ~tla-check.json~ with ~checker = \"missing\"~. A dry run still exits with code
