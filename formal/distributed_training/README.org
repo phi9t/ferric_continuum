@@ -25,6 +25,19 @@ This slice inherits vocabulary from the DTensor mesh simulation handoff:
   TP collectives complete before DP collectives.
 - ~MeshPlanBad.tla~ and ~MeshPlanBad.cfg~: the canonical DP x TP cross-axis
   ordering cycle.
+- ~StepTxn.tla~: the Layer-0 step-transaction contract. A training step is a
+  distributed transaction over a versioned device mesh: each rank walks an
+  idle -> computing -> synchronizing -> prepared -> {committing/committed |
+  aborting/aborted} phase machine; the group takes exactly one global
+  commit/abort decision (commit iff no rank observed an AMP/loss-scale
+  overflow); committed model versions increase monotonically; and no optimizer
+  state mutates on the abort path. This is the refinement target for the first
+  runtime trace bridge (~.scratch/distributed-training-tla/issues/08~).
+- ~StepTxnGood.tla~ and ~StepTxnGood.cfg~: a legal two-rank instance; satisfies
+  ~Inv~ and the ~StepResolves~ liveness property.
+- ~StepTxnBad.tla~ and ~StepTxnBad.cfg~: a buggy variant whose ~AbortMutating~
+  action mutates optimizer state and bumps the version on the abort path,
+  violating ~NoMutationAfterAbort~ / ~VersionMonotone~.
 
 * Runner
 
@@ -78,14 +91,17 @@ bash formal/tools/verify_formal_mesh_plan.sh
 # Or run the hermetic TLC check target directly:
 bazel test --config=formal //formal/distributed_training:mesh_plan_tlc_test
 
+# The Layer-0 step-transaction contract (StepTxn good/bad pair):
+bazel test --config=formal //formal/distributed_training:step_txn_tlc_test
+
 # Runner unit tests only (pure Python, no jar/JDK):
 bazel test //tests/tla_check:tla_check_test
 #+end_src
 
-The ~mesh_plan_tlc_test~ target is tagged ~local-only~ + ~manual~ because it
-fetches the jar over the network at repo-rule time, so plain
-~bazel test //...~ skips it. GitHub CI runs it in the dedicated ~formal~ job via
-the verifier above.
+The ~mesh_plan_tlc_test~ and ~step_txn_tlc_test~ targets are tagged
+~local-only~ + ~manual~ because they fetch the jar over the network at
+repo-rule time, so plain ~bazel test //...~ skips them. GitHub CI runs them in
+the dedicated ~formal~ job via the verifier above.
 
 Expected behavior:
 
@@ -101,6 +117,19 @@ local-rank membership without duplicates, per-rank agreement on ordered group
 views, no ghost members, posted-by-member validity, completion only after all
 required members posted, signature agreement for each group/epoch/step/slot, and
 no blocked cycle.
+
+For ~StepTxn~:
+
+- ~StepTxnGood.cfg~ satisfies ~Inv~ and the ~StepResolves~ liveness property
+  (~result = success~, TLC exit ~0~).
+- ~StepTxnBad.cfg~ violates ~Inv~ (~NoMutationAfterAbort~ / ~VersionMonotone~)
+  because ~AbortMutating~ touches optimizer/version state on the abort path
+  (~result = invariant_violation~, TLC exit ~12~).
+
+~StepTxn.Inv~ bundles: ~TypeOK~, ~OneGlobalDecision~ (one group-wide
+commit/abort governs every rank), ~NoMutationAfterAbort~, ~VersionMonotone~
+(version rises at most once and only under a commit decision), and ~NoSkipSync~
+(no rank commits/aborts without a resolved global decision).
 
 If no checker is installed, a non-dry run exits with code ~2~ and writes
 ~tla-check.json~ with ~checker = \"missing\"~. A dry run still exits with code

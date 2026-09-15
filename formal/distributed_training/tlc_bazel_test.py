@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Hermetic Bazel driver for the MeshPlan TLC model checks.
+"""Hermetic Bazel driver for the distributed-training TLC model checks.
 
-This wraps ``tools/tla_check.py`` so both the good and bad distributed-training
-mesh models are checked with Bazel's own JDK against the pinned
-``@tla2tools//jar``. It is intentionally free of any host ``java`` / TLA
-assumptions:
+This wraps ``tools/tla_check.py`` so a good/bad fixture pair is checked with
+Bazel's own JDK against the pinned ``@tla2tools//jar``. It is intentionally
+free of any host ``java`` / TLA assumptions:
 
   * the tla2tools jar arrives as a data dep and is located via the runfiles
     library,
@@ -12,17 +11,22 @@ assumptions:
     runtime toolchain), passed in as a runfiles-relative path and resolved
     through the same runfiles library,
   * the ``.tla`` / ``.cfg`` fixtures arrive as data deps in the same runfiles
-    directory (``MeshPlan.tla`` must sit next to the Good/Bad modules because
-    they ``INSTANCE MeshPlan``).
+    directory (a shared base module such as ``MeshPlan.tla`` / ``StepTxn.tla``
+    must sit next to the Good/Bad modules because they ``INSTANCE`` it).
+
+The good/bad basenames default to the MeshPlan pair but can be overridden with
+``--good <Base>Good`` / ``--bad <Base>Bad`` so the same driver checks any
+fixture pair (MeshPlan, StepTxn, ...).
 
 Contract:
-  * ``MeshPlanGood`` must complete with no error (``result == "success"``).
-  * ``MeshPlanBad`` must violate ``Inv`` (``result == "invariant_violation"``);
-    TLC exits nonzero for this, which is the *expected* outcome, so we assert on
-    the classified result rather than the raw exit code.
+  * ``<Good>`` must complete with no error (``result == "success"``).
+  * ``<Bad>`` must violate ``Inv`` (``result == "invariant_violation"``); TLC
+    exits nonzero for this, which is the *expected* outcome, so we assert on the
+    classified result rather than the raw exit code.
 """
 from __future__ import annotations
 
+import argparse
 import sys
 import tempfile
 from pathlib import Path
@@ -58,29 +62,34 @@ def _resolve_java(rf: runfiles.Runfiles, java_arg: str) -> Path:
     raise SystemExit(f"could not resolve $(JAVA): {java_arg}")
 
 
-def _fixture_dir(rf: runfiles.Runfiles) -> Path:
-    good = rf.Rlocation("_main/formal/distributed_training/MeshPlanGood.tla")
+def _fixture_dir(rf: runfiles.Runfiles, good_stem: str) -> Path:
+    good = rf.Rlocation(f"_main/formal/distributed_training/{good_stem}.tla")
     if good and Path(good).is_file():
         return Path(good).parent
     # Fallback: co-located with this script in the runfiles tree.
     here = Path(__file__).resolve().parent
-    if (here / "MeshPlanGood.tla").is_file():
+    if (here / f"{good_stem}.tla").is_file():
         return here
-    raise SystemExit("MeshPlan fixtures not found in runfiles")
+    raise SystemExit(f"{good_stem} fixtures not found in runfiles")
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 3:
-        raise SystemExit("usage: tlc_bazel_test.py <java-bin> <tla2tools.jar>")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("java_bin", help="Bazel $(JAVA) launcher path")
+    parser.add_argument("jar", help="Path to tla2tools.jar")
+    parser.add_argument("--good", default="MeshPlanGood", help="Good module stem")
+    parser.add_argument("--bad", default="MeshPlanBad", help="Bad module stem")
+    args = parser.parse_args(argv[1:])
+
     rf = runfiles.Create()
     if rf is None:
         raise SystemExit("runfiles not available")
 
-    java_bin = _resolve_java(rf, argv[1])
-    jar = Path(argv[2])
+    java_bin = _resolve_java(rf, args.java_bin)
+    jar = Path(args.jar)
     if not jar.is_file():
-        jar = _rlocation(rf, argv[2])
-    fixtures = _fixture_dir(rf)
+        jar = _rlocation(rf, args.jar)
+    fixtures = _fixture_dir(rf, args.good)
 
     checker = tla_check.discover_checker(jar_arg=str(jar), java_arg=str(java_bin))
     if checker.kind != "tlc":
@@ -92,20 +101,20 @@ def main(argv: list[str]) -> int:
 
         good_exit = tla_check.run_checker(
             checker,
-            fixtures / "MeshPlanGood.tla",
-            fixtures / "MeshPlanGood.cfg",
+            fixtures / f"{args.good}.tla",
+            fixtures / f"{args.good}.cfg",
             out_root / "good",
         )
         good = tla_check.json.loads((out_root / "good" / "tla-check.json").read_text())
         print(f"[good] exit={good_exit} result={good['result']} ok={good['ok']}")
         if not (good_exit == 0 and good["ok"] and good["result"] == "success"):
-            failures.append("MeshPlanGood did not complete cleanly")
+            failures.append(f"{args.good} did not complete cleanly")
             print((out_root / "good" / "stdout.log").read_text(), file=sys.stderr)
 
         bad_exit = tla_check.run_checker(
             checker,
-            fixtures / "MeshPlanBad.tla",
-            fixtures / "MeshPlanBad.cfg",
+            fixtures / f"{args.bad}.tla",
+            fixtures / f"{args.bad}.cfg",
             out_root / "bad",
         )
         bad = tla_check.json.loads((out_root / "bad" / "tla-check.json").read_text())
@@ -113,16 +122,16 @@ def main(argv: list[str]) -> int:
         # The bad model is *expected* to break Inv; TLC exits nonzero (12) for
         # that, so success here means "found the invariant violation".
         if bad["result"] != "invariant_violation" or bad["ok"]:
-            failures.append("MeshPlanBad did not surface the expected invariant violation")
+            failures.append(f"{args.bad} did not surface the expected invariant violation")
             print((out_root / "bad" / "stdout.log").read_text(), file=sys.stderr)
         if "counterexample" not in bad:
-            failures.append("MeshPlanBad evidence is missing a counterexample path")
+            failures.append(f"{args.bad} evidence is missing a counterexample path")
 
     if failures:
         for f in failures:
             print(f"FAIL: {f}", file=sys.stderr)
         return 1
-    print("PASS: MeshPlanGood clean, MeshPlanBad invariant violation detected")
+    print(f"PASS: {args.good} clean, {args.bad} invariant violation detected")
     return 0
 
 

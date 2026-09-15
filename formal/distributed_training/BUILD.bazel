@@ -26,6 +26,21 @@ exports_files([
     "README.org",
 ])
 
+# The StepTxn formal models and their TLC configs. StepTxn.tla is the shared
+# Layer-0 step-transaction contract that StepTxnGood `INSTANCE`s; StepTxnBad is
+# a self-contained buggy variant. All must land in the same runfiles directory.
+filegroup(
+    name = "step_txn_models",
+    srcs = [
+        "StepTxn.tla",
+        "StepTxnBad.cfg",
+        "StepTxnBad.tla",
+        "StepTxnGood.cfg",
+        "StepTxnGood.tla",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 # Hermetic TLC model check: runs both mesh models with Bazel's own JDK
 # (`$(JAVA)` from the current Java runtime toolchain) against the pinned
 # `@tla2tools//jar`. No host `java` or `TLA_TOOLS_JAR` is required. The good
@@ -42,6 +57,39 @@ py_test(
     ],
     data = [
         ":mesh_plan_models",
+        "@bazel_tools//tools/jdk:current_java_runtime",
+        "@tla2tools//jar",
+    ],
+    main = "tlc_bazel_test.py",
+    tags = [
+        "local-only",
+        "manual",
+    ],
+    toolchains = ["@bazel_tools//tools/jdk:current_java_runtime"],
+    deps = [
+        "//tools:tla_check",
+        "@rules_python//python/runfiles",
+    ],
+)
+
+# Hermetic TLC model check for the Layer-0 step-transaction contract. Same
+# hermetic scaffolding as mesh_plan_tlc_test, driving the StepTxn Good/Bad pair
+# via the --good/--bad flags. StepTxnGood must complete cleanly (Inv +
+# StepResolves); StepTxnBad must surface the NoMutationAfterAbort/VersionMonotone
+# violation. Tagged manual + local-only for the same reasons as the mesh check.
+py_test(
+    name = "step_txn_tlc_test",
+    srcs = ["tlc_bazel_test.py"],
+    args = [
+        "$(JAVA)",
+        "$(location @tla2tools//jar)",
+        "--good",
+        "StepTxnGood",
+        "--bad",
+        "StepTxnBad",
+    ],
+    data = [
+        ":step_txn_models",
         "@bazel_tools//tools/jdk:current_java_runtime",
         "@tla2tools//jar",
     ],
