@@ -129,7 +129,7 @@ impl DeepSeekV41TextConfig {
         let quant = object_at(root, "quantization_config")?;
         let vision = object_at(root, "vision_config")?;
 
-        Ok(Self {
+        let cfg = Self {
             vocab_size: usize_field(text, "vocab_size")?,
             hidden_size: usize_field(text, "hidden_size")?,
             moe_intermediate_size: usize_field(text, "moe_intermediate_size")?,
@@ -200,14 +200,16 @@ impl DeepSeekV41TextConfig {
                 min_pixels: usize_field(vision, "min_pixels")?,
                 max_wh_ratio: optional_f64_field(vision, "max_wh_ratio")?,
             },
-        })
+        };
+        cfg.validate()?;
+        Ok(cfg)
     }
 
     pub fn from_inference_json(path: &Path) -> Result<Self, String> {
         let json = read_json(path, "inference/config.json")?;
         let root = as_object(&json, "inference/config.json")?;
 
-        Ok(Self {
+        let cfg = Self {
             vocab_size: usize_field(root, "vocab_size")?,
             hidden_size: usize_field(root, "dim")?,
             moe_intermediate_size: usize_field(root, "moe_inter_dim")?,
@@ -278,7 +280,65 @@ impl DeepSeekV41TextConfig {
                 min_pixels: usize_field(root, "vision_min_pixels")?,
                 max_wh_ratio: optional_f64_field(root, "vision_max_wh_ratio")?,
             },
-        })
+        };
+        cfg.validate()?;
+        Ok(cfg)
+    }
+
+    /// Reject configs whose geometry cannot form a valid text model, so a
+    /// malformed `config.json` fails at parse time with a named field rather
+    /// than as an opaque shape mismatch deep in the loader or a divide-by-zero
+    /// in attention. These are structural invariants the upstream release
+    /// always satisfies; violating them means the file is wrong.
+    fn validate(&self) -> Result<(), String> {
+        let positive: &[(&str, usize)] = &[
+            ("vocab_size", self.vocab_size),
+            ("hidden_size", self.hidden_size),
+            ("num_hidden_layers", self.num_hidden_layers),
+            ("num_attention_heads", self.num_attention_heads),
+            ("head_dim", self.head_dim),
+            ("hc_mult", self.hc_mult),
+            ("n_routed_experts", self.n_routed_experts),
+            ("num_experts_per_tok", self.num_experts_per_tok),
+            ("o_groups", self.o_groups),
+            ("moe_intermediate_size", self.moe_intermediate_size),
+        ];
+        for (field, value) in positive {
+            if *value == 0 {
+                return Err(format!("config field `{field}` must be > 0"));
+            }
+        }
+        if self.qk_rope_head_dim > self.head_dim {
+            return Err(format!(
+                "config: qk_rope_head_dim ({}) must not exceed head_dim ({})",
+                self.qk_rope_head_dim, self.head_dim
+            ));
+        }
+        if self.num_experts_per_tok > self.n_routed_experts {
+            return Err(format!(
+                "config: num_experts_per_tok ({}) must not exceed n_routed_experts ({})",
+                self.num_experts_per_tok, self.n_routed_experts
+            ));
+        }
+        if self.num_attention_heads % self.o_groups != 0 {
+            return Err(format!(
+                "config: num_attention_heads ({}) must be divisible by o_groups ({})",
+                self.num_attention_heads, self.o_groups
+            ));
+        }
+        if !self.rms_norm_eps.is_finite() || self.rms_norm_eps <= 0.0 {
+            return Err(format!(
+                "config: rms_norm_eps ({}) must be a positive finite value",
+                self.rms_norm_eps
+            ));
+        }
+        if !self.rope_theta.is_finite() || self.rope_theta <= 0.0 {
+            return Err(format!(
+                "config: rope_theta ({}) must be a positive finite value",
+                self.rope_theta
+            ));
+        }
+        Ok(())
     }
 }
 

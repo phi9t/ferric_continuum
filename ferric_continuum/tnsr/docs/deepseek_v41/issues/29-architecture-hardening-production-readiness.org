@@ -1,0 +1,84 @@
+#+TITLE: DeepSeek V4.1 architecture deepening + production-readiness hardening
+#+TYPE: task
+#+STATUS: done
+#+PARENT: ../spec.org
+
+* Context
+
+Follows the =$improve-codebase-architecture= review of the DeepSeek V4.1 module
+(=ferric_continuum/tnsr/src/deepseek_v41/=). The review surfaced deepening
+candidates and production-readiness findings; this issue records the batch that
+was implemented ("address all") on =ultron/mainline=.
+
+Read first:
+
+- =../spec.org= (all four waves)
+- =ferric_continuum/tnsr/src/deepseek_v41/load.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/model.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/config.rs=
+
+* Requirements (implemented)
+
+** C1 — extract =checkpoint_io= module, own shard buffers (kills =Box::leak=)
+
+- New =src/deepseek_v41/checkpoint_io.rs=: a deep seam under the loader that
+  owns =Vec<u8>= shard buffers and builds an owned name -> entry index from the
+  safetensors header (=SafeTensors::read_metadata= + =data_offsets=). No
+  =Box::leak=; a =Checkpoint= frees all shard memory on drop. This matters for
+  the real 510GB release and any long-lived server that opens more than one
+  checkpoint.
+- Total interface: =Checkpoint::{open_single,open,has,float,float_exact,
+  linear_weight}=; decodes bf16/f16/f32 + block-scaled FP8-E4M3 / FP4-E2M1.
+- =load.rs= now imports from =checkpoint_io=; all dtype-decode / dequant / index
+  logic moved out of the loader.
+
+** P4 — input validation (NaN reject + config ranges)
+
+- =checkpoint_io= rejects non-finite values after FP8/FP4 dequant with a named
+  error (=reject_nonfinite=) rather than silently poisoning downstream matmuls.
+- =DeepSeekV41TextConfig::validate= runs after both parse paths
+  (=from_hf_json= / =from_inference_json=): positive-geometry fields, rope-dim
+  <= head-dim, top-k <= expert count, heads divisible by =o_groups=, positive
+  finite =rms_norm_eps= / =rope_theta=. Test:
+  =semantically_invalid_config_is_rejected_by_validate=.
+
+** P3 — NaN-safe CLI top_k
+
+- =src/bin/deepseek_v41_infer.rs= =top_k= uses =f32::total_cmp= instead of
+  =partial_cmp().unwrap()=, so a NaN logit sorts deterministically instead of
+  panicking.
+
+** P2 — panicking public API on the DSpark / multimodal path -> =Result= seams
+
+- =DeepSeekV41DsparkHead::try_forward_spec= is the new fallible entry
+  (empty ids, missing stage tensors, shape mismatch all return named errors);
+  =forward_spec= is a thin panicking wrapper for tests.
+- =forward_embed= / =forward_head= / =first_stage= / =last_stage= now return
+  =Result= instead of =expect=.
+- =merge_image_embeddings= returns =Result= (span overflow / unknown token type
+  are named errors) instead of =assert!/panic!=; the multimodal forward
+  propagates it with =?=.
+
+* Verification
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests
+  //ferric_continuum/tnsr:deepseek_v41_math_tests
+  //ferric_continuum/tnsr:deepseek_v41_model_tests= -> 3 PASS.
+- =bazel test //ferric_continuum/tnsr/...= -> 17 PASS (Qwen3 unchanged).
+- =bazel build -c opt //ferric_continuum/tnsr:deepseek_v41_infer= -> OK.
+- =rustfmt --check= on all changed Rust -> clean.
+- =verify_deepseek_v41_text_compat.sh= -> PASS-WITH-SKIPS (tiny parity PASS,
+  real-checkpoint parity SKIP: no local weights).
+- =verify_deepseek_v41_dspark_compat.sh= -> PASS-WITH-SKIPS (tiny parity PASS,
+  real SKIP).
+
+* Out of scope
+
+Real 510GB weight download; native FP8/FP4 matmul kernels; the remaining
+deepening candidates (C2 component =from_checkpoint=, C3 =plan.rs= split,
+C5 =weight_adapt= module, C6 =typed.rs= split) which the review ranked lower and
+are left as follow-ups.
+
+* Resolution
+
+Landed as part of the architecture-hardening batch on =ultron/mainline=.
