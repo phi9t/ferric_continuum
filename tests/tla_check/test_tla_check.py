@@ -29,7 +29,24 @@ class TlaCheckTests(unittest.TestCase):
 
             self.assertEqual(checker.kind, "tlc")
             self.assertEqual(checker.jar, jar.resolve())
-            self.assertEqual(checker.command_prefix, ["java", "-cp", str(jar.resolve()), "tlc2.TLC"])
+            self.assertEqual(
+                checker.command_prefix,
+                ["java", "-XX:+UseParallelGC", "-cp", str(jar.resolve()), "tlc2.TLC"],
+            )
+
+    def test_discover_checker_uses_explicit_java_bin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            jar = root / "tla2tools.jar"
+            jar.write_text("fake jar\n")
+
+            checker = tla_check.discover_checker(
+                jar_arg=str(jar), java_arg="/hermetic/jdk/bin/java", environ={}, path=[]
+            )
+
+            self.assertEqual(checker.kind, "tlc")
+            self.assertEqual(checker.command_prefix[0], "/hermetic/jdk/bin/java")
+            self.assertEqual(checker.command_prefix[-1], "tlc2.TLC")
 
     def test_discover_checker_reports_missing_tool(self):
         checker = tla_check.discover_checker(jar_arg=None, environ={}, path=[])

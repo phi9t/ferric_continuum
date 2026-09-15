@@ -24,11 +24,16 @@ class Checker:
 def discover_checker(
     *,
     jar_arg: str | None,
+    java_arg: str | None = None,
     environ: Mapping[str, str] | None = None,
     path: Iterable[str] | None = None,
 ) -> Checker:
     env = dict(os.environ if environ is None else environ)
     search_path = list(path) if path is not None else None
+    # Resolve which `java` launcher to use with an explicit jar. An explicit
+    # --java-bin (or JAVA env) lets a hermetic caller (e.g. Bazel) point at a
+    # bundled JDK instead of relying on a host `java` on PATH.
+    java_bin = java_arg or env.get("JAVA") or "java"
     jar_value = jar_arg or env.get("TLA_TOOLS_JAR")
     if jar_value:
         jar = Path(jar_value).expanduser().resolve()
@@ -36,7 +41,7 @@ def discover_checker(
             return Checker(
                 kind="tlc",
                 jar=jar,
-                command_prefix=["java", "-cp", str(jar), "tlc2.TLC"],
+                command_prefix=[java_bin, "-XX:+UseParallelGC", "-cp", str(jar), "tlc2.TLC"],
             )
         return Checker(
             kind="missing",
@@ -146,6 +151,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--model", required=True, help="Path to the .tla module.")
     parser.add_argument("--config", required=True, help="Path to the TLC .cfg file.")
     parser.add_argument("--tla-tools-jar", help="Path to tla2tools.jar.")
+    parser.add_argument(
+        "--java-bin",
+        help="Java launcher to run TLC with when using an explicit jar (default: JAVA env or `java` on PATH).",
+    )
     parser.add_argument("--out-dir", default=".ferric/tla", help="Directory for tla-check.json/stdout/stderr.")
     parser.add_argument("--dry-run", action="store_true", help="Record the checker command without executing it.")
     args = parser.parse_args(argv)
@@ -154,7 +163,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     config = Path(args.config).expanduser().resolve()
     out_dir = Path(args.out_dir).expanduser().resolve()
     evidence_path = out_dir / "tla-check.json"
-    checker = discover_checker(jar_arg=args.tla_tools_jar)
+    checker = discover_checker(jar_arg=args.tla_tools_jar, java_arg=args.java_bin)
 
     base = {
         "timestamp_utc": datetime.now(UTC).isoformat(),

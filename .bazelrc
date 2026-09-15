@@ -279,6 +279,22 @@ build:libcxx --host_linkopt=-lc++abi
 # build:remote --remote_cache=grpc://your-cache:port
 
 ###############################################################################
+# Formal methods (TLA+ / TLC) Configuration
+###############################################################################
+#
+# The MeshPlan TLC model check (//formal/distributed_training:mesh_plan_tlc_test)
+# runs tla2tools.jar with Bazel's own JDK. The host's auto-detected `local_jdk`
+# can be Java 8, which is too old for modern tla2tools, so pin a hermetic
+# remote JDK 17. The target is tagged `local-only`+`manual` (needs network at
+# fetch time), so this config is what the verifier and any manual run use:
+#   bazel test --config=formal //formal/distributed_training:mesh_plan_tlc_test
+common:formal --java_runtime_version=remotejdk_17
+common:formal --tool_java_runtime_version=remotejdk_17
+# Run the model check even though it is tagged local-only (it is the whole point
+# of the config); still keep cuda/gpu excluded.
+test:formal --test_tag_filters=-cuda,-requires-gpu
+
+###############################################################################
 # User overrides
 ###############################################################################
 

@@ -40,28 +40,61 @@ python3 tools/tla_check.py \
   --dry-run
 #+end_src
 
-When ~tla2tools.jar~ is available:
+When ~tla2tools.jar~ is available (ad-hoc host run):
 
 #+begin_src sh
 python3 tools/tla_check.py \
   --tla-tools-jar /path/to/tla2tools.jar \
+  --java-bin /path/to/jdk17/bin/java \
   --model formal/distributed_training/MeshPlanGood.tla \
   --config formal/distributed_training/MeshPlanGood.cfg \
   --out-dir .ferric/tla/mesh-plan-good
 
 python3 tools/tla_check.py \
   --tla-tools-jar /path/to/tla2tools.jar \
+  --java-bin /path/to/jdk17/bin/java \
   --model formal/distributed_training/MeshPlanBad.tla \
   --config formal/distributed_training/MeshPlanBad.cfg \
   --out-dir .ferric/tla/mesh-plan-bad
 #+end_src
 
+TLC needs a modern JDK (17+); tla2tools no longer runs on Java 8. Pass
+~--java-bin~ to point at the right launcher when the host default is too old.
+
+* Hermetic Bazel path (canonical)
+
+The canonical way to run the model check is under Bazel, which needs *no* host
+~java~ and *no* ~TLA_TOOLS_JAR~. Bazel fetches the pinned ~tla2tools.jar~ (via
+the ~@tla2tools~ ~http_jar~ in ~MODULE.bazel~, verified by sha256) and runs
+~tlc2.TLC~ with a pinned hermetic JDK 17. The ~--config=formal~ flags in
+~.bazelrc~ select ~remotejdk_17~ (the auto-detected host ~local_jdk~ can be
+Java 8, which is too old).
+
+#+begin_src sh
+# Full verifier: runner unit tests + hermetic good/bad TLC check.
+# NEVER presents a SKIP as PASS; SKIPs the TLC level honestly when offline.
+bash formal/tools/verify_formal_mesh_plan.sh
+
+# Or run the hermetic TLC check target directly:
+bazel test --config=formal //formal/distributed_training:mesh_plan_tlc_test
+
+# Runner unit tests only (pure Python, no jar/JDK):
+bazel test //tests/tla_check:tla_check_test
+#+end_src
+
+The ~mesh_plan_tlc_test~ target is tagged ~local-only~ + ~manual~ because it
+fetches the jar over the network at repo-rule time, so plain
+~bazel test //...~ skips it. GitHub CI runs it in the dedicated ~formal~ job via
+the verifier above.
+
 Expected behavior:
 
 - ~MeshPlanGood.cfg~ satisfies ~Inv~ and ~CollectiveResponse~ in the finite
-  DP x TP instance.
-- ~MeshPlanBad.cfg~ violates ~Inv~ through ~BlockedCycle~, showing the
-  cross-axis collective ordering bug.
+  DP x TP instance (~result = success~, TLC exit ~0~).
+- ~MeshPlanBad.cfg~ violates ~Inv~ through ~BlockedCycle~ (~result =
+  invariant_violation~, TLC exit ~12~), showing the cross-axis collective
+  ordering bug. The nonzero exit is the *expected* outcome, so the test asserts
+  on the classified result, not the raw exit code.
 
 ~Inv~ includes the first topology checks: unique DP/TP rank coordinates, ordered
 local-rank membership without duplicates, per-rank agreement on ordered group

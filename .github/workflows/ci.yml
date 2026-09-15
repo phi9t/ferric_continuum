@@ -171,6 +171,37 @@ jobs:
           cargo clippy --manifest-path=/dev/null -- --check "$file" || true
         done
 
+  formal:
+    name: Formal (TLA+/TLC)
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Bazel
+      uses: bazel-contrib/setup-bazel@0.8.1
+      with:
+        bazelisk-version: '1.x'
+
+    - name: Cache Bazel
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cache/bazel
+          ~/.cache/bazelisk
+        key: ${{ runner.os }}-bazel-formal-${{ hashFiles('**/*.bazel', '**/*.bzl', 'MODULE.bazel', 'MODULE.bazel.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-bazel-
+
+    # The MeshPlan TLC check is tagged `local-only` (it fetches the pinned
+    # tla2tools.jar over the network), so the default build-and-test job skips
+    # it. Run it here with the hermetic verifier, which uses --config=formal
+    # (pinned remotejdk_17 + @tla2tools//jar) and NEVER presents a SKIP as PASS.
+    - name: Run distributed-training formal verifier
+      run: |
+        bash formal/tools/verify_formal_mesh_plan.sh
+
   coverage:
     name: Test Coverage
     runs-on: ubuntu-24.04

@@ -1,0 +1,16 @@
+load("@rules_python//python:defs.bzl", "py_test")
+
+package(default_visibility = ["//visibility:private"])
+
+# Unit tests for the TLA+ model-check runner. These are pure-Python: they cover
+# checker discovery, output classification, and evidence recording without
+# invoking a real TLC (the jar-backed smoke test guards on TLA_TOOLS_JAR and is
+# exercised hermetically by //formal/distributed_training:mesh_plan_tlc_test).
+py_test(
+    name = "tla_check_test",
+    srcs = ["test_tla_check.py"],
+    data = ["//formal/distributed_training:mesh_plan_models"],
+    imports = ["../.."],
+    main = "test_tla_check.py",
+    deps = ["//tools:tla_check"],
+)
