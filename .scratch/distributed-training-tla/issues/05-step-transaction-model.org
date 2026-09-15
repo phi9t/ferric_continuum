@@ -1,6 +1,6 @@
 #+TITLE: Define the abstract step transaction model
 #+TYPE: research
-#+STATUS: open
+#+STATUS: resolved
 #+BLOCKED_BY: 02-mesh-plan-model
 #+PARENT: ../map.org
 
@@ -59,3 +59,62 @@ layout, recovery, and checkpoint models must refine.
   layout/provenance model.
 
 * Answer
+
+Resolved 2026-09-15. The abstract step-transaction model landed as
+~formal/distributed_training/StepTxn.tla~ with hermetic good/bad TLC fixtures
+and a Bazel test, checked before the layout/provenance model (issue 04) because
+the wayfinder session chose it as the refinement target for the first trace
+bridge (issue 08).
+
+** State variables and transitions
+
+- Variables: ~phase[Ranks]~, ~overflow[Ranks]~ (AMP/loss-scale overflow as a
+  nondeterministic local input), ~decision~ (~"none" | "commit" | "abort"~),
+  ~version~ (committed model version), ~optim_mutated~.
+- ~TxnId~ is the constant tuple ~<<JobGen, Epoch, LogicalStep, AccumWindow,
+  Attempt>>~ (recorded so trace validation can bind to it).
+- Phases: ~idle -> computing -> synchronizing -> prepared -> {committing ->
+  committed | aborting -> aborted}~.
+- Transitions: ~Compute(r)~, ~Sync(r)~, ~Prepare(r)~, ~Decide~ (single global
+  commit iff no overflow, else abort), ~Commit(r)~/~Committed(r)~,
+  ~Abort(r)~/~Aborted(r)~, ~ResolvedStutter~ (the only stuttering allowed, and
+  only once the transaction has resolved).
+
+** Invariants and liveness for the first finite model
+
+- ~OneGlobalDecision~: one group-wide commit/abort governs every rank.
+- ~NoMutationAfterAbort~: no optimizer mutation on the abort path.
+- ~VersionMonotone~: version rises at most one bump, only under a commit.
+- ~NoSkipSync~: no rank commits/aborts without a resolved global decision.
+- Liveness ~StepResolves == <>Resolved~ (checked in ~StepTxnGood.cfg~).
+
+** Decisions on the open questions
+
+- Data cursor / optimizer: modeled as advancing together in the same
+  transaction (a single ~commit~ decision), so the abstract contract has one
+  commit point; cursor-vs-optimizer split is deferred to the checkpoint layer
+  (issue 07).
+- Allowed stuttering before resolution: none. Stuttering (~ResolvedStutter~) is
+  permitted only after the transaction has fully committed or aborted, keeping
+  the finite state space small and the liveness property meaningful.
+
+** The intended counterexample
+
+~StepTxnBad.tla~'s ~AbortMutating(r)~ lets a rank on the abort path still bump
+~version~ and set ~optim_mutated~ -- exactly the "one rank updates while the
+group aborted" bug. TLC surfaces it as a ~NoMutationAfterAbort~ /
+~VersionMonotone~ ~Inv~ violation (exit 12) with a counterexample trace.
+
+** Evidence
+
+- ~bazel test --config=formal
+  //formal/distributed_training:step_txn_tlc_test~ ->
+  ~[good] result=success~, ~[bad] result=invariant_violation~, PASS.
+- ~formal/tools/verify_formal_mesh_plan.sh~ -> L1/L2/L3 all PASS (L3 is the new
+  StepTxn level).
+
+** Order decision
+
+Checked before the layout/provenance model (issue 04). Layout/provenance and
+pipeline-buffer models (04/06) are re-sequenced as refinements of this
+transaction contract, after the first trace bridge (issue 08).

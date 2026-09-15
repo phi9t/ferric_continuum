@@ -1,6 +1,6 @@
 #+TITLE: Distributed training TLA+ wayfinder
 #+TYPE: map
-#+STATUS: needs-info
+#+STATUS: charting
 
 * Goal
 
@@ -81,6 +81,47 @@ Evidence:
   leases, pipeline schedules, membership recovery, checkpoint publication, and
   trace validation.
 
+* Wayfinder session 2026-09-15 (arm + trace-source fork)
+
+The pivotal decision that sizes this whole track was charted this session with
+=/grilling= + =/domain-modeling=. The router flagged a fork between
+design-invariant checking (cheap, stays in TLC) and trace validation
+(high-value, connects to real =tnsr= runs). The arXiv:2602.22631 paper
+("TorchLean", Lean 4 NN formalization) was consulted for inspiration: its
+value is the *semantic-gap / refinement / explicit-runtime-boundary* framing,
+not a blueprint — it uses theorem proving over NN semantics, not TLC over
+distributed collective/mesh/checkpoint protocols. The durable inheritance is:
+*a trace validator is only meaningful if it refines a checked abstract spec.*
+
+Decisions:
+
+- ARM: *Both, sequenced.* First finish a thin slice of design-invariant
+  checking to produce a real refinement target, then build the
+  trace-validation bridge against it. Rationale: a trace checker with no
+  checked spec to refine is just a schema linter; the paper's refinement
+  framing makes the spec-first ordering the honest one.
+- The refinement target is the *step-transaction model* (issue 05), not the
+  full layout/provenance or pipeline-buffer layers. It is the smallest Layer-0
+  contract that a runtime trace can be checked to refine (commit/abort
+  agreement, monotone versions, no-mutation-after-abort). Layers 04 and 06
+  become refinements *of* the transaction spec, sequenced after the first
+  trace bridge, not before it.
+- TRACE SOURCE: *Ferric synthetic traces first.* The validator consumes the
+  existing =tnsr.mesh_sim_trace.v0= schema (=MeshTrace= / =MeshTraceEvent= in
+  =ferric_continuum/tnsr/src/dtensor/trace.rs=) emitted by the graduated
+  DTensor mesh simulation. No cross-repo coupling; TorchTitan/Monarch event
+  schemas stay study inputs, deferred to a later frontier ticket once the
+  Ferric-trace refinement check is green.
+- The trace-validation checker follows the landed hermetic pattern: a small
+  Python bridge translates a recorded =MeshTrace= JSON into a TLA+ behavior
+  (an ordered assignment to the transaction spec's variables) and TLC checks
+  that behavior against =StepTxn.tla= via =--config=formal=, reusing the
+  pinned =@tla2tools//jar= and =mesh_plan_tlc_test= scaffolding.
+
+- Later layers should add step transactions, tensor layout/provenance, buffer
+  leases, pipeline schedules, membership recovery, checkpoint publication, and
+  trace validation.
+
 * Related local context
 
 - Existing DTensor simulation tracker:
@@ -92,19 +133,32 @@ Evidence:
 
 * Frontier
 
+Re-sequenced by the 2026-09-15 wayfinder session (arm = "invariants then
+trace", trace source = Ferric synthetic). Issue 05 is the refinement target
+and is now resolved (StepTxn.tla landed + hermetic TLC green); 08 is the trace
+bridge that depends on it; 04 and 06 are refinements sequenced after the first
+trace bridge.
+
+- [[file:issues/08-trace-refinement-bridge.org][08-trace-refinement-bridge]] (next actionable — Ferric MeshTrace -> StepTxn.tla)
+- [[file:issues/04-layout-provenance-boundary.org][04-layout-provenance-boundary]] (refinement, after 08)
+- [[file:issues/06-pipeline-buffer-lifecycle.org][06-pipeline-buffer-lifecycle]] (refinement, after 08)
+- [[file:issues/07-recovery-checkpoint-trace-validation.org][07-recovery-checkpoint-trace-validation]] (recovery/checkpoint extension, after 08)
+
+Already resolved:
+
 - [[file:issues/00-wait-for-dtensor-mesh-simulation.org][00-wait-for-dtensor-mesh-simulation]]
 - [[file:issues/01-scope-formal-model-stack.org][01-scope-formal-model-stack]]
 - [[file:issues/02-mesh-plan-model.org][02-mesh-plan-model]]
 - [[file:issues/03-checker-tooling.org][03-checker-tooling]]
-- [[file:issues/04-layout-provenance-boundary.org][04-layout-provenance-boundary]]
-- [[file:issues/05-step-transaction-model.org][05-step-transaction-model]]
-- [[file:issues/06-pipeline-buffer-lifecycle.org][06-pipeline-buffer-lifecycle]]
-- [[file:issues/07-recovery-checkpoint-trace-validation.org][07-recovery-checkpoint-trace-validation]]
+- [[file:issues/05-step-transaction-model.org][05-step-transaction-model]] (StepTxn.tla, resolved 2026-09-15)
 
 * Fog
 
-- Whether the first generated constants should come directly from
-  ~tnsr::dtensor::MeshSimPlan~ reports or from a smaller intermediate protocol
-  IR.
-- Whether trace validation should target Ferric synthetic traces first or a
-  TorchTitan/Monarch-derived event schema first.
+- (RESOLVED 2026-09-15) Constants source: the first trace bridge reads
+  recorded ~tnsr.mesh_sim_trace.v0~ JSON directly; a smaller protocol IR is
+  deferred until a second trace producer (TorchTitan/Monarch) is added.
+- (RESOLVED 2026-09-15) Trace target: Ferric synthetic traces first;
+  TorchTitan/Monarch-derived event schema deferred to a later frontier ticket.
+- Still open: what subset of ~MeshTraceEvent~ variants (LayoutTransition,
+  Collective, Injection, Failure) the first ~StepTxn.tla~ refinement check must
+  observe versus ignore. Sharpened in issue 08.

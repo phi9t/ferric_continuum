@@ -1,0 +1,62 @@
+#+TITLE: Ferric MeshTrace -> StepTxn.tla refinement bridge
+#+TYPE: task
+#+STATUS: open
+#+BLOCKED_BY: 05-step-transaction-model
+#+PARENT: ../map.org
+
+* Question
+
+How does a recorded Ferric ~tnsr.mesh_sim_trace.v0~ trace get checked to
+refine the abstract step-transaction spec ~StepTxn.tla~, hermetically, under
+the existing ~--config=formal~ TLC path?
+
+* Context
+
+Chosen by the 2026-09-15 wayfinder session:
+
+- Arm = "invariants then trace": ~StepTxn.tla~ (issue 05) is the refinement
+  target; this ticket is the first trace bridge that consumes it.
+- Trace source = Ferric synthetic first: the bridge reads the existing
+  ~MeshTrace~ / ~MeshTraceEvent~ schema emitted by the graduated DTensor mesh
+  simulation (~ferric_continuum/tnsr/src/dtensor/trace.rs~), not a
+  TorchTitan/Monarch schema.
+- The refinement framing is inherited from arXiv:2602.22631 (TorchLean): a
+  runtime artifact is only trustworthy if it *refines* a checked abstract
+  spec. A trace linter with no spec is out of scope.
+
+* Requirements
+
+- A trace-to-behavior translator (Python, mirroring ~tools/tla_check.py~ /
+  ~formal/distributed_training/tlc_bazel_test.py~) that:
+  - reads a recorded ~MeshTrace~ JSON (one training step),
+  - maps ~MeshTraceEvent~ variants to ~StepTxn.tla~ transitions
+    (Collective -> synchronizing; phase Optimizer -> committing/committed;
+    Failure -> aborting/aborted),
+  - emits a TLA+ ~TraceBehavior~ module constraining the spec variables to the
+    observed ordered sequence.
+- A TLC check that the observed behavior is a legal behavior of ~StepTxn.tla~
+  (refinement / trace-inclusion), reusing the pinned ~@tla2tools//jar~ and the
+  ~mesh_plan_tlc_test~ hermetic scaffolding under ~--config=formal~.
+- A good fixture (a legal recorded step -> TLC success/exit 0) and a bad
+  fixture (a trace that violates the transaction contract, e.g. optimizer
+  commit after a Failure event -> TLC exit 12 with a named invariant).
+- The subset decision: which ~MeshTraceEvent~ variants the first refinement
+  observes (Collective, Failure, Optimizer-phase) vs. ignores (LayoutTransition,
+  Injection) with a written rationale.
+- Never present a SKIP as PASS; the DTensor trace producer must be the
+  graduated one.
+
+* Out of scope
+
+- TorchTitan/Monarch event schema (later frontier ticket).
+- Layout/provenance (issue 04) and pipeline-buffer (issue 06) refinements.
+- Recovery/checkpoint state (issue 07).
+- Changing the ~tnsr~ trace emitter.
+
+* Evidence needed
+
+- The variant-subset table with rationale.
+- The good/bad fixture pair and their TLC exit codes.
+- The dependency edge from ~StepTxn.tla~ to the trace behavior module.
+
+* Answer

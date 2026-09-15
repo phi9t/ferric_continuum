@@ -13,6 +13,13 @@
 #                                   violation. This fetches the pinned
 #                                   @tla2tools//jar (needs network at fetch time)
 #                                   and runs it with remotejdk_17.
+#   Level 3  hermetic TLC check  -> //formal/distributed_training:step_txn_tlc_test
+#                                   under --config=formal: StepTxnGood must
+#                                   satisfy Inv + StepResolves and StepTxnBad
+#                                   must surface the NoMutationAfterAbort /
+#                                   VersionMonotone violation (the Layer-0
+#                                   step-transaction contract and refinement
+#                                   target for the trace bridge).
 #
 # The TLC level SKIPs honestly (never PASS, never FAIL) when the jar cannot be
 # fetched (e.g. no network in a sandbox) rather than masking a real failure.
@@ -70,6 +77,20 @@ elif "$BAZEL" test --config=formal \
   record "L2-hermetic-tlc" PASS
 else
   record "L2-hermetic-tlc" FAIL
+fi
+
+# ---------------------------------------------------------------------------
+# Level 3: hermetic TLC step-transaction check (good clean + bad violation).
+# ---------------------------------------------------------------------------
+echo "==> Level 3: hermetic TLC StepTxn check"
+if [ "$JAR_OK" -eq 0 ]; then
+  echo "    SKIP: $JAR_REASON."
+  record "L3-step-txn-tlc" SKIP
+elif "$BAZEL" test --config=formal \
+    //formal/distributed_training:step_txn_tlc_test; then
+  record "L3-step-txn-tlc" PASS
+else
+  record "L3-step-txn-tlc" FAIL
 fi
 
 # ---------------------------------------------------------------------------
