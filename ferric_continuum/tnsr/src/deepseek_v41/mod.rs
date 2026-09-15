@@ -1,6 +1,7 @@
 //! DeepSeek V4.1 metadata and text-model building blocks.
 
 pub mod attention;
+pub mod checkpoint_io;
 pub mod config;
 pub mod cost;
 pub mod dspark;

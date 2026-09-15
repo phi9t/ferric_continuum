@@ -155,7 +155,10 @@ pub struct ImageDelimiters<'a> {
 /// Overwrite each image's token span in the `[B, S, D]` embedding buffer with
 /// its delimiter embeddings and aligner rows. Mirrors
 /// `Transformer.merge_image_embeddings`: the `IMAGE` slots take aligner rows in
-/// reading order; the sentinels take the learned delimiters.
+/// reading order; the sentinels take the learned delimiters. Returns a named
+/// error if a span overflows the sequence or carries an unknown token type,
+/// so image inputs that do not match the token layout fail cleanly rather than
+/// aborting the process.
 pub fn merge_image_embeddings(
     embed: &mut [f32],
     b: usize,
@@ -163,15 +166,30 @@ pub fn merge_image_embeddings(
     dim: usize,
     images: &[Vec<ImageSpan>],
     delims: &ImageDelimiters,
-) {
-    assert_eq!(embed.len(), b * s * dim, "embed buffer shape mismatch");
-    assert_eq!(images.len(), b, "one image list per batch row");
+) -> Result<(), String> {
+    if embed.len() != b * s * dim {
+        return Err(format!(
+            "embed buffer length {} does not match b*s*dim {}",
+            embed.len(),
+            b * s * dim
+        ));
+    }
+    if images.len() != b {
+        return Err(format!(
+            "images length {} does not match batch {b}",
+            images.len()
+        ));
+    }
     for (bi, sample) in images.iter().enumerate() {
         for img in sample {
             let mut aligner_off = 0;
             for (k, &ty) in img.token_types.iter().enumerate() {
                 let pos = img.start + k;
-                assert!(pos < s, "image span overflows sequence length");
+                if pos >= s {
+                    return Err(format!(
+                        "image span position {pos} overflows sequence length {s}"
+                    ));
+                }
                 let dst = &mut embed[(bi * s + pos) * dim..(bi * s + pos + 1) * dim];
                 match ty {
                     IMAGE_START => dst.copy_from_slice(delims.image_start),
@@ -182,11 +200,16 @@ pub fn merge_image_embeddings(
                         dst.copy_from_slice(src);
                         aligner_off += 1;
                     }
-                    _ => panic!("unexpected image token type {ty} inside an image span"),
+                    other => {
+                        return Err(format!(
+                            "unexpected image token type {other} inside an image span"
+                        ))
+                    }
                 }
             }
         }
     }
+    Ok(())
 }
 
 impl DeepSeekV41TextModel {
@@ -269,7 +292,7 @@ impl DeepSeekV41TextModel {
         // merges into `h` then unsqueezes to hc_mult copies).
         let h = embedding::embedding(ids, b, s, &self.embed_tokens, "deepseek.embed_tokens");
         let mut buffer = h.inner.borrow().value.data.as_ref().clone();
-        merge_image_embeddings(&mut buffer, b, s, dim, images, delims);
+        merge_image_embeddings(&mut buffer, b, s, dim, images, delims)?;
         let merged =
             Tensor::from_value_no_grad(TensorValue::from_vec(Shape(vec![b, s, dim]), buffer));
 
@@ -360,12 +383,16 @@ pub struct DsparkSpecOutput {
 }
 
 impl DeepSeekV41DsparkHead {
-    fn first_stage(&self) -> &DeepSeekV41DsparkStage {
-        self.stages.first().expect("DSpark head needs a stage 0")
+    fn first_stage(&self) -> Result<&DeepSeekV41DsparkStage, String> {
+        self.stages
+            .first()
+            .ok_or_else(|| "DSpark head needs a stage 0".to_string())
     }
 
-    fn last_stage(&self) -> &DeepSeekV41DsparkStage {
-        self.stages.last().expect("DSpark head needs a last stage")
+    fn last_stage(&self) -> Result<&DeepSeekV41DsparkStage, String> {
+        self.stages
+            .last()
+            .ok_or_else(|| "DSpark head needs a last stage".to_string())
     }
 
     /// Build the stage-0 draft residual embedding and the projected main hidden.
@@ -377,29 +404,39 @@ impl DeepSeekV41DsparkHead {
     ///
     /// `main_hidden` is `[batch, in_dim]` with `in_dim = dim * n_targets`;
     /// `input_ids` is one accepted id per batch row. Returns the `[B, block, D]`
-    /// draft embedding tensor and the `[batch, dim]` `main_x`.
-    fn forward_embed(&self, main_hidden: &[f32], input_ids: &[usize]) -> (Tensor, Vec<f32>) {
+    /// draft embedding tensor and the `[batch, dim]` `main_x`, or a named error
+    /// if stage 0 is missing the `main_proj`/`main_norm` tensors or the shapes
+    /// do not line up.
+    fn forward_embed(
+        &self,
+        main_hidden: &[f32],
+        input_ids: &[usize],
+    ) -> Result<(Tensor, Vec<f32>), String> {
         let batch = input_ids.len();
-        let stage0 = self.first_stage();
+        let stage0 = self.first_stage()?;
         let proj = stage0
             .main_proj
             .as_ref()
-            .expect("stage 0 must own main_proj");
+            .ok_or("DSpark stage 0 must own main_proj")?;
         let main_norm = stage0
             .main_norm
             .as_ref()
-            .expect("stage 0 must own main_norm");
-        assert_eq!(
-            proj.len() % self.dim,
-            0,
-            "main_proj length must be dim * in_dim"
-        );
+            .ok_or("DSpark stage 0 must own main_norm")?;
+        if proj.len() % self.dim != 0 {
+            return Err(format!(
+                "DSpark main_proj length {} must be a multiple of dim {}",
+                proj.len(),
+                self.dim
+            ));
+        }
         let in_dim = proj.len() / self.dim;
-        assert_eq!(
-            main_hidden.len(),
-            batch * in_dim,
-            "main_hidden must be [batch, in_dim]"
-        );
+        if main_hidden.len() != batch * in_dim {
+            return Err(format!(
+                "DSpark main_hidden length {} must equal batch*in_dim {}",
+                main_hidden.len(),
+                batch * in_dim
+            ));
+        }
         let main_x = main_proj_norm(
             main_hidden,
             proj,
@@ -421,7 +458,7 @@ impl DeepSeekV41DsparkHead {
             &self.embed_tokens,
             "deepseek.dspark.embed",
         );
-        (embedded, main_x)
+        Ok((embedded, main_x))
     }
 
     /// The last-stage `forward_head` draft loop.
@@ -432,25 +469,29 @@ impl DeepSeekV41DsparkHead {
     /// bias, greedily (temperature 0) sample the next id, and stack the Markov
     /// embeddings; finally score `concat(hidden, markov_embed)` with the
     /// confidence head. `input_ids` is one accepted id per batch row.
-    fn forward_head(&self, stream: &ResidualStream, input_ids: &[usize]) -> DsparkSpecOutput {
+    fn forward_head(
+        &self,
+        stream: &ResidualStream,
+        input_ids: &[usize],
+    ) -> Result<DsparkSpecOutput, String> {
         let batch = input_ids.len();
-        let stage = self.last_stage();
+        let stage = self.last_stage()?;
         let head_norm = stage
             .head_norm
             .as_ref()
-            .expect("last stage must own head norm");
+            .ok_or("DSpark last stage must own head norm")?;
         let markov_embed = stage
             .markov_embed
             .as_ref()
-            .expect("last stage must own markov embed");
+            .ok_or("DSpark last stage must own markov embed")?;
         let markov_head = stage
             .markov_head
             .as_ref()
-            .expect("last stage must own markov head");
+            .ok_or("DSpark last stage must own markov head")?;
         let confidence_proj = stage
             .confidence_proj
             .as_ref()
-            .expect("last stage must own confidence proj");
+            .ok_or("DSpark last stage must own confidence proj")?;
 
         // Collapse [B, block, HC, D] with the carried pre-mix -> [B, block, D].
         let shape = stream.shape();
@@ -512,11 +553,11 @@ impl DeepSeekV41DsparkHead {
             }
         }
 
-        DsparkSpecOutput {
+        Ok(DsparkSpecOutput {
             output_ids,
             logits,
             confidence,
-        }
+        })
     }
 
     /// Run one DSpark speculative step over the accepted `input_ids`.
@@ -527,13 +568,18 @@ impl DeepSeekV41DsparkHead {
     /// no VL routing bias), then `forward_head` over the final stream.
     ///
     /// `main_hidden` is `[batch, dim * n_targets]`; `input_ids` is one accepted
-    /// id per batch row.
-    pub fn forward_spec(&self, input_ids: &[usize], main_hidden: &[f32]) -> DsparkSpecOutput {
-        assert!(
-            !input_ids.is_empty(),
-            "forward_spec needs at least one accepted id"
-        );
-        let (embedded, main_x) = self.forward_embed(main_hidden, input_ids);
+    /// id per batch row. Returns a named error instead of panicking when the
+    /// head is misconfigured (empty ids, missing stage tensors, shape mismatch)
+    /// so callers embedding this in a server do not abort the process.
+    pub fn try_forward_spec(
+        &self,
+        input_ids: &[usize],
+        main_hidden: &[f32],
+    ) -> Result<DsparkSpecOutput, String> {
+        if input_ids.is_empty() {
+            return Err("forward_spec needs at least one accepted id".to_string());
+        }
+        let (embedded, main_x) = self.forward_embed(main_hidden, input_ids)?;
         // main_x seeds the sliding-window KV cache in the full decode path
         // (start_pos > 0 only); the tiny parity harness runs one prefill step.
         let _ = main_x;
@@ -546,6 +592,13 @@ impl DeepSeekV41DsparkHead {
             stage.block.forward(&mut stream, 0, &mut shared, None);
         }
         self.forward_head(&stream, input_ids)
+    }
+
+    /// Panicking convenience wrapper over [`Self::try_forward_spec`] for tests
+    /// and callers that treat a misconfigured head as a programmer error.
+    pub fn forward_spec(&self, input_ids: &[usize], main_hidden: &[f32]) -> DsparkSpecOutput {
+        self.try_forward_spec(input_ids, main_hidden)
+            .expect("DeepSeekV41DsparkHead forward_spec failed")
     }
 }
 

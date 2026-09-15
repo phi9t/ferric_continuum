@@ -34,6 +34,7 @@ _TNSR_SRCS = [
     "src/qwen3_load.rs",
     "src/deepseek_v41/config.rs",
     "src/deepseek_v41/attention.rs",
+    "src/deepseek_v41/checkpoint_io.rs",
     "src/deepseek_v41/cost.rs",
     "src/deepseek_v41/dspark.rs",
     "src/deepseek_v41/engram.rs",

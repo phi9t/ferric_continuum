@@ -50,9 +50,11 @@ fn argmax(row: &[f32]) -> usize {
 }
 
 /// Top-`k` (id, logit) pairs of `row`, highest first — a numeric sanity anchor.
+/// Uses `f32::total_cmp` so a NaN logit sorts deterministically instead of
+/// panicking (`partial_cmp` returns `None` for NaN).
 fn top_k(row: &[f32], k: usize) -> Vec<(usize, f32)> {
     let mut idx: Vec<usize> = (0..row.len()).collect();
-    idx.sort_by(|&a, &b| row[b].partial_cmp(&row[a]).unwrap());
+    idx.sort_by(|&a, &b| row[b].total_cmp(&row[a]));
     idx.into_iter().take(k).map(|i| (i, row[i])).collect()
 }
 

@@ -1195,7 +1195,7 @@ fn merge_image_embeddings_overwrites_span() {
         image_end: &image_end,
         image_newline: &image_newline,
     };
-    merge_image_embeddings(&mut embed, b, s, dim, &images, &delims);
+    merge_image_embeddings(&mut embed, b, s, dim, &images, &delims).unwrap();
     assert_close(
         &embed,
         &f32_array(&fixture["expected"], "merged"),

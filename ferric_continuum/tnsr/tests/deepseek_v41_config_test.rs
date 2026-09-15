@@ -193,3 +193,33 @@ fn malformed_config_field_returns_error() {
     assert!(err.contains("vocab_size"));
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn semantically_invalid_config_is_rejected_by_validate() {
+    // Start from the well-typed release inference config and corrupt a single
+    // structural invariant (num_experts_per_tok > n_routed_experts). The file
+    // parses field-by-field but must fail `validate` with a named field.
+    let text = std::fs::read_to_string(inference_config_path()).unwrap();
+    let mut json: serde_json::Value = serde_json::from_str(&text).unwrap();
+    json["n_activated_experts"] = serde_json::json!(100000);
+
+    let mut dir = std::env::temp_dir();
+    dir.push(format!(
+        "tnsr-deepseek-v41-validate-test-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("invalid-config.json");
+    std::fs::write(&path, serde_json::to_string(&json).unwrap()).unwrap();
+
+    let err = match DeepSeekV41TextConfig::from_inference_json(&path) {
+        Ok(_) => panic!("semantically invalid config unexpectedly parsed"),
+        Err(err) => err,
+    };
+    assert!(
+        err.contains("num_experts_per_tok") && err.contains("n_routed_experts"),
+        "unexpected error message: {err}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}

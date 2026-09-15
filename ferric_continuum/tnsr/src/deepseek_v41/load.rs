@@ -35,14 +35,13 @@
 //! local directory.  The single-file / TP-shard fixtures written in tests are
 //! enough to exercise every path here.
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use half::bf16;
-use safetensors::tensor::{Dtype, SafeTensors, TensorView};
-
 use super::attention::{DeepSeekV41Attention, DeepSeekV41Compressor, DeepSeekV41Indexer};
+#[cfg(test)]
+use super::checkpoint_io::{e4m3_to_f32, e8m0_to_f32};
+use super::checkpoint_io::{expect_shape, Checkpoint, QuantKind};
 use super::config::DeepSeekV41TextConfig;
 use super::engram::DeepSeekV41Engram;
 use super::model::{
@@ -52,37 +51,7 @@ use super::moe::{DeepSeekV41Expert, DeepSeekV41Gate, DeepSeekV41MoE};
 use super::vision::{OwnedVisionBlock, OwnedVisionModel};
 use crate::tensor::{Shape, Tensor, TensorValue};
 
-/// Source quantization of a loaded tensor.  Wave 1 always dequantizes to f32
-/// for execution; this records what the checkpoint actually stored so later
-/// native FP8/FP4 kernel tickets can reconstruct the packed form.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum QuantKind {
-    /// Plain float (bf16/f16/f32) decoded directly to f32.
-    Float,
-    /// FP8 E4M3 weight with an E8M0 block-scale (block size 32).
-    Fp8E4m3,
-    /// FP4 E2M1 packed weight (two values/byte) with an E8M0 block-scale.
-    Fp4E2m1,
-}
-
-const FP_BLOCK_SIZE: usize = 32;
-
-/// FP4 (E2M1) code -> value table, matching upstream `convert.py::FP4_TABLE`.
-const FP4_TABLE: [f32; 16] = [
-    0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0,
-];
-
-// -- error / shape helpers -------------------------------------------------
-
-fn expect_shape(name: &str, got: &[usize], expected: &[usize]) -> Result<(), String> {
-    if got == expected {
-        Ok(())
-    } else {
-        Err(format!(
-            "tensor `{name}` expected {expected:?}, got {got:?}"
-        ))
-    }
-}
+// -- shape helpers ---------------------------------------------------------
 
 fn expect_numel(name: &str, got: usize, expected: usize) -> Result<(), String> {
     if got == expected {
@@ -104,262 +73,6 @@ fn transpose_2d(name: &str, data: &[f32], rows: usize, cols: usize) -> Result<Ve
         }
     }
     Ok(out)
-}
-
-// -- dtype decode ----------------------------------------------------------
-
-/// Decode a float safetensors view (bf16/f16/f32) into f32.
-fn view_float_to_f32(name: &str, view: &TensorView) -> Result<Vec<f32>, String> {
-    let bytes = view.data();
-    match view.dtype() {
-        Dtype::BF16 => {
-            if bytes.len() % 2 != 0 {
-                return Err(format!("tensor `{name}`: bf16 byte length not even"));
-            }
-            Ok(bytes
-                .chunks_exact(2)
-                .map(|c| bf16::from_bits(u16::from_le_bytes([c[0], c[1]])).to_f32())
-                .collect())
-        }
-        Dtype::F16 => {
-            if bytes.len() % 2 != 0 {
-                return Err(format!("tensor `{name}`: f16 byte length not even"));
-            }
-            Ok(bytes
-                .chunks_exact(2)
-                .map(|c| half::f16::from_bits(u16::from_le_bytes([c[0], c[1]])).to_f32())
-                .collect())
-        }
-        Dtype::F32 => {
-            if bytes.len() % 4 != 0 {
-                return Err(format!(
-                    "tensor `{name}`: f32 byte length not multiple of 4"
-                ));
-            }
-            Ok(bytes
-                .chunks_exact(4)
-                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-                .collect())
-        }
-        other => Err(format!(
-            "tensor `{name}`: unsupported float dtype {other:?}"
-        )),
-    }
-}
-
-/// Decode an FP8 E4M3 byte to f32 (1 sign, 4 exponent bias 7, 3 mantissa;
-/// `0x7F`/`0xFF` are NaN, matching `float8_e4m3fn`).
-fn e4m3_to_f32(byte: u8) -> f32 {
-    let sign = if byte & 0x80 != 0 { -1.0f32 } else { 1.0f32 };
-    let exp = ((byte >> 3) & 0x0F) as i32;
-    let mant = (byte & 0x07) as i32;
-    if exp == 0x0F && mant == 0x07 {
-        return f32::NAN;
-    }
-    if exp == 0 {
-        // subnormal: value = mant/8 * 2^(1-bias)
-        sign * (mant as f32 / 8.0) * 2f32.powi(1 - 7)
-    } else {
-        // normal: value = (1 + mant/8) * 2^(exp-bias)
-        sign * (1.0 + mant as f32 / 8.0) * 2f32.powi(exp - 7)
-    }
-}
-
-/// Decode an E8M0 scale byte to a positive f32 (value = 2^(byte-127); `0xFF`
-/// is NaN, matching `float8_e8m0fnu`).
-fn e8m0_to_f32(byte: u8) -> f32 {
-    if byte == 0xFF {
-        return f32::NAN;
-    }
-    2f32.powi(byte as i32 - 127)
-}
-
-/// Raw bytes for a scale side-car tensor, kept in the source dtype.
-fn scale_bytes(name: &str, view: &TensorView) -> Result<Vec<u8>, String> {
-    // Scales are stored as E8M0 (`F8_E8M0`) or occasionally F32 in fixtures.
-    match view.dtype() {
-        // safetensors exposes E8M0 as an opaque 1-byte type; some builds label
-        // it F8_E4M3 / U8.  We only need the raw byte, decoded as E8M0.
-        Dtype::U8 => Ok(view.data().to_vec()),
-        Dtype::F8_E4M3 => Ok(view.data().to_vec()),
-        Dtype::F8_E5M2 => Ok(view.data().to_vec()),
-        other => Err(format!(
-            "tensor `{name}`: unsupported scale dtype {other:?} (expected 1-byte E8M0)"
-        )),
-    }
-}
-
-/// Dequantize an FP8 E4M3 `[out, in]` weight with an E8M0 `[ceil(out/32),
-/// ceil(in/32)]` block-scale into a row-major f32 `[out, in]` buffer.
-fn dequant_fp8(
-    name: &str,
-    weight: &TensorView,
-    scale: &TensorView,
-    out_dim: usize,
-    in_dim: usize,
-) -> Result<Vec<f32>, String> {
-    expect_shape(name, weight.shape(), &[out_dim, in_dim])?;
-    let raw = weight.data();
-    expect_numel(name, raw.len(), out_dim * in_dim)?;
-
-    let sblk_out = out_dim.div_ceil(FP_BLOCK_SIZE);
-    let sblk_in = in_dim.div_ceil(FP_BLOCK_SIZE);
-    let scale_name = format!("{name}.scale");
-    expect_shape(&scale_name, scale.shape(), &[sblk_out, sblk_in])?;
-    let sbytes = scale_bytes(&scale_name, scale)?;
-    expect_numel(&scale_name, sbytes.len(), sblk_out * sblk_in)?;
-
-    let mut out = vec![0.0f32; out_dim * in_dim];
-    for o in 0..out_dim {
-        for i in 0..in_dim {
-            let w = e4m3_to_f32(raw[o * in_dim + i]);
-            let s = e8m0_to_f32(sbytes[(o / FP_BLOCK_SIZE) * sblk_in + i / FP_BLOCK_SIZE]);
-            out[o * in_dim + i] = w * s;
-        }
-    }
-    Ok(out)
-}
-
-/// Dequantize an FP4 E2M1 packed `[out, in/2]` weight (two nibbles per byte,
-/// low nibble first) with an E8M0 `[ceil(out/32), ceil(in/32)]` block-scale
-/// into a row-major f32 `[out, in]` buffer.
-fn dequant_fp4(
-    name: &str,
-    weight: &TensorView,
-    scale: &TensorView,
-    out_dim: usize,
-    in_dim: usize,
-) -> Result<Vec<f32>, String> {
-    if in_dim % 2 != 0 {
-        return Err(format!(
-            "tensor `{name}`: FP4 in_dim {in_dim} must be even (two values per byte)"
-        ));
-    }
-    let packed_in = in_dim / 2;
-    expect_shape(name, weight.shape(), &[out_dim, packed_in])?;
-    let raw = weight.data();
-    expect_numel(name, raw.len(), out_dim * packed_in)?;
-
-    let sblk_out = out_dim.div_ceil(FP_BLOCK_SIZE);
-    let sblk_in = in_dim.div_ceil(FP_BLOCK_SIZE);
-    let scale_name = format!("{name}.scale");
-    expect_shape(&scale_name, scale.shape(), &[sblk_out, sblk_in])?;
-    let sbytes = scale_bytes(&scale_name, scale)?;
-    expect_numel(&scale_name, sbytes.len(), sblk_out * sblk_in)?;
-
-    let mut out = vec![0.0f32; out_dim * in_dim];
-    for o in 0..out_dim {
-        for p in 0..packed_in {
-            let byte = raw[o * packed_in + p];
-            let low = FP4_TABLE[(byte & 0x0F) as usize];
-            let high = FP4_TABLE[((byte >> 4) & 0x0F) as usize];
-            // logical columns: 2p (low nibble), 2p+1 (high nibble).
-            let i0 = 2 * p;
-            let i1 = 2 * p + 1;
-            let s0 = e8m0_to_f32(sbytes[(o / FP_BLOCK_SIZE) * sblk_in + i0 / FP_BLOCK_SIZE]);
-            let s1 = e8m0_to_f32(sbytes[(o / FP_BLOCK_SIZE) * sblk_in + i1 / FP_BLOCK_SIZE]);
-            out[o * in_dim + i0] = low * s0;
-            out[o * in_dim + i1] = high * s1;
-        }
-    }
-    Ok(out)
-}
-
-// -- checkpoint index ------------------------------------------------------
-
-/// A flat view over one or more safetensors shards addressed by tensor name.
-struct Checkpoint {
-    shards: Vec<SafeTensors<'static>>,
-    // name -> (shard idx)
-    index: BTreeMap<String, usize>,
-}
-
-impl Checkpoint {
-    /// Open a single-file `model.safetensors` checkpoint.
-    fn open_single(path: &Path) -> Result<Checkpoint, String> {
-        Checkpoint::open_files(&[path.to_path_buf()])
-    }
-
-    /// Open one or more shard files, building a name -> shard index.
-    fn open_files(paths: &[PathBuf]) -> Result<Checkpoint, String> {
-        let mut shards = Vec::new();
-        let mut index = BTreeMap::new();
-        for (shard_idx, path) in paths.iter().enumerate() {
-            let raw = fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-            // SafeTensors borrows from the buffer; leak the buffer into a
-            // 'static slice so the parsed view stays valid for the life of the
-            // Checkpoint (loaders are short-lived one-shot processes).
-            let leaked: &'static [u8] = Box::leak(raw.into_boxed_slice());
-            let st = SafeTensors::deserialize(leaked)
-                .map_err(|e| format!("parse {}: {e}", path.display()))?;
-            for name in st.names() {
-                index.entry(name.to_string()).or_insert(shard_idx);
-            }
-            shards.push(st);
-        }
-        Ok(Checkpoint { shards, index })
-    }
-
-    fn has(&self, name: &str) -> bool {
-        self.index.contains_key(name)
-    }
-
-    fn view(&self, name: &str) -> Result<TensorView<'_>, String> {
-        let shard = *self
-            .index
-            .get(name)
-            .ok_or_else(|| format!("missing required tensor `{name}`"))?;
-        self.shards[shard]
-            .tensor(name)
-            .map_err(|e| format!("tensor `{name}`: {e}"))
-    }
-
-    /// Decode a float tensor to f32 with its shape.
-    fn float(&self, name: &str) -> Result<(Vec<f32>, Vec<usize>), String> {
-        let view = self.view(name)?;
-        let shape = view.shape().to_vec();
-        Ok((view_float_to_f32(name, &view)?, shape))
-    }
-
-    fn float_exact(&self, name: &str, expected: &[usize]) -> Result<Vec<f32>, String> {
-        let (data, shape) = self.float(name)?;
-        expect_shape(name, &shape, expected)?;
-        Ok(data)
-    }
-
-    /// Decode a possibly-quantized `[out, in]` linear weight to f32 `[out, in]`
-    /// row-major, returning the source quant kind.  Detects FP8/FP4 by the
-    /// presence and dtype of a `.scale` side-car.
-    fn linear_weight(
-        &self,
-        name: &str,
-        out_dim: usize,
-        in_dim: usize,
-    ) -> Result<(Vec<f32>, QuantKind), String> {
-        let view = self.view(name)?;
-        let scale_name = format!("{name}.scale");
-        match view.dtype() {
-            Dtype::BF16 | Dtype::F16 | Dtype::F32 => {
-                expect_shape(name, view.shape(), &[out_dim, in_dim])?;
-                let data = view_float_to_f32(name, &view)?;
-                Ok((data, QuantKind::Float))
-            }
-            Dtype::F8_E4M3 => {
-                let scale = self.view(&scale_name)?;
-                let data = dequant_fp8(name, &view, &scale, out_dim, in_dim)?;
-                Ok((data, QuantKind::Fp8E4m3))
-            }
-            Dtype::I8 | Dtype::U8 => {
-                // FP4 E2M1 packed: two logical columns per stored byte.
-                let scale = self.view(&scale_name)?;
-                let data = dequant_fp4(name, &view, &scale, out_dim, in_dim)?;
-                Ok((data, QuantKind::Fp4E2m1))
-            }
-            other => Err(format!(
-                "tensor `{name}`: unsupported linear weight dtype {other:?}"
-            )),
-        }
-    }
 }
 
 // -- parameter placement ---------------------------------------------------
@@ -465,7 +178,7 @@ pub fn load_text_model_from_converted_tp(
     if !shard.exists() {
         return Err(format!("converted TP shard not found: {}", shard.display()));
     }
-    let ckpt = Checkpoint::open_files(&[shard])?;
+    let ckpt = Checkpoint::open(&[shard])?;
     build_text_model(&cfg, &ckpt)
 }
 
@@ -493,7 +206,7 @@ fn open_checkpoint(model_dir: &Path) -> Result<Checkpoint, String> {
         ));
     }
     shards.sort();
-    Checkpoint::open_files(&shards)
+    Checkpoint::open(&shards)
 }
 
 fn build_text_model(
