@@ -93,7 +93,7 @@ jobs:
         bazelisk-version: '1.x'
 
     - name: Cache Bazel
-      uses: actions/cache@v3
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cache/bazel
@@ -201,7 +201,7 @@ jobs:
         bazelisk-version: '1.x'
 
     - name: Cache Bazel
-      uses: actions/cache@v3
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cache/bazel
@@ -245,7 +245,7 @@ jobs:
         bazelisk-version: '1.x'
 
     - name: Cache Bazel
-      uses: actions/cache@v3
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cache/bazel
