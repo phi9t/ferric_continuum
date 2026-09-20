@@ -1,0 +1,37 @@
+#+TITLE: Implement private run journal and checkpoint records
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 01-contract-schema-and-validator
+#+PARENT: ../spec.org
+
+* Context
+
+Task Run state belongs under the repository Git common directory, not inside a
+single linked worktree. Checkpoints combine mechanical state with a short
+semantic handoff.
+
+* Requirements
+
+- Store run state under ~<git-common-dir>/devx/runs/<run-id>/~.
+- Create directories with mode ~0700~ and files with mode ~0600~.
+- Append events to ~events.jsonl~ without rewriting previous events.
+- Write checkpoint JSON files under ~checkpoints/~.
+- Record commands, exit codes, test results, commits, context rebinds, writer
+  lease changes, Git HEAD/index identities, dirty-state digests, trajectory
+  locators and hashes, blockers, and authorization decisions.
+- Support checkpoint phases required by ~docs/agents/task-runs.md~.
+
+* Out of scope
+
+- Kata API integration.
+- Recovery admission.
+- Remote artifact storage.
+
+* Verification
+
+- Unit tests create a temporary repository and verify common-dir storage.
+- Permission tests verify ~0700~ directories and ~0600~ files.
+- Append-only tests prove existing journal events are preserved.
+- Checkpoint round-trip tests validate required fields and semantic handoff.
+
+* Comments

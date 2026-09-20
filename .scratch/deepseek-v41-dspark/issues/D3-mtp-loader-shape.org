@@ -1,0 +1,60 @@
+#+TITLE: D3 mtp.* loader shape and DSpark config surfacing
+#+TYPE: grilling
+#+STATUS: resolved
+#+BLOCKED_BY: D2-executed-vs-represented
+#+PARENT: ../intent.org
+
+* Decision
+
+How do the =mtp.*= tensors and the DSpark config fields slot onto the existing
+Wave-1/2 loader and config types?
+
+* Current state (verified in tree)
+
+- =config.rs= already parses DSpark fields into
+  =DeepSeekV41DeferredDsparkConfig= (=n_mtp_layers=, =dspark_block_size=,
+  =dspark_noise_token_id=, =dspark_target_layer_ids=, =dspark_markov_rank=,
+  =dspark_n_routed_experts=, =dspark_num_experts_per_tok=). Named "Deferred"
+  because Wave 1 read but did not execute them.
+- =load.rs= explicitly *ignores* =mtp.*= (recorded as deferred), same as it did
+  for =vision.*= before Wave 2 activated it.
+- The =mtp.*= tensor namespace (from =model.safetensors.index.json=) mirrors a
+  backbone block plus DSpark-only tensors:
+  - per-stage block tensors: =mtp.N.attn.*=, =mtp.N.attn_norm.weight=,
+    =mtp.N.ffn.*= (gate/experts/shared_experts, incl. =bias_vl=),
+    =mtp.N.ffn_norm.weight=, =mtp.N.hc_{attn,ffn}_{fn,base,scale}=.
+  - stage-0 only: =mtp.0.main_proj.{weight,scale}=, =mtp.0.main_norm.weight=.
+  - last-stage only: =mtp.LAST.norm.weight=,
+    =mtp.LAST.markov_head.{embed,head}.weight=,
+    =mtp.LAST.confidence_head.proj.weight=.
+
+* Resolution
+
+- *Reuse the block loaders.* The per-stage =mtp.N.{attn,ffn,attn_norm,ffn_norm,
+  hc_*}= tensors load with the *same* code path that loads a backbone
+  =layers.N.*= block -- a DSpark stage IS a Block plus extra heads. Add a thin
+  =load_dspark_stage= that calls the existing block loader on the =mtp.N.=
+  prefix, then loads the DSpark-only tensors by stage position.
+- *New struct, not a bolt-on.* Introduce =DeepSeekV41DsparkHead= holding
+  =Vec<DeepSeekV41DsparkStage>=, each a =DeepSeekV41Block= plus optional
+  =main_proj/main_norm= (stage 0) and optional =markov_head/confidence_head/norm=
+  (last stage). This keeps the text/vision =DeepSeekV41TextModel= unchanged and
+  the DSpark head a separable module (deep-module seam), loaded only when
+  =dspark_block_size > 0=.
+- *Rename the config type.* =DeepSeekV41DeferredDsparkConfig= ->
+  =DeepSeekV41DsparkConfig= once Wave 3 executes it (drop "Deferred"). Keep a
+  type alias for one release if any external caller references the old name;
+  in-tree there are none, so a straight rename is fine.
+- *Loader entry point.* Add =load_dspark_head(model_dir) ->
+  Result<Option<DeepSeekV41DsparkHead>, String>=: =None= when the config has no
+  DSpark layers, =Some= otherwise. Text/multimodal loaders keep ignoring
+  =mtp.*= so their behavior is unchanged; only a new explicit call activates it.
+
+* Consequences
+
+- No change to =DeepSeekV41TextModel= public shape -> Waves 1-2 tests stay green.
+- The =wo_a= grouped layout, FP8/FP4 dequant, and BF16/F16/F32 decode all reuse
+  the Wave-1 tensor decode helpers unchanged.
+- Expert count for MTP stages uses =get_moe_config(layer_id >= n_layers)=:
+  =dspark_n_routed_experts or n_routed_experts= -- the loader must pick the MTP
+  expert counts, not the backbone ones, when building =mtp.N.ffn=.

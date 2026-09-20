@@ -1,0 +1,69 @@
+#+TITLE: TODO multimodal DeepSeek V4.1 wave
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY: 09-text-compatibility-closure
+#+PARENT: ../spec.org
+
+* Context
+
+This is a placeholder TODO wave for multimodal/image support after text-only
+logits compatibility is proven. It is intentionally not implementation-ready.
+
+Read first:
+
+- =../spec.org=
+- =../research/upstream-architecture.md=
+- =../upstream/inference/vision.py=
+- =../upstream/inference/image_processor.py=
+- =../upstream/encoding/encoding.py=
+
+* Requirements
+
+- Before implementation, split this TODO into fresh design/spec tickets.
+- Cover:
+  - vision config parser and source verifier
+  - ViT patch embedding
+  - 2D RoPE
+  - downsample/aligner path
+  - image placeholder expansion
+  - token type vector generation
+  - learned image delimiter embeddings
+  - text/vision merge semantics
+  - image-mask routing bias
+  - multimodal prompt encoding parity
+  - image fixture parity against upstream
+
+* Out of scope
+
+- Do not implement this as part of Wave 1 text compatibility.
+- Do not let text-only CLI silently accept image placeholders.
+
+* Verification
+
+Future multimodal wave must provide source, config, op, layer, block, prompt,
+and logits/embedding parity verifiers comparable to the text wave.
+
+* Comments
+
+- This ticket exists to keep the TODO visible without expanding the first wave.
+
+* Resolution (2026-09-14)
+
+Wave 2 multimodal is implemented and landed on =ultron/mainline= (merge commit
+=ebc0842=, "feat(tnsr): DeepSeek V4.1-Flash multimodal Wave 2 (vision →
+parity)"). All requirement bullets are covered by shipped tickets W2-01..W2-08:
+
+- vision config parser + source verifier (W2-01)
+- image_processor grid planning fixtures (W2-02)
+- ViT patch embedding + 2D RoPE + block fixtures (W2-03)
+- Aligner downsample + =encode_image= (W2-04)
+- text/vision merge + image-mask routing bias (W2-05)
+- vision checkpoint loader for =vision.*= / =aligner.*= / =image_*= tensors (W2-06)
+- multimodal prompt encoding parity + CLI image path (W2-07)
+- tiny + B200 GPU parity harness + closure (W2-08)
+
+Verifier: =tools/verify_deepseek_v41_multimodal_compat.sh= reports L1-L6 PASS,
+B200/real-checkpoint parity honest SKIP (CPU-only host, no local weights). Tiny
+multimodal parity: cosine 1.00000000, top1 match, top5 5/5. The text-only CLI
+still rejects image placeholders. Follow-on hardening (negative controls, env
+preflight) landed as =d2b7aba=.

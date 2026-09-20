@@ -1,0 +1,52 @@
+#+TITLE: Engram runtime integration with masked n-gram lookup
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 02-indexed-checkpoint-and-engram-loading, 03-ced-runtime-boundary
+#+PARENT: ../spec.org
+
+* Context
+
+Engram is present in local helper code, but the reviewed runtime can panic when
+Engram is enabled because loaded layer tensors are absent. Faithful behavior also
+requires compressed-token hashing and image-token masking before table lookup.
+
+* Requirements
+
+- Compute compressed-token n-gram hashes with the same cache/update semantics as
+  upstream =NgramHashState.forward=.
+- Support token masks so image tokens do not participate in n-grams and do not
+  receive Engram residual contributions.
+- Perform Engram table lookup and =wkv= projection inside the model forward path.
+- Apply the upstream residual update: split key/value, normalize gate inputs,
+  gate by q/k dot product, and add value to eligible residual positions.
+- Add tests that fail when:
+  - image tokens change text-token hash IDs across a span,
+  - Engram-enabled weights are missing,
+  - Engram table lookup is skipped but q/k helper math still runs.
+
+* Out of scope
+
+- Training-time Engram table construction.
+- Quantized production kernel fusion.
+
+* Verification
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests=
+
+* Completion Notes
+
+2026-09-20:
+
+- Engram hash helpers now support masked/dead token cache semantics so image
+  spans do not participate in later text-token n-grams.
+- Engram runtime can look up loaded table rows by hash id, run the loaded
+  =wkv= projection, split key/value, and apply the existing upstream gate/update
+  math.
+- Model/block forward can consume per-layer Engram hash IDs and apply lookup in
+  the runtime path; older fixture-only key/value injection remains as a test
+  seam.
+- Engram-enabled model forward now fails explicitly when hash runtime state is
+  absent, instead of silently skipping lookup or panicking on missing fixture
+  key/value tensors.
+- Verification passed:
+  =bazel test //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests //ferric_continuum/tnsr:lib_tests=

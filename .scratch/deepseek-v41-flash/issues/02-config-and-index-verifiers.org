@@ -1,0 +1,80 @@
+#+TITLE: Config and safetensors index verifiers
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 01-source-manifest-and-paper-verifiers
+#+PARENT: ../spec.org
+
+* Context
+
+Before model code exists, the repo needs cheap verifiers that prove the local
+DeepSeek V4.1 source artifacts still expose the release fields and checkpoint
+namespace the implementation targets.
+
+Read first:
+
+- =../spec.org=
+- =../research/upstream-architecture.md=
+- =../upstream/config.json=
+- =../upstream/inference/config.json=
+- =../upstream/model.safetensors.index.json=
+- =../upstream/inference/convert.py=
+- =ferric_continuum/tnsr/src/qwen3_load.rs= for local config parsing and shape
+  error style.
+
+* Requirements
+
+- Create =ferric_continuum/tnsr/src/deepseek_v41/config.rs=.
+- Create =ferric_continuum/tnsr/src/deepseek_v41/mod.rs=.
+- Export =pub mod deepseek_v41;= from =ferric_continuum/tnsr/src/lib.rs=.
+- Define typed config structs that can parse both:
+  - nested Hugging Face =config.json=
+  - flat DeepSeek =inference/config.json=
+- Preserve all text fields listed in =../spec.org= under =Text-only architecture contract / Config=.
+- Preserve vision and DSpark fields as parsed deferred-surface data, but do not execute
+  those paths.
+- Add =DeepSeekV41TextConfig::from_hf_json(path: &Path) -> Result<Self, String>=.
+- Add =DeepSeekV41TextConfig::from_inference_json(path: &Path) -> Result<Self, String>=.
+- Add =DeepSeekV41ReleaseIndex::from_json(path: &Path) -> Result<Self, String>=
+  that reads =model.safetensors.index.json= without opening weight shards.
+- The index verifier must assert:
+  - =metadata.total_size= is =510286023000=.
+  - shard names cover =model-00001-of-00048.safetensors= through
+    =model-00048-of-00048.safetensors=.
+  - tensor count is =96085=.
+  - representative converted-style names exist:
+    - =embed.weight=
+    - =head.weight=
+    - =norm.weight=
+    - =layers.0.attn.wq_a.weight=
+    - =layers.0.attn.wq_b.weight=
+    - =layers.0.attn.wkv.weight=
+    - =layers.2.attn.compressor.wkv.weight=
+    - =layers.2.attn.indexer.wq_b.weight=
+    - =layers.1.engram.wkv.weight=
+    - at least one =mtp.0.= tensor
+    - at least one =vision.= tensor
+  - Qwen-style names such as =model.layers.0.self_attn.q_proj.weight= are absent.
+- Add a Rust test target =//ferric_continuum/tnsr:deepseek_v41_config_tests=.
+
+* Out of scope
+
+- No tensor data loading beyond the index JSON.
+- No model forward implementation.
+- No tokenizer implementation.
+
+* Verification
+
+- Run:
+  =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests=
+- Expected: tests pass and include:
+  - nested HF config parse
+  - flat inference config parse
+  - equality of corresponding text fields across both configs
+  - representative release-index namespace checks
+  - malformed config field returns =Err= instead of panicking
+
+* Comments
+
+- This is Level 2 of the verifier ladder.
+- Keep parsing code independent from the future model structs so config drift
+  remains testable even when model implementation changes.

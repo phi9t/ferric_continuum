@@ -347,6 +347,7 @@ fn tiny_converted_checkpoint_loads() {
     assert_eq!(model.hidden_size, 4);
     assert_eq!(model.hc_mult, 2);
     assert_eq!(model.layers.len(), 1);
+    assert_eq!(model.encoder_decoder_split(), (1, 0));
     // A forward over in-vocab ids should produce [b, s, vocab] logits.  The
     // seed helper wires the per-batch token count into each MoE gate first.
     let out = forward_with_token_seed(&mut model, &[0, 1], 1, 2).expect("forward");
@@ -472,9 +473,74 @@ fn missing_engram_tensor_on_engram_layer_is_error() {
         Ok(_) => panic!("expected load to fail"),
         Err(e) => e,
     };
-    assert!(
-        err.contains("Engram") && err.contains("layers.1.engram"),
-        "err: {err}"
+    assert!(err.contains("layers.1.engram.embed.weight"), "err: {err}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn engram_tensors_load_into_runtime_representation() {
+    let cfg = TINY_CONFIG_JSON
+        .replace("\"n_layers\": 1", "\"n_layers\": 2")
+        .replace("\"compress_ratios\": [0]", "\"compress_ratios\": [0, 0]")
+        .replace("\"engram_layer_ids\": []", "\"engram_layer_ids\": [1]")
+        .replace(
+            "\"engram_num_embeddings\": []",
+            "\"engram_num_embeddings\": [4]",
+        );
+    let dir = unique_tmp_dir("engram-loaded");
+    std::fs::write(dir.join("config.json"), cfg).unwrap();
+    let mut tensors = tiny_tensor_map();
+    let layer1: Vec<(String, FixtureTensor)> = tiny_tensor_map()
+        .into_iter()
+        .filter(|(k, _)| k.starts_with("layers.0."))
+        .map(|(k, v)| (k.replacen("layers.0.", "layers.1.", 1), v))
+        .collect();
+    tensors.extend(layer1);
+    tensors.push((
+        "layers.1.engram.q_weight".into(),
+        FixtureTensor::f32_zeros(&[2, 4]),
+    ));
+    tensors.push((
+        "layers.1.engram.k_weight".into(),
+        FixtureTensor::f32_zeros(&[2, 4]),
+    ));
+    tensors.push((
+        "layers.1.engram.embed.weight".into(),
+        FixtureTensor::f32_zeros(&[4, 2]),
+    ));
+    // n_hash_cols=(max_ngram_size - 1) * n_heads = 4, head_dim=2,
+    // out=dim*(hc+1)=12, in=8, stored as torch [out, in].
+    tensors.push((
+        "layers.1.engram.wkv.weight".into(),
+        FixtureTensor::f32_zeros(&[12, 8]),
+    ));
+    write_safetensors(&dir, "model.safetensors", tensors);
+
+    let model = load_text_model(&dir).expect("engram-enabled checkpoint should load");
+    let engram = model.layers[1].engram.as_ref().expect("engram loaded");
+    assert_eq!(
+        engram
+            .embed_weight
+            .as_ref()
+            .unwrap()
+            .inner
+            .borrow()
+            .value
+            .shape
+            .0,
+        vec![4, 2]
+    );
+    assert_eq!(
+        engram
+            .wkv_weight
+            .as_ref()
+            .unwrap()
+            .inner
+            .borrow()
+            .value
+            .shape
+            .0,
+        vec![8, 12]
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -489,6 +555,86 @@ fn converted_tp_shard_loads() {
     // load_text_model auto-discovers the mp shard when no single-file exists.
     let model2 = load_text_model(&dir).expect("auto-discovery of mp shard");
     assert_eq!(model2.layers.len(), 1);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn hf_indexed_checkpoint_loads_public_shard_names() {
+    let dir = unique_tmp_dir("hf-index");
+    std::fs::write(dir.join("config.json"), TINY_CONFIG_JSON).unwrap();
+    let mut shard0 = Vec::new();
+    let mut shard1 = Vec::new();
+    let mut weight_map_entries = Vec::new();
+    for (index, (name, tensor)) in tiny_tensor_map().into_iter().enumerate() {
+        let shard_name = if index % 2 == 0 {
+            shard0.push((name.clone(), tensor));
+            "model-00001-of-00002.safetensors"
+        } else {
+            shard1.push((name.clone(), tensor));
+            "model-00002-of-00002.safetensors"
+        };
+        weight_map_entries.push(format!("    \"{name}\": \"{shard_name}\""));
+    }
+    write_safetensors(&dir, "model-00001-of-00002.safetensors", shard0);
+    write_safetensors(&dir, "model-00002-of-00002.safetensors", shard1);
+    let weight_map = weight_map_entries.join(",\n");
+    let index_json = format!(
+        r#"{{
+  "metadata": {{"total_size": 1}},
+  "weight_map": {{
+{weight_map}
+  }}
+}}"#
+    );
+    std::fs::write(dir.join("model.safetensors.index.json"), index_json).unwrap();
+
+    let model = load_text_model(&dir).expect("hf-indexed checkpoint should load");
+    assert_eq!(model.layers.len(), 1);
+    assert_eq!(model.vocab_size, 5);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn hf_indexed_checkpoint_rejects_unsafe_or_missing_shards() {
+    let dir = unique_tmp_dir("hf-index-bad");
+    std::fs::write(dir.join("config.json"), TINY_CONFIG_JSON).unwrap();
+    std::fs::write(
+        dir.join("model.safetensors.index.json"),
+        r#"{
+  "metadata": {"total_size": 1},
+  "weight_map": {
+    "embed.weight": "../outside.safetensors"
+  }
+}"#,
+    )
+    .unwrap();
+    let err = match load_text_model(&dir) {
+        Ok(_) => panic!("expected unsafe shard path to fail"),
+        Err(e) => e,
+    };
+    assert!(
+        err.contains("shard path must stay within model dir"),
+        "err: {err}"
+    );
+
+    std::fs::write(
+        dir.join("model.safetensors.index.json"),
+        r#"{
+  "metadata": {"total_size": 1},
+  "weight_map": {
+    "embed.weight": "model-00001-of-00048.safetensors"
+  }
+}"#,
+    )
+    .unwrap();
+    let err = match load_text_model(&dir) {
+        Ok(_) => panic!("expected missing indexed shard to fail"),
+        Err(e) => e,
+    };
+    assert!(
+        err.contains("indexed safetensors shard not found"),
+        "err: {err}"
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }
 

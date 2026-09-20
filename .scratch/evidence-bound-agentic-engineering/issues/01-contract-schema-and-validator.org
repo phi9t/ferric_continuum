@@ -1,0 +1,39 @@
+#+TITLE: Define task contract schema and validator
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY:
+#+PARENT: ../spec.org
+
+* Context
+
+Kata issues should point to one committed Task Contract manifest. The contract
+is the parseable execution interface for agents and task tooling.
+
+* Requirements
+
+- Define the TOML schema for Task Contracts.
+- Support modes: ~delivery~, ~remediation~, ~scout~, and ~experiment~.
+- Require mode-specific fields and reject unknown modes.
+- Validate context document paths against a supplied Git commit.
+- Compute a stable contract digest over task title/body pointer, dependency
+  relationships, contract bytes, and referenced Git blobs.
+- Ignore Kata comments and ~work.*~ metadata when computing the digest.
+- Produce clear diagnostics for missing files, untracked context, ambiguous
+  pointers, and malformed fields.
+
+* Out of scope
+
+- Starting worktrees.
+- Writing Kata metadata.
+- Recording run journals.
+- Remote job handling.
+
+* Verification
+
+- Unit tests cover valid minimal contracts for all four modes.
+- Unit tests reject missing required fields, unknown modes, duplicate pointers,
+  missing Git blobs, and untracked authoritative context.
+- A fixture test proves comments and ~work.*~ metadata do not change the digest,
+  while contract pointer or referenced blob changes do.
+
+* Comments

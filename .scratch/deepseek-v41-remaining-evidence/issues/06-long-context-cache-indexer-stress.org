@@ -1,0 +1,99 @@
+#+TITLE: Long-context SWA, CSA2, CED, and indexer stress evidence
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY: 01-baseline-evidence-inventory
+#+PARENT: ../spec.org
+
+* Context
+
+The current tests cover tiny SWA and CSA2 behavior. The release claims depend on
+long-context execution: sliding-window cache wraparound, CED decoder use of
+encoder-derived global KV, CSA2 Full/Reindex/Reuse shared state, and indexer
+Top-K behavior across source layers.
+
+Read first:
+
+- =../spec.org=
+- =ferric_continuum/tnsr/src/deepseek_v41/attention.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/model.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/sparse.rs=
+- =ferric_continuum/tnsr/tests/deepseek_v41_model_test.rs=
+
+* Outcome Packet
+
+Outcome:
+
+- A bounded stress suite proves cache/indexer invariants across prefill and
+  decode positions that cross the SWA window, source-layer, and CED boundaries.
+
+Mode:
+
+- delivery
+
+Non-goals:
+
+- No million-token full model run.
+- No performance benchmark.
+- No native quantized kernels.
+
+Allowed change surfaces:
+
+- DeepSeek V4.1 model/attention/sparse tests and the smallest runtime changes
+  needed to expose verifiable state safely.
+
+* Requirements
+
+- Add reduced-geometry tests that run enough decode steps to wrap
+  =window_size= at least twice.
+- Assert that local SWA reads only the expected causal window after wraparound.
+- Assert CED decoder global KV remains sourced from final encoder hidden state
+  while decoder-local SWA continues to update independently.
+- Assert CSA2 =Full= publishes compressed KV, index K, Top-K, and candidate
+  mask state under the correct source layer.
+- Assert CSA2 =Reindex= recomputes Top-K from cached index K without replacing
+  compressed KV from the KV-source layer.
+- Assert CSA2 =Reuse= reads cached Top-K from the configured index source.
+- Add a receipt describing the reduced geometry, sequence positions, and why it
+  discriminates cache/indexer regressions.
+
+* Acceptance Map
+
+Claim:
+
+- SWA, CSA2, CED, and indexer state remain correct across prefill/decode cache
+  boundaries, not just on one-shot tiny fixtures.
+
+Evidence:
+
+- Focused Rust tests and a receipt with observed source-state counters and
+  position ranges.
+
+Candidate:
+
+- The current commit under test.
+
+Reuse rule:
+
+- Reuse while attention, model, sparse, and related fixtures remain unchanged.
+
+Invalidation rule:
+
+- Any cache, indexer, CED, DSpark prefix, or sparse-attention change reruns this
+  stress suite.
+
+* Verification
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_model_tests=
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_math_tests=
+- =rustfmt --edition 2021 --check ferric_continuum/tnsr/src/deepseek_v41/attention.rs ferric_continuum/tnsr/src/deepseek_v41/model.rs ferric_continuum/tnsr/tests/deepseek_v41_model_test.rs=
+
+* Comments
+
+* Answer
+
+Resolved by =../receipts/06-long-context-cache-indexer-stress.org=.
+
+This run added reduced-geometry SWA cache wraparound coverage and strengthened
+the CED decoder-local SWA cache assertion. The final stress scope is bounded:
+it proves cache/indexer invariants over controlled prefill/decode boundary
+crossings, not a million-token full-model run.

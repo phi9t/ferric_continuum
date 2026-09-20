@@ -1,0 +1,39 @@
+#+TITLE: DeepSeek V4.1 DSpark acceptance-loop decision
+#+TYPE: receipt
+#+STATUS: resolved
+#+PARENT: ../issues/05-dspark-acceptance-loop-decision.org
+
+* Decision
+
+Do not implement a DSpark speculative acceptance loop as part of the
+upstream-faithful DeepSeek V4.1 port.
+
+The current supported boundary is =forward_spec= parity. A native tnsr
+acceptance-loop experiment would need a separate experiment contract with its
+own hypothesis, protocol, metrics, and authorization.
+
+* Evidence
+
+- =ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/generate.py=
+  defines the ordinary generation loop and does not call =forward_spec=.
+- =ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py=
+  documents the DSpark draft head as forward-pass-only in the mirrored
+  reference: "nothing calls forward_spec, so these are read but the
+  speculative-decoding loop itself is out of scope for this repo."
+- =model.py= exposes =Model.forward_spec= and a local smoke block under
+  =if __name__ == \"__main__\"=, which is sufficient to anchor
+  =forward_spec= parity but not an acceptance policy.
+- Current Rust surfaces match this boundary through
+  =DeepSeekV41DsparkHead::try_forward_spec= and the tiny DSpark verifier.
+
+* Verification
+
+- Command:
+  =rg -n \"forward_spec|sample|generate|DSpark|mtp\" ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/generate.py=
+- Result: source inspection found =forward_spec= only in =model.py= and no
+  =forward_spec= call in =generate.py=.
+
+* Invalidation
+
+Refresh this decision after any upstream mirror update or release note that
+adds DSpark speculative generation semantics.

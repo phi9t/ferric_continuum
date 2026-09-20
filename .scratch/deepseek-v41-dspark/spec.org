@@ -1,0 +1,94 @@
+#+TITLE: DeepSeek V4.1 Wave 3: DSpark/MTP speculative-draft forward
+#+TYPE: spec
+#+STATUS: ready-for-agent
+#+PARENT: ../deepseek-v41-flash/spec.org
+
+* Summary
+
+Port the DeepSeek V4.1 DSpark (MTP) draft head to =tnsr= to the Wave-1/2
+evidence bar: source -> config -> op -> layer -> block -> =forward_spec= numeric
+parity on a tiny upstream-executed model, real-checkpoint parity an honest SKIP.
+This collapses the resolved decision map (D1-D4 under =../intent.org=).
+
+The scope is *forward-pass parity only*. Upstream ships =forward_spec= but the
+released =generate.py= never calls it, so there is no speculative-decoding loop
+to match and none is built (Non-goals).
+
+* Parity contract (D1)
+
+- Numeric gate is deterministic: =forward_head='s= per-draft full-vocab =logits=
+  (after Markov bias) and the =confidence= scalar/vector. Gates: logits cosine
+  >= 0.999, top-1 match, top-5 overlap >= 4; confidence =max_abs_diff= within a
+  tight tolerance.
+- =output_ids= are excluded from the gate. Both sides force =sample -> argmax=
+  (temperature 0) so the Markov bias walks the same fixed token sequence.
+
+* Executed vs represented (D2)
+
+- Executes on CPU/f32: =forward_embed= (main_proj/main_norm + draft embed),
+  DSpark decode block (attn + MoE + HC, reusing Wave-1/2 seams), DSpark
+  sparse-window attention (reusing the Wave-1 CPU sparse-window helper +
+  =get_dspark_topk_idxs= + main_kv seeding), Markov head bias walk, confidence
+  head (fp32 end-to-end).
+- Represented only (out of gate): FP8/FP4 native kernels (Wave 4), and the
+  =window_kv_cache= as a long multi-step rolling cache (harness runs one
+  prefill + one decode + one =forward_spec=).
+
+* Loader and config (D3)
+
+- Rename =DeepSeekV41DeferredDsparkConfig= -> =DeepSeekV41DsparkConfig= (no
+  in-tree callers of the old name; straight rename).
+- New =DeepSeekV41DsparkHead { stages: Vec<DeepSeekV41DsparkStage> }=; each stage
+  is a =DeepSeekV41Block= plus optional =main_proj/main_norm= (stage 0) and
+  optional =markov_head/confidence_head/norm= (last stage).
+- New =load_dspark_head(dir) -> Result<Option<DeepSeekV41DsparkHead>, String>=:
+  =None= when =dspark_block_size == 0=. Reuses the backbone block loader on the
+  =mtp.N.= prefix; MTP expert counts come from =get_moe_config(layer >=
+  n_layers)= (=dspark_n_routed_experts or n_routed_experts=).
+- Text/multimodal loaders keep ignoring =mtp.*= -> Waves 1-2 tests unchanged.
+
+* Reference harness and determinism (D4)
+
+- Extend =tools/deepseek_v41_reference.py= with =--emit-tiny-dspark-checkpoint=
+  and a =--dspark= mode: build tiny DSpark-enabled =ModelArgs=, run prefill
+  =forward=, one decode step, then =forward_spec=; emit logits + confidence in
+  the Wave-1 JSON schema. Monkeypatch =sample -> argmax= and record it in
+  =kernel_patch=.
+- Reuse =deepseek_v41_compare_logits.py= for logits; add a =--confidence= check
+  with the same 0/1/2 (PASS/FAIL/ERROR) exit scheme.
+- New =tools/verify_deepseek_v41_dspark_compat.sh= mirroring the fortified
+  text/multimodal verifiers: P0 self-checks, HF preflight -> SKIP, Bazel op/model
+  levels, tiny =forward_spec= parity PASS, real-checkpoint parity SKIP.
+- No user-facing speculative CLI flag; the =forward_spec= dump is driven by a
+  fixture/test path. Text/multimodal CLI keeps rejecting speculative flags.
+
+* Non-goals
+
+- No speculative-decoding generation loop (upstream ships none).
+- No production FP8/FP4 kernels (Wave 4).
+- No distributed all-reduce; single-process only.
+- No change to =DeepSeekV41TextModel= public shape.
+
+* Implementation waves and tickets
+
+** Wave 3A: DSpark ops + config
+- [[file:issues/W3-01-dspark-config-and-source-verifier.org][W3-01]]
+- [[file:issues/W3-02-dspark-attention-and-heads-fixtures.org][W3-02]]
+
+** Wave 3B: DSpark head model + loader
+- [[file:issues/W3-03-dspark-head-model-forward_spec.org][W3-03]]
+- [[file:issues/W3-04-dspark-checkpoint-loader.org][W3-04]]
+
+** Wave 3C: parity + closure
+- [[file:issues/W3-05-dspark-parity-harness-and-closure.org][W3-05]]
+
+* Acceptance
+
+Wave 3 is complete only when:
+- All W3 tickets are resolved.
+- =forward_spec= tiny parity passes (logits + confidence) via the fortified
+  comparator; real-checkpoint parity is a documented SKIP.
+- Source/config/op/model verifiers pass without weights.
+- Text/multimodal paths and their tests are unchanged and still reject
+  speculative inputs.
+- Focused Bazel tests pass under =bazel=.

@@ -1,0 +1,49 @@
+#+TITLE: TODO DSpark DeepSeek V4.1 wave
+#+TYPE: task
+#+STATUS: ready-for-human
+#+BLOCKED_BY: 09-text-compatibility-closure
+#+PARENT: ../spec.org
+
+* Context
+
+This is a placeholder TODO wave for DSpark/MTP speculative decoding after
+text-only logits compatibility is proven. The upstream reference defines the
+forward pieces but =generate.py= does not call =forward_spec=, so this needs a
+separate design pass before implementation.
+
+Read first:
+
+- =../spec.org=
+- =../research/upstream-architecture.md=
+- =../upstream/inference/model.py= classes =DSparkAttention=, =DSparkBlock=,
+  =DSparkMarkovHead=, and =DSparkConfidenceHead=.
+
+* Requirements
+
+- Before implementation, split this TODO into fresh design/spec tickets.
+- Cover:
+  - DSpark/MTP config parser review
+  - checkpoint namespace support under =mtp.*=
+  - cache seeding during prefill
+  - DSpark attention for decode
+  - Markov head parity
+  - confidence head parity
+  - =forward_spec= parity against upstream
+  - integration decision for generation loop usage
+
+* Out of scope
+
+- Do not implement this as part of Wave 1 text logits compatibility.
+- Do not expose speculative decoding flags in the Wave 1 CLI except as explicit
+  rejected inputs.
+
+* Verification
+
+Future DSpark wave must provide source, config, op, layer, block, and
+=forward_spec= parity verifiers. It must also distinguish upstream-supported
+forward parity from generation-loop behavior, because the released
+=generate.py= does not exercise =forward_spec=.
+
+* Comments
+
+- This ticket exists to keep the TODO visible without expanding the first wave.

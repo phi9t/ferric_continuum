@@ -1,0 +1,54 @@
+#+TITLE: W3-05 DSpark forward_spec parity harness + closure
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: W3-04-dspark-checkpoint-loader
+#+PARENT: ../spec.org
+
+* Context
+
+Prove tiny =forward_spec= parity end-to-end and close out Wave 3, mirroring the
+fortified text/multimodal verifiers.
+
+Read first: =../spec.org=, =../issues/D1-parity-contract.org=,
+=../issues/D4-reference-harness-determinism.org=, the existing
+=tools/deepseek_v41_reference.py=, =tools/deepseek_v41_compare_logits.py=, and
+=tools/verify_deepseek_v41_{text,multimodal}_compat.sh=.
+
+* Requirements
+
+- Extend =deepseek_v41_reference.py= with =--emit-tiny-dspark-checkpoint= and a
+  =--dspark= mode: tiny DSpark-enabled =ModelArgs=, prefill =forward= -> decode
+  step -> =forward_spec=; emit last-draft-position logits (full row) +
+  =confidence= in the Wave-1 JSON schema, with =kernel_patch= recording
+  =sample->argmax= plus the raising FP8/FP4 stubs.
+- Extend =deepseek_v41_compare_logits.py= with a =--confidence= check:
+  =max_abs_diff= within a tight tolerance, reusing the 0/1/2 (PASS/FAIL/ERROR)
+  exit scheme and the finite/schema guards.
+- New =tools/verify_deepseek_v41_dspark_compat.sh= mirroring the fortified
+  verifiers: P0 comparator + source self-tests; HF_PYTHON preflight ->
+  reference-dependent levels SKIP honestly; Bazel config/op/model levels; tiny
+  =forward_spec= parity (emit tiny mtp.* checkpoint the loader reads, dump Rust
+  logits+confidence, run reference, compare); real-checkpoint parity SKIP unless
+  =DEEPSEEK_V41_MODEL_DIR=/=MODEL_DIR= set. Never present SKIP as PASS.
+- Wire the tiny =forward_spec= dump: prefer a small Rust test/fixture dumper over
+  a user-facing CLI flag (D4). The text/multimodal CLI keeps rejecting
+  speculative flags.
+- Closure: append resolution notes with command evidence to W3-01..W3-05 and to
+  =../../deepseek-v41-flash/spec.org= Wave-3 section; flip =issues/11-todo-
+  dspark-v41.org= to resolved pointing at this effort. Standards + Spec review
+  of the diff. No commit/push/merge unless explicitly authorized.
+
+* Out of scope
+
+- No generation loop. No FP8/FP4 native kernels. No TP merge.
+
+* Verification
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_{config,math,model}_tests=
+  green.
+- =tools/verify_deepseek_v41_dspark_compat.sh= -> P0 + config/op/model PASS,
+  tiny =forward_spec= parity PASS (logits cosine >= 0.999, top-1 match, top-5 >=
+  4, confidence within tolerance), real-checkpoint parity SKIP.
+- =python3 -m py_compile= on changed tools; =rustfmt= on changed Rust.
+
+* Comments

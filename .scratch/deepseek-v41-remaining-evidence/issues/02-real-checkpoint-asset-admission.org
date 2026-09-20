@@ -1,0 +1,107 @@
+#+TITLE: Real checkpoint asset admission for DeepSeek V4.1
+#+TYPE: task
+#+STATUS: ready-for-human
+#+BLOCKED_BY: 01-baseline-evidence-inventory
+#+PARENT: ../spec.org
+
+* Context
+
+The current verifier scripts honestly skip real-checkpoint parity when
+=DEEPSEEK_V41_MODEL_DIR= or =MODEL_DIR= is missing. Before parity work can be
+trusted, the local release assets need their own admission receipt.
+
+Read first:
+
+- =../spec.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/research/upstream-architecture.md=
+- =ferric_continuum/tnsr/src/deepseek_v41/config.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/checkpoint_io.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/load.rs=
+
+* Outcome Packet
+
+Outcome:
+
+- A local model directory is either admitted as the DeepSeek V4.1 release
+  checkpoint or rejected with exact missing/mismatched evidence.
+
+Mode:
+
+- scout
+
+Non-goals:
+
+- No automatic download of 510GB weights.
+- No numeric parity claim.
+- No mutation of model assets.
+
+Allowed change surfaces:
+
+- Add a small asset-inspection tool if the existing verifier cannot produce a
+  reusable receipt.
+- Add receipt docs under this effort.
+
+Allowed external effects:
+
+- Read-only filesystem access to the configured model directory.
+
+Escalation conditions:
+
+- Model directory is absent.
+- Shard count, total_size, config family, or critical tensor namespace differs
+  from the mirrored release index.
+- Asset hashing would exceed the agreed time or I/O budget.
+
+* Requirements
+
+- Resolve =DEEPSEEK_V41_MODEL_DIR= / =MODEL_DIR= exactly.
+- Verify =config.json= parses as DeepSeek V4.1 and matches the mirrored release
+  family.
+- Verify =model.safetensors.index.json= has expected shard count and no unsafe
+  shard paths.
+- Verify every listed shard exists, is a regular file, and is readable.
+- Record index hash, config hash, shard count, total byte size, and enough shard
+  hashes or stat data to bind later parity receipts to the same assets.
+- Confirm representative text, vision, Engram, DSpark, FP8, and FP4 tensor
+  names are present through the index.
+
+* Acceptance Map
+
+Claim:
+
+- The local assets are the intended DeepSeek V4.1 release candidate input.
+
+Evidence:
+
+- Receipt containing candidate commit, model-dir path, config/index digest,
+  shard inventory, namespace probes, command line, and exit code.
+
+Candidate:
+
+- The current code commit plus the admitted model-dir identity.
+
+Reuse rule:
+
+- Reuse only for the same model-dir path, config digest, index digest, shard
+  count, shard sizes, and relevant loader code.
+
+Invalidation rule:
+
+- Any model asset, config, index, or loader/checkpoint I/O change requires a new
+  admission receipt.
+
+* Verification
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests=
+- =DEEPSEEK_V41_MODEL_DIR=/path/to/model ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh= should reach the real-loader smoke level without asset-admission failures. Numeric real parity may still SKIP until ticket 03.
+
+* Comments
+
+* Answer
+
+Deferred to human-owned asset provisioning. See
+=../receipts/02-real-checkpoint-asset-admission.org=.
+
+This run did not set =DEEPSEEK_V41_MODEL_DIR= or =MODEL_DIR= and did not
+download the 510GB checkpoint. The real-checkpoint verifier levels therefore
+remain honest SKIPs until an already-provisioned model directory is supplied.

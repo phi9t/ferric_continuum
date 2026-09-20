@@ -1,0 +1,193 @@
+#+TITLE: DeepSeek V4.1 remaining evidence and production closure
+#+TYPE: spec
+#+STATUS: ready-for-human
+#+PARENT: ../../ferric_continuum/tnsr/docs/deepseek_v41/spec.org
+
+* Summary
+
+This effort uses the evidence-bound agentic engineering method to define the
+remaining DeepSeek V4.1 work after the current CPU/tiny-fixture implementation.
+The already-landed work covers the requested architecture concepts at source and
+tiny-runtime level: CED, Engram, CSA2, the DeepSeek V4 CSA contrast, the
+V3.2-origin indexer lineage with current V4.1 behavior, sliding-window
+attention, and DSpark MTP.
+
+Execution contract:
+
+- Contract: =contract.toml=
+
+The remaining work is not to re-open those as vague implementation tasks. The
+remaining work is to produce stronger evidence for release use:
+
+- real released-weight parity for text, multimodal, and DSpark paths;
+- native quantized FP8/FP4 execution instead of eager f32 dequantization;
+- tensor-parallel serving parity beyond static shard-layout checks;
+- long-context cache/indexer stress evidence for SWA, CSA2, and CED;
+- an explicit DSpark acceptance-loop decision based on upstream behavior;
+- the lower-priority architecture-deepening follow-ups left by ticket 29;
+- a final release-candidate evidence packet that separates completion from
+  publication.
+
+* Existing Baseline
+
+These records are treated as the starting evidence, not as claims that release
+closure is complete:
+
+- =ferric_continuum/tnsr/docs/deepseek_v41/spec.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/research/upstream-architecture.md=
+- =.scratch/deepseek-v41-faithful-coverage/spec.org=
+- =.scratch/deepseek-v41-faithful-coverage/issues/01-source-coverage-gate.org=
+- =.scratch/deepseek-v41-faithful-coverage/issues/08-faithful-parity-closure.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/20-multimodal-parity-harness-and-closure.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/25-dspark-parity-harness-and-closure.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/27-cuda-gated-forward-parity.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/28-perf-device-closure.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/29-architecture-hardening-production-readiness.org=
+
+Verified baseline claims already recorded there:
+
+- source manifest claims cover CED, Engram, CSA2, DeepSeek V4 CSA contrast,
+  indexer lineage/current behavior, SWA, DSpark MTP, multimodal, FP4 main-KV,
+  and release-shard metadata;
+- CPU tiny parity exists for text, multimodal, and DSpark;
+- GPU-gated tiny forward agreement exists for a small DeepSeek V4.1 model;
+- real-checkpoint parity remains an honest SKIP without local release weights;
+- native FP8/FP4 kernels and tensor-parallel serving parity remain deferred.
+
+* Outcome Packet
+
+Outcome:
+
+- DeepSeek V4.1 in =tnsr= has a release-candidate evidence package that states
+  exactly which claims are proven against local source, tiny fixtures, GPU
+  execution, real released weights, tensor-parallel serving, and long-context
+  behavior.
+
+Why this matters:
+
+- The current implementation is inspectable and source-grounded, but production
+  use needs candidate-bound evidence on the same surfaces users will exercise:
+  real checkpoints, device execution, cache growth, quantized kernels, and
+  serving topology.
+
+Mode:
+
+- The whole effort is a gated delivery program made of delivery, scout, and
+  experiment tickets. A scout may close with "unknown" when it produces bounded
+  evidence and follow-up tickets.
+
+Non-goals:
+
+- No public release, push, merge, or external publication without explicit
+  human authorization.
+- No claim that tiny-fixture parity proves real released-weight parity.
+- No claim that the CPU f32 dequantized path proves native FP8/FP4 performance.
+- No speculative decoding acceptance loop unless ticket 05 explicitly finds an
+  upstream-faithful contract or the human approves a tnsr-native experiment.
+
+Authoritative context:
+
+- =CONSTITUTION.md=
+- =docs/agents/agentic-engineering.md=
+- =docs/agents/evidence-bound-method.md=
+- =docs/agents/task-runs.md=
+- =docs/agents/issue-tracker.org=
+- =ferric_continuum/tnsr/CONTEXT.md=
+- =ferric_continuum/tnsr/docs/deepseek_v41/spec.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/research/upstream-architecture.md=
+- =ferric_continuum/tnsr/third_party/deepseek_v41/upstream/=
+
+Allowed change surfaces:
+
+- DeepSeek V4.1 Rust modules under
+  =ferric_continuum/tnsr/src/deepseek_v41/=
+- DeepSeek V4.1 tests under =ferric_continuum/tnsr/tests/=
+- DeepSeek V4.1 tools under =ferric_continuum/tnsr/tools/=
+- Bazel targets in =ferric_continuum/tnsr/BUILD.bazel=
+- DeepSeek V4.1 docs and tracker files under
+  =ferric_continuum/tnsr/docs/deepseek_v41/= and this effort directory
+
+Allowed external effects:
+
+- Local Bazel builds/tests.
+- Local GPU tests when a GPU is present.
+- Local reads of an already-provisioned =DEEPSEEK_V41_MODEL_DIR= or =MODEL_DIR=.
+- No automatic download of the 510GB release checkpoint unless separately
+  authorized.
+
+Completion and promotion rules:
+
+- Each ticket records its candidate, evidence, skipped gates, and invalidation
+  conditions.
+- The final release-candidate ticket reconciles all lower tickets.
+- =task-finish= style completion is not publication. Merge, push, and release
+  remain human-authorized promotions.
+
+* Uncertainty Ledger
+
+| Question | Current evidence | Consequence if wrong | Next discriminating action | Status |
+|-
+| Can the Rust loader consume the real 48-shard release without exhausting memory or mis-reading quantized tensors? | HF index parsing and tiny indexed-shard fixtures pass; real checkpoint is not local in the recorded closure. | Tiny parity could hide release-only namespace, dtype, shard, or memory failures. | Run an asset-admission scout and a loader smoke receipt against local release weights. | unknown |
+| Does the text path numerically match the real released checkpoint? | Tiny text parity passes; real parity is SKIP because no faithful CPU reference and no local weights were configured. | Release logits may drift despite green tiny fixtures. | Produce a candidate-bound real text parity protocol and execute it where weights/runtime exist. | unknown |
+| Does the multimodal path match real image prompts with released weights? | Tiny multimodal parity passes; B200/real parity can SKIP. | Image merge, VL bias, or vision tensors may be correct only for tiny fixtures. | Run real multimodal parity/smoke under an explicit model-dir and image-fixture contract. | unknown |
+| Does DSpark MTP match the real release beyond the tiny forward_spec fixture? | Tiny DSpark parity passes; real DSpark parity is SKIP. | MTP namespace or stage/cache behavior may diverge under full geometry. | Add real DSpark parity/smoke and classify the missing acceptance loop separately. | unknown |
+| Are SWA, CSA2, CED, and indexer caches robust over long decode positions? | Unit tests exercise mode behavior and tiny decode; no 1M-context stress receipt is recorded. | Ring/cache/index assumptions can fail only after wraparound or cross-source reuse. | Run bounded long-context/cache stress with reduced geometry and explicit invariants. | unknown |
+| Can native FP8/FP4 execution replace f32 dequantization safely? | Checkpoint I/O records quant kind and dequantizes to f32; source manifest pins FP4 main-KV semantics. | Performance claims are unproven and memory footprint differs from the release design. | Build native quantized kernel path behind an opt-in gate with CPU/dequant agreement tests. | unknown |
+| Is tensor-parallel serving behavior correct? | Static TP shard-layout validation and one-shard fixtures exist; no serving parity. | Single-process results may not predict multi-rank serving behavior. | Add a local TP serving experiment with fixed candidate and evidence receipts. | unknown |
+| Are the DeepSeek V4.1 module boundaries deep enough for future agents? | Ticket 29 extracted checkpoint I/O but left C2, C3, C5, and C6 follow-ups. | Future work may keep editing large coupled modules and reintroduce behavior drift. | Split the remaining seams with behavior-preserving tests. | inferred |
+
+* Acceptance Map
+
+Every ticket must preserve the existing baseline commands and add its own
+candidate-bound evidence. Use
+=bazel= for Bazel commands unless a
+ticket states otherwise.
+
+| Claim | Evidence | Candidate | Reuse rule | Invalidation rule |
+|-
+| Baseline source/tiny coverage still holds. | =verify_deepseek_v41_sources.sh=, focused Bazel tests, text/multimodal/DSpark verifier summaries. | Current commit or issue branch. | Reuse only while DeepSeek source/tests/tools are unchanged. | Any changed DeepSeek source, fixture, verifier, or upstream mirror reruns the affected level. |
+| Real checkpoint assets are admissible. | Asset receipt with shard count, total size, hashes/index match, no unsafe paths. | Local model directory identity. | Reuse while path, index hash, shard hashes, and loader code are unchanged. | Any shard/index/config/loader change invalidates. |
+| Real text/multimodal/DSpark claims are proven or explicitly not claimable. | Numeric parity where reference exists; otherwise loader smoke plus SKIP reason. | Exact commit plus model-dir receipt. | Reuse only for the same commit, model assets, prompt/input, runtime, and verifier version. | Any source, weights, prompt, runtime, or comparator change invalidates. |
+| Native FP8/FP4 execution agrees with f32/dequant baseline. | CPU/dequant versus native CUDA agreement tests and finite-value guards. | Quantized-kernel candidate commit. | Reuse only for same GPU arch, driver/runtime, inputs, and commit. | Kernel, dtype, scale, cache layout, or CUDA runtime change invalidates. |
+| Tensor-parallel serving is faithful. | Multi-rank/local simulation or process receipt comparing TP result to single-process reference. | TP serving candidate and launch config. | Reuse only for same world size, sharding map, checkpoint, and candidate. | Any partitioning, collective, checkpoint, or launch change invalidates. |
+| Release candidate is acceptable for human promotion. | Final evidence packet reconciles all tickets and names residual SKIPs. | Clean committed range. | No reuse after any candidate commit changes. | Any commit, dirty tree, failed review, or unreconciled SKIP invalidates. |
+
+* Tickets
+
+- [[file:issues/01-baseline-evidence-inventory.org][01-baseline-evidence-inventory]]
+- [[file:issues/02-real-checkpoint-asset-admission.org][02-real-checkpoint-asset-admission]]
+- [[file:issues/03-real-text-and-multimodal-parity.org][03-real-text-and-multimodal-parity]]
+- [[file:issues/04-real-dspark-mtp-parity.org][04-real-dspark-mtp-parity]]
+- [[file:issues/05-dspark-acceptance-loop-decision.org][05-dspark-acceptance-loop-decision]]
+- [[file:issues/06-long-context-cache-indexer-stress.org][06-long-context-cache-indexer-stress]]
+- [[file:issues/07-native-quantized-fp8-fp4-execution.org][07-native-quantized-fp8-fp4-execution]]
+- [[file:issues/08-tensor-parallel-serving-parity.org][08-tensor-parallel-serving-parity]]
+- [[file:issues/09-architecture-deepening-followups.org][09-architecture-deepening-followups]]
+- [[file:issues/10-release-candidate-evidence-packet.org][10-release-candidate-evidence-packet]]
+
+* Dependency Order
+
+- Ticket 01 is the baseline for all other tickets.
+- Ticket 02 blocks tickets 03, 04, and 08.
+- Tickets 03, 04, 06, 07, 08, and 09 may run independently after their stated
+  blockers.
+- Ticket 05 may run after ticket 01 because it is a scout decision, not a
+  delivery implementation.
+- Ticket 10 waits for tickets 03 through 09 or for explicit deferral decisions.
+
+* Verification
+
+Spec-only verification for this effort:
+
+- =rg -n "DeepSeek V4\\.1 remaining evidence" .scratch/deepseek-v41-remaining-evidence=
+- =find .scratch/deepseek-v41-remaining-evidence/issues -type f | sort=
+- =git diff --check -- .scratch/deepseek-v41-remaining-evidence ferric_continuum/tnsr/docs/deepseek_v41/spec.org=
+
+Implementation tickets define their own stronger gates.
+
+* Comments
+
+- This effort deliberately keeps the current faithful-coverage kata closed. New
+  evidence gaps live here so done tickets keep their historical meaning.
+- Contracts are represented in ticket bodies until the task-contract manifest
+  tooling from =.scratch/evidence-bound-agentic-engineering/= exists.

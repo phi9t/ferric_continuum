@@ -23,7 +23,8 @@
 #   DEEPSEEK_V41_MODEL_DIR / MODEL_DIR  real checkpoint dir (optional)
 #   HF_PYTHON   python with torch+numpy+safetensors
 #               (default: main-checkout .venv-hf; worktrees lack it)
-#   OUT_DIR     scratch dir for JSON dumps (default: /tmp/dsv41_text_compat)
+#   OUT_DIR     scratch dir for JSON dumps
+#               (default: $TMPDIR/deepseek-v41-text-compat)
 #   BAZEL       bazel binary (default: bazel; version pinned by .bazelversion)
 set -uo pipefail
 
@@ -33,7 +34,7 @@ cd "$REPO_ROOT"
 # The CPU venv lives in the MAIN checkout, not in worktrees. Default to it.
 MAIN_VENV="${HOME}/workspace/ferric_continuum/.venv-hf/bin/python"
 HF_PYTHON="${HF_PYTHON:-$MAIN_VENV}"
-OUT_DIR="${OUT_DIR:-/tmp/dsv41_text_compat}"
+OUT_DIR="${OUT_DIR:-${TMPDIR:-/tmp}/deepseek-v41-text-compat}"
 BAZEL="${BAZEL:-bazel}"
 TOOLS="$REPO_ROOT/ferric_continuum/tnsr/tools"
 MODEL_DIR="${DEEPSEEK_V41_MODEL_DIR:-${MODEL_DIR:-}}"
@@ -74,11 +75,15 @@ fi
 # ---------------------------------------------------------------------------
 # Preflight self-check: prove the logits comparator actually bites (identical
 # PASSes, perturbed FAILs, non-finite ERRORs). A parity gate that cannot fail
-# is worthless; this negative control guards against that. numpy-only, so it
-# runs with the system python even when HF_PYTHON is absent.
+# is worthless; this negative control guards against that. The comparator
+# imports numpy, so run it through the same interpreter validated for reference
+# work.
 # ---------------------------------------------------------------------------
 echo "==> Preflight: comparator negative control (self-test)"
-if python3 "$TOOLS/deepseek_v41_compare_logits.py" --self-test >/dev/null 2>&1; then
+if [ "$HF_OK" -eq 0 ]; then
+  echo "    SKIP: no numpy-capable interpreter ($HF_REASON); cannot run comparator self-test."
+  record "P0-comparator-selftest" SKIP
+elif "$HF_PYTHON" "$TOOLS/deepseek_v41_compare_logits.py" --self-test >/dev/null 2>&1; then
   record "P0-comparator-selftest" PASS
 else
   echo "    FAIL: comparator self-test did not behave (perturbed row not rejected)."

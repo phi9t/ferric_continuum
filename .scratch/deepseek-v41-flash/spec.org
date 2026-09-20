@@ -1,0 +1,442 @@
+#+TITLE: DeepSeek V4.1 Flash tnsr implementation spec
+#+TYPE: spec
+#+STATUS: ready-for-agent
+#+PARENT: intent.org
+
+* Goal
+
+Implement DeepSeek V4.1 Flash in =ferric_continuum/tnsr= as an inspectable,
+text-only causal-LM path first, with a verifier ladder that proves the Rust
+implementation stays compatible with the upstream paper/model-card claims, the
+Hugging Face checkpoint metadata, and DeepSeek's released inference code.
+
+The first implementation wave must produce text logits. Multimodal image input
+and DSpark speculative decoding remain explicit TODO waves.
+
+* Sources
+
+Primary sources already mirrored under this effort:
+
+- =.scratch/deepseek-v41-flash/upstream/README.md=
+- =.scratch/deepseek-v41-flash/upstream/DeepSeek_V41_Tech_Report.txt=
+- =.scratch/deepseek-v41-flash/upstream/config.json=
+- =.scratch/deepseek-v41-flash/upstream/tokenizer_config.json=
+- =.scratch/deepseek-v41-flash/upstream/model.safetensors.index.json=
+- =.scratch/deepseek-v41-flash/upstream/inference/config.json=
+- =.scratch/deepseek-v41-flash/upstream/inference/model.py=
+- =.scratch/deepseek-v41-flash/upstream/inference/convert.py=
+- =.scratch/deepseek-v41-flash/upstream/inference/engram.py=
+- =.scratch/deepseek-v41-flash/upstream/inference/generate.py=
+- =.scratch/deepseek-v41-flash/upstream/encoding/encoding.py=
+
+Research summary:
+
+- =.scratch/deepseek-v41-flash/research/upstream-architecture.md=
+
+Local precedent:
+
+- =ferric_continuum/tnsr/src/qwen3.rs=
+- =ferric_continuum/tnsr/src/qwen3_load.rs=
+- =ferric_continuum/tnsr/src/bin/qwen3_infer.rs=
+- =ferric_continuum/tnsr/tools/hf_reference.py=
+- =ferric_continuum/tnsr/tools/compare_logits.py=
+- =ferric_continuum/tnsr/tools/verify_hf_compat.sh=
+
+* Scope
+
+** Wave 0: source evidence and verifier fixtures
+
+Create durable source-manifest fixtures that encode the exact upstream facts
+the implementation must satisfy. These fixtures are not a replacement for the
+paper or upstream code; they are a local, testable index of cited claims.
+
+Required verifiers:
+
+- A paper/model-card claim verifier checks that the local source manifest still
+  agrees with the mirrored README and technical report facts used by this
+  implementation.
+- A config verifier checks nested Hugging Face =config.json= and flat
+  =inference/config.json= against the expected DeepSeek V4.1 text fields.
+- A safetensors-index verifier checks the release checkpoint namespace and
+  shard map without downloading hundreds of GB of weight data.
+- A source-surface verifier checks that the upstream inference code still
+  exposes the functions/classes relied on by parity fixtures.
+
+** Wave 1: text-only implementation
+
+Implement the text causal-LM path:
+
+- Text config parser for both HF nested config and DeepSeek inference config.
+- Interleaved YaRN RoPE matching upstream =apply_rotary_emb=.
+- Sliding-window sparse attention indices.
+- Compressed KV compressor and indexer metadata/seams.
+- Latent attention with =wq_a=, =q_norm=, =wq_b=, =wkv=, =kv_norm=,
+  =attn_sink=, grouped =wo_a=, and =wo_b=.
+- MoE gate with =sqrtsoftplus= scoring, correction bias, unbiased routing
+  weights, =norm_topk_prob=, and =routed_scaling_factor=.
+- Routed and shared SwiGLU experts with =swiglu_limit= clamps.
+- Hyper-Connection residual copies and Sinkhorn-derived pre/post/comb mixes.
+- Engram compressed-token map, hash layout, n-gram hash state, lookup module,
+  and residual update for text tokens.
+- Text transformer forward: embedding -> HC expansion -> 40 text blocks ->
+  collapse -> final RMSNorm -> head logits.
+- Loader support for the DeepSeek checkpoint namespace, with explicit handling
+  of HF/converted names, transposes, TP shard dimensions, FP8 scales, FP4
+  expert packing, Engram tables, and unsupported surfaces.
+- CLI and verifier tooling modeled after =qwen3_infer=, including
+  =--token-ids= and =--dump-logits=.
+
+Wave 1 may use CPU/f32 dequantized math for inspectability. It does not need to
+be fast enough for production serving, but verifier fixtures must bound the
+numeric drift introduced by dequantization and by any pure-Rust reference
+fallback.
+
+** Wave 2: multimodal TODO
+
+TODO after text logits pass:
+
+- Vision config parser and source verifier.
+- ViT patch embedding, 2D RoPE, downsample/aligner path.
+- Image token span processing and learned image delimiter embeddings.
+- Text/vision merge semantics and image-mask routing bias.
+- Multimodal prompt encoding parity against upstream =encoding.py= and
+  =image_processor.py=.
+
+** Wave 3: DSpark TODO
+
+TODO after text logits pass:
+
+- DSpark/MTP config parser and checkpoint namespace support.
+- DSpark attention, Markov head, confidence head, and cache seeding.
+- =forward_spec= parity against upstream for decode-only speculative drafts.
+- Integration with any later generation loop.
+
+** Wave 4: performance and device TODO
+
+TODO after correctness:
+
+- Native quantized kernels for FP8/FP4 instead of eager dequantized CPU math.
+- CUDA verifier integration under =--config=cuda=.
+- Tensor-parallel serving parity beyond static shard-layout validation.
+
+* Non-goals for Wave 1
+
+- No vision/image execution.
+- No DSpark speculative decoding execution.
+- No distributed all-reduce execution; tensor-parallel shard rules are validated
+  and represented, but Wave 1 executes a local single-process model.
+- No production-speed FP8/FP4 kernels.
+- No silent fallback that changes logits. Unsupported inputs must fail loudly.
+
+* Text-only architecture contract
+
+** Config
+
+The Rust config types must preserve all upstream text fields even if a field is
+only used by a later wave. Required text fields include:
+
+- =vocab_size= 129280
+- =hidden_size= / =dim= 5120
+- =moe_intermediate_size= / =moe_inter_dim= 2304
+- =num_hidden_layers= / =n_layers= 40
+- =num_attention_heads= / =n_heads= 64
+- =num_key_value_heads= 1
+- =head_dim= 512
+- =qk_rope_head_dim= / =rope_head_dim= 64
+- =q_lora_rank= 1280
+- =o_lora_rank= 1024
+- =o_groups= 8
+- =rms_norm_eps= / =norm_eps= 1e-20
+- =rope_theta= 10000
+- =rope_scaling.factor= / =rope_factor= 16
+- =rope_scaling.original_max_position_embeddings= / =original_seq_len= 65536
+- =beta_fast= 32 and =beta_slow= 1
+- =sliding_window= / =window_size= 128
+- full =compress_ratios=
+- =compress_rope_theta= 160000
+- =kv_source_layer_ids= / =kv_source_layers= [2,8,14,20]
+- =index_source_layer_ids= / =index_source_layers= [2,8,14,20,24,28,32,36]
+- =index_n_heads= 32
+- =index_head_dim= 128
+- =index_topk= 512
+- =candidate_source_layer_id= / =candidate_source_layer= 20
+- =candidate_topk_blocks= 2048
+- =candidate_block_size= 8
+- =hc_mult= 4
+- =hc_sinkhorn_iters= 20
+- =hc_eps= 1e-6
+- =n_routed_experts= 384
+- =n_shared_experts= 1
+- =num_experts_per_tok= / =n_activated_experts= 6
+- =scoring_func= / =score_func= sqrtsoftplus
+- =norm_topk_prob= true
+- =routed_scaling_factor= / =route_scale= 1.5
+- =swiglu_limit= 10.0
+- =engram_layer_ids= [1,14]
+- =engram_num_embeddings= [384006168,384016682]
+- =engram_max_ngram_size= 4
+- =engram_vocab_size= 16000000
+- =engram_n_heads= 8
+- =engram_head_dim= 256
+- =engram_pad_token_id= / =engram_pad_id= 2
+- =engram_compressed_vocab_size= 99092
+
+** RoPE
+
+DeepSeek V4.1 text RoPE uses adjacent element pairs as complex numbers. The
+Qwen3 half-split loader-side permutation must not be copied into this path.
+
+YaRN behavior must match upstream =precompute_freqs_cis=: dimensions whose
+wavelength fits the original context keep the base frequency, long wavelengths
+are divided by =factor=, and the =beta_fast= to =beta_slow= band is faded by a
+linear ramp.
+
+** Attention
+
+Attention is latent and sparse:
+
+- Query path: =wq_a -> q_norm -> wq_b -> [B,S,H,head_dim]=.
+- KV path: =wkv -> kv_norm -> [B,S,head_dim]=, with RoPE only over the
+  =rope_head_dim= tail.
+- Sliding-window KV is causal and ring-buffered.
+- Compressed KV is produced only by source layers. Consumers reuse the shared
+  compressed cache and top-k index choices.
+- Index source layers publish Top-K compressed positions. Later reuse layers
+  read the published indices.
+- Candidate source layer 20 creates a block-level candidate mask for later
+  indexers.
+- Output projection is grouped low-rank: reshape heads into =o_groups=,
+  apply grouped =wo_a=, then =wo_b= back to =dim=.
+
+** MoE
+
+MoE must preserve the upstream routing distinction:
+
+- Expert selection uses =scores + correction_bias=.
+- Expert weights use raw =scores= gathered at selected indices.
+- =sqrtsoftplus= scoring is =sqrt(softplus(linear(x)/gate_temp))=.
+- =norm_topk_prob= normalizes selected weights with =+1e-20=.
+- Selected weights are multiplied by =route_scale=.
+- Routed expert outputs are summed and then the shared expert is added.
+
+** Hyper-Connections
+
+The residual stream has =hc_mult= copies. Each sublayer receives a collapsed
+input via =pre_mix= and returns to the HC stream with =post= and =comb= mixes.
+Mixes are derived from normalized flattened HC state and split through the
+Sinkhorn helper into pre/post/comb coefficients.
+
+** Engram
+
+Engram is part of text-only compatibility. It must not be deferred with vision.
+
+Required text pieces:
+
+- Compressed token map compatible with upstream normalization.
+- Prime-bucket layout compatible with =EngramLayout.from_args=.
+- Prefill and decode hash-state behavior for text token IDs.
+- Engram table loading and dequantized lookup.
+- Residual update using per-HC normalized signed-square-root gate.
+
+* Verifier ladder
+
+** Level 1: source and paper claims
+
+Commands must be cheap and not require model weights.
+
+- Verify README/model-card claims used by the implementation:
+  - multimodal MoE
+  - 552B backbone parameter claim
+  - CED 20 causal-encoder + 20 decoder organization
+  - CSA2 Full/Reindex/Reuse description
+  - FP4 main KV cache and one E4M3 scale per 16 channels
+  - 1M context support
+- Verify technical-report claims mirrored into =paper_claims.json=.
+- Fail when source files are missing, stale, or no longer contain the expected
+  claim anchors.
+
+** Level 2: config and safetensors metadata
+
+No weight download required.
+
+- Parse =config.json= and =inference/config.json=.
+- Assert exact release dimensions and mode fields.
+- Parse =model.safetensors.index.json=.
+- Assert shard count, total byte size, representative tensor names, and absence
+  of Qwen-style tensor names.
+- Assert converted namespace expectations from =inference/convert.py=.
+
+** Level 3: isolated math fixtures against upstream code
+
+Use JSON fixtures generated by Python from the mirrored upstream inference
+files. Tiny fixtures must run without released model weights.
+
+Required fixture families:
+
+- YaRN frequency and adjacent-pair RoPE.
+- Sliding-window top-k indices.
+- Candidate block selection.
+- Compressor pooling for ratio 1 and ratio > 1.
+- Gate routing with =sqrtsoftplus= and correction bias.
+- SwiGLU clamp behavior.
+- Hyper-Connection mix shapes and doubly-stochastic comb invariant.
+- Engram compressed-token map and hash layout.
+
+Each fixture family must be asserted through explicit unit verifier strata:
+
+- *Op verifier*: one function or operation at a time, with deterministic inputs
+  and exact or tolerance-bounded expected outputs from upstream Python.
+- *Layer verifier*: one model layer component at a time, including attention,
+  compressor, indexer, gate, routed expert, shared expert, hyper-connection
+  mixer, and engram update.
+- *Block verifier*: one complete text block at a time, including HC pre/post
+  sequencing, attention residual update, MoE residual update, and published
+  shared-attention state.
+
+No full-model parity result counts as sufficient evidence if the corresponding
+op/layer/block verifier is missing.
+
+** Level 4: tiny model parity against upstream code
+
+Use a tiny deterministic state dict and the mirrored upstream =model.py= as
+the reference. If upstream GPU-only kernels block CPU fixture generation, the
+fixture generator may monkeypatch those kernel functions with pure PyTorch
+reference implementations while still instantiating upstream model classes and
+using upstream field names. The monkeypatch must be documented in the fixture
+metadata.
+
+Parity checks:
+
+- Intermediate tensors for every implemented layer component: q path, KV path,
+  compressor output, indexer scores/indices, sparse attention output, grouped
+  output projection, routing scores/indices/weights, expert outputs, shared
+  expert output, HC pre/post/comb mixes, engram gate/update.
+- Complete one-block forward parity for representative block modes:
+  - sliding-window only =compress_ratio= 0
+  - source compressed KV layer
+  - index-source layer
+  - reuse layer consuming published Top-K indices
+  - engram layer
+- Final logits for a tiny text-only model.
+- =--token-ids= mode to isolate model math from tokenizer differences.
+
+** Level 5: tokenizer and prompt fixtures
+
+Compare prompt rendering/token IDs against upstream =encoding.py= and the
+Hugging Face tokenizer or first-party DeepSeek recipe tooling.
+
+Wave 1 only needs text prompt modes:
+
+- Plain prompt token IDs.
+- Chat mode with =</think>= suppression.
+- Thinking mode with numeric reasoning effort.
+- Tool-call DSML prompt strings, but parsing/generation output may remain a
+  verifier-only fixture until a user-facing prompt API exists.
+
+Image placeholders must be rejected by the text-only CLI with a clear error.
+
+** Level 6: real checkpoint logits
+
+When local assets exist, compare Rust logits against the upstream inference
+runtime on short text-only prompts.
+
+Required behavior:
+
+- Rust binary emits JSON with token IDs, prompt text, vocab size, and
+  last-position logits.
+- Python reference emits the same schema.
+- Comparator reports token-id agreement, max/mean absolute difference, cosine
+  similarity, top-1 agreement, and top-5 overlap.
+- If token IDs differ, rerun Rust with upstream token IDs to isolate tokenizer
+  drift from model math.
+- Verification must support both unconverted HF-index metadata and converted
+  DeepSeek TP checkpoint directories.
+
+* File layout
+
+Expected production files:
+
+- =ferric_continuum/tnsr/src/deepseek_v41/config.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/rope.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/sparse.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/attention.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/moe.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/hyper.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/engram.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/model.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/load.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/mod.rs=
+- =ferric_continuum/tnsr/src/bin/deepseek_v41_infer.rs=
+
+Expected tests and tools:
+
+- =ferric_continuum/tnsr/tests/deepseek_v41_config_test.rs=
+- =ferric_continuum/tnsr/tests/deepseek_v41_math_test.rs=
+- =ferric_continuum/tnsr/tests/deepseek_v41_model_test.rs=
+- =ferric_continuum/tnsr/tools/deepseek_v41_verify_sources.py=
+- =ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py=
+- =ferric_continuum/tnsr/tools/deepseek_v41_reference.py=
+- =ferric_continuum/tnsr/tools/deepseek_v41_compare_logits.py=
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh=
+- =ferric_continuum/tnsr/testdata/deepseek_v41/*.json=
+
+Expected Bazel targets:
+
+- =//ferric_continuum/tnsr:deepseek_v41_config_tests=
+- =//ferric_continuum/tnsr:deepseek_v41_math_tests=
+- =//ferric_continuum/tnsr:deepseek_v41_model_tests=
+- =//ferric_continuum/tnsr:deepseek_v41_infer=
+
+* Implementation waves and tickets
+
+** Wave 0: Evidence and source verifiers
+
+- [[file:issues/01-source-manifest-and-paper-verifiers.org][01-source-manifest-and-paper-verifiers]]
+- [[file:issues/02-config-and-index-verifiers.org][02-config-and-index-verifiers]]
+
+** Wave 1A: Isolated text math
+
+- [[file:issues/03-rope-sparse-and-compressor-fixtures.org][03-rope-sparse-and-compressor-fixtures]]
+- [[file:issues/04-moe-hyper-and-engram-fixtures.org][04-moe-hyper-and-engram-fixtures]]
+
+** Wave 1B: Text model and loader
+
+- [[file:issues/05-text-model-skeleton-and-forward.org][05-text-model-skeleton-and-forward]]
+- [[file:issues/06-deepseek-checkpoint-loader.org][06-deepseek-checkpoint-loader]]
+
+** Wave 1C: End-to-end text compatibility
+
+- [[file:issues/07-tokenizer-prompt-and-cli.org][07-tokenizer-prompt-and-cli]]
+- [[file:issues/08-text-logits-parity-harness.org][08-text-logits-parity-harness]]
+- [[file:issues/09-text-compatibility-closure.org][09-text-compatibility-closure]]
+
+** Wave 2 TODO: multimodal
+
+- [[file:issues/10-todo-multimodal-v41.org][10-todo-multimodal-v41]]
+
+** Wave 3 TODO: DSpark
+
+- [[file:issues/11-todo-dspark-v41.org][11-todo-dspark-v41]]
+
+* Acceptance
+
+Wave 1 is complete only when:
+
+- All Wave 0 and Wave 1 tickets are resolved.
+- The text-only Rust path rejects vision and DSpark inputs explicitly.
+- Focused Bazel tests pass under =bazel=.
+- Source/paper/config/index verifiers pass without model weights.
+- Tiny upstream-code parity fixtures pass.
+- Real checkpoint parity has either passed with local assets or is documented as
+  blocked on missing local checkpoint/dependency assets, with all lower verifier
+  levels green.
+
+* Comments
+
+- The implementation must remain a =tnsr= executable derivation: prefer small
+  modules with explicit math over a wholesale Python runtime port.
+- Keep Qwen3 and DeepSeek V4.1 loaders separate. Shared helpers are fine only
+  when the interface is stable and the behavior is genuinely common.
+- Do not reuse Qwen3's RoPE permutation unless a future upstream
+  Transformers-class verifier proves the HF class differs from the released
+  DeepSeek inference code.

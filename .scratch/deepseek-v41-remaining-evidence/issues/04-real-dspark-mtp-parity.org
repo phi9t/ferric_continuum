@@ -1,0 +1,103 @@
+#+TITLE: Real released-weight DSpark MTP parity
+#+TYPE: task
+#+STATUS: ready-for-human
+#+BLOCKED_BY: 02-real-checkpoint-asset-admission, 03-real-text-and-multimodal-parity
+#+PARENT: ../spec.org
+
+* Context
+
+The Rust DSpark path has tiny =forward_spec= parity and loader coverage for the
+=mtp.*= namespace. It does not yet prove real released-weight DSpark logits and
+confidence against a faithful upstream reference.
+
+Read first:
+
+- =../spec.org=
+- =.scratch/deepseek-v41-dspark/spec.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/25-dspark-parity-harness-and-closure.org=
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_dspark_compat.sh=
+- =ferric_continuum/tnsr/src/deepseek_v41/dspark.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/model.rs=
+
+* Outcome Packet
+
+Outcome:
+
+- DSpark MTP real-checkpoint behavior is either numerically proven for
+  =forward_spec= or documented as unclaimable with exact missing evidence.
+
+Mode:
+
+- delivery when a faithful reference runtime exists; scout otherwise.
+
+Non-goals:
+
+- No generation-loop acceptance sampling. Ticket 05 decides whether that should
+  exist.
+- No tensor-parallel serving claim.
+- No native FP8/FP4 performance claim.
+
+Allowed external effects:
+
+- Local model checkpoint reads and bounded local reference/Rust execution.
+
+Escalation conditions:
+
+- The upstream reference cannot execute =forward_spec= for the real checkpoint
+  in the available environment.
+- Rust and reference disagree beyond the D1 parity contract.
+- The model directory is not admitted by ticket 02.
+
+* Requirements
+
+- Reuse the ticket 02 asset receipt.
+- Fix the DSpark verifier's real-checkpoint level so it can PASS only from a
+  numeric comparison of Rust =forward_spec= output to the upstream reference.
+- Bind DSpark inputs to the same accepted-token and =main_hidden= contract used
+  by the tiny parity path, adapted to real release dimensions.
+- Compare logits and confidence. Keep =output_ids= deterministic through the
+  same argmax/temperature-0 rule.
+- Preserve honest SKIP when there is no faithful real-reference runtime.
+
+* Acceptance Map
+
+Claim:
+
+- Real DSpark =forward_spec= logits and confidence match upstream for fixed
+  accepted-token inputs and main hidden states.
+
+Evidence:
+
+- Comparator receipt with logits cosine, top-1 match, top-5 overlap, confidence
+  max_abs_diff, command lines, model asset receipt, and exit code.
+
+Candidate:
+
+- Clean commit range plus admitted model-dir receipt.
+
+Reuse rule:
+
+- Reuse only for the same candidate, model assets, DSpark inputs, reference
+  runtime, and comparator.
+
+Invalidation rule:
+
+- Any change to =dspark.rs=, DSpark parts of =model.rs=, loader =mtp.*=
+  handling, verifier/comparator code, reference adapter, or model assets reruns
+  this ticket.
+
+* Verification
+
+- =BAZEL=bazel DEEPSEEK_V41_MODEL_DIR=/path/to/model ferric_continuum/tnsr/tools/verify_deepseek_v41_dspark_compat.sh=
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_model_tests=
+
+* Comments
+
+* Answer
+
+Partially executed and deferred for real weights. See
+=../receipts/04-real-dspark-mtp-parity.org=.
+
+The DSpark verifier proves tiny =forward_spec= parity for logits,
+=output_ids=, and confidence. Real released-weight DSpark MTP parity remains
+unproven because ticket 02 did not admit a local release checkpoint.

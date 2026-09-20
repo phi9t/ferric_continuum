@@ -1,0 +1,138 @@
+#+TITLE: DeepSeek V4.1 release-candidate evidence packet
+#+TYPE: receipt
+#+STATUS: ready-for-human
+#+PARENT: ../issues/10-release-candidate-evidence-packet.org
+
+* Candidate
+
+- Base/context commit: =f58239798719ddf9350aa5e7db7f514459073c15=
+- Execution branch: =deepseek-v41-remaining-exec=
+- Pre-review candidate commit: =bf019855124469007dc9f3d5a1396a5d14bec685=
+- Final candidate: the local commit containing this receipt update and the
+  post-review DeepSeek V4.1 changes.
+
+* Post-Review Execution
+
+This pass addressed the final local conformance gap found during review:
+CSA2 release source layers with =compress_ratio > 1= now construct a
+=wkv= + =wgate= compressor and execute the upstream-style prefill path:
+
+- ratio 1 remains =wkv -> RMSNorm= with no gate;
+- ratio N prefill projects =wkv= and =wgate= to =head_dim=, drops incomplete
+  trailing groups per batch, softmax-pools over the ratio dimension, then
+  applies RMSNorm;
+- ratio N decode state remains an explicit unsupported boundary rather than a
+  silent approximation.
+
+The post-review pass also corrected stale educational module headers and the
+private rustdoc link that was warning in =typed_tensor_compile_tests=.
+
+* Verified Claims
+
+| Claim | Evidence |
+|-
+| Source faithfulness for CED, Engram, CSA2, V4 CSA contrast, indexer lineage/current behavior, SWA, DSpark MTP, multimodal, FP4 main KV, and release metadata | =receipts/01-baseline-evidence.org=; 30 source claims passed |
+| Focused DeepSeek V4.1 CPU test ladder | =receipts/01-baseline-evidence.org=; 4 test targets passed |
+| Text tiny parity | =receipts/03-real-text-and-multimodal-parity.org=; max abs diff =3.95895e-07=, cosine =1.00000000= |
+| Multimodal tiny parity including SWA prefill windows | =receipts/03-real-text-and-multimodal-parity.org=; max abs diff =2.10007e-07=, cosine =1.00000000= |
+| DSpark MTP tiny =forward_spec= parity | =receipts/04-real-dspark-mtp-parity.org=; logits and confidence within tolerance, output ids exact |
+| CED decoder-local SWA state and SWA decode wraparound | =receipts/06-long-context-cache-indexer-stress.org=; focused model tests |
+| CSA2/indexer prefill-to-decode boundary | =receipts/06-long-context-cache-indexer-stress.org=; focused model tests |
+| Existing tiny CUDA forward parity | =receipts/07-native-quantized-fp8-fp4-execution.org=; =L6-cuda-forward-parity PASS= |
+| DSpark acceptance-loop boundary | =receipts/05-dspark-acceptance-loop-decision.org=; upstream =generate.py= has no =forward_spec= call |
+| Architecture follow-up disposition | =receipts/09-architecture-deepening-followups.org= |
+| CSA2 ratio-N source-layer execution | =deepseek_v41_model_tests=; =csa2_full_source_layer_uses_ratio_n_prefill_compression= and =compressor_ratio_n_prefill_drops_incomplete_group_per_batch= pass |
+
+* Skipped Or Deferred Claims
+
+- Real checkpoint asset admission: SKIP. No =DEEPSEEK_V41_MODEL_DIR= or
+  =MODEL_DIR= was configured, and checkpoint download is not authorized.
+- Real released-weight text parity: SKIP, blocked by asset admission.
+- Real released-weight multimodal parity: SKIP, blocked by asset admission.
+- B200 multimodal reference parity: SKIP, no CUDA torch runtime was available
+  to the verifier on this host.
+- Real released-weight DSpark MTP parity: SKIP, blocked by asset admission.
+- Native FP8/FP4 execution: deferred behind a separate human-authorized
+  delivery or experiment run.
+- Tensor-parallel serving parity: deferred behind real assets and a separate
+  TP serving substrate.
+- Public release, push, merge, or publication: not authorized by this task.
+
+* Final Verification Commands
+
+- Post-landing live workload run on =work-base= at
+  =2efa5aaf2dda478e5f16c8885866cd87f259c344=:
+  - =OUT_DIR=$TMPDIR/deepseek-v41-text BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh= -> exit 0 with
+    =PASS-WITH-SKIPS=. The Rust =deepseek_v41_infer= binary loaded a generated
+    tiny checkpoint, dumped logits, and matched the Python reference with
+    =max_abs_diff= =3.95895e-07=, =cosine_sim= =1.00000000=, and top-1 =3/3=.
+  - =OUT_DIR=$TMPDIR/deepseek-v41-mm BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_multimodal_compat.sh= -> exit 0 with
+    =PASS-WITH-SKIPS=. The Rust binary loaded a generated tiny multimodal
+    checkpoint and image-patch file, dumped logits, and matched the Python
+    reference with =max_abs_diff= =2.10007e-07=, =cosine_sim= =1.00000000=, and
+    top-1 =4/4=.
+  - =OUT_DIR=$TMPDIR/deepseek-v41-dspark BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_dspark_compat.sh= -> exit 0 with
+    =PASS-WITH-SKIPS=. The Rust DSpark fixture dumper matched reference
+    =output_ids= exactly, matched logits with =max_abs_diff= =1.80135e-07=, and
+    matched confidence within tolerance with max delta =1.62208e-07=.
+  - =OUT_DIR=$TMPDIR/deepseek-v41-perf BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_perf_compat.sh= -> exit 0 with
+    =PASS-WITH-SKIPS=. The CUDA forward parity target
+    =//ferric_continuum/tnsr:deepseek_v41_cuda_forward_tests= executed and
+    passed.
+  - Direct CLI workload:
+    =deepseek_v41_infer --model-dir $TMPDIR/deepseek-v41-direct/tiny_ckpt --token-ids 1,3 --text-only --max-new-tokens 3 --dump-logits $TMPDIR/deepseek-v41-direct/rust_prefill.json= -> exit 0.
+    The binary reported finite/non-degenerate embedding stats, first-step top-5
+    logits headed by token =3=, final generated ids =[1, 3, 3, 3, 3]=, and the
+    dumped prefill logits matched the reference with =max_abs_diff=
+    =3.95895e-07=.
+- =rustfmt --edition 2021 --check ferric_continuum/tnsr/src/deepseek_v41/attention.rs ferric_continuum/tnsr/src/deepseek_v41/load.rs ferric_continuum/tnsr/tests/deepseek_v41_model_test.rs ferric_continuum/tnsr/src/deepseek_v41/checkpoint_io.rs ferric_continuum/tnsr/src/deepseek_v41/dspark.rs ferric_continuum/tnsr/src/deepseek_v41/engram.rs ferric_continuum/tnsr/src/deepseek_v41/mod.rs ferric_continuum/tnsr/src/deepseek_v41/model.rs= -> exit 0.
+- =git diff --check -- ferric_continuum/tnsr/src/deepseek_v41 ferric_continuum/tnsr/tests/deepseek_v41_model_test.rs= -> exit 0.
+- =bazel test --nocache_test_results //ferric_continuum/tnsr:deepseek_v41_model_tests= -> exit 0,
+  32 tests passed.
+- =bazel test --nocache_test_results //ferric_continuum/tnsr:deepseek_v41_config_tests //ferric_continuum/tnsr:deepseek_v41_source_tests //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests //ferric_continuum/tnsr:typed_tensor_compile_tests= -> exit 0,
+  5 targets passed.
+- =bazel test --nocache_test_results //...= -> exit 0,
+  32 test targets and 95 test cases passed.
+- =bazel test --nocache_test_results --config=cuda //ferric_continuum/cuda_kernels/... //ferric_continuum/cuda_gym/... //ferric_continuum/tnsr:deepseek_v41_cuda_forward_tests= -> exit 0,
+  16 test targets and 38 test cases passed. The build emitted the existing
+  =cuda_ffi.rs= dead-code warning for unused status variants.
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_sources.sh= -> exit 0.
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests //ferric_continuum/tnsr:deepseek_v41_source_tests= -> exit 0.
+- =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh= -> exit 0 with
+  =PASS-WITH-SKIPS=.
+- =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_multimodal_compat.sh= -> exit 0 with
+  =PASS-WITH-SKIPS=.
+- =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_dspark_compat.sh= -> exit 0 with
+  =PASS-WITH-SKIPS=.
+- =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_perf_compat.sh= -> exit 0 with
+  =PASS-WITH-SKIPS=.
+- =bazel test //ferric_continuum/tnsr/...= -> exit 0,
+  18 passing, 0 skipped, 0 failing.
+- =git diff --check -- .scratch/deepseek-v41-remaining-evidence ferric_continuum/tnsr/tools/deepseek_v41_reference.py ferric_continuum/tnsr/tests/deepseek_v41_model_test.rs= -> exit 0.
+- =rustfmt --edition 2021 --check ferric_continuum/tnsr/tests/deepseek_v41_model_test.rs= -> exit 0.
+
+The compatibility wrapper command was first started once without =BAZEL= in the
+environment; that path selected Bazel 8.4.2 and was interrupted. The evidence
+above is the rerun with =BAZEL=bazel=.
+
+The post-landing live workload pass also found two wrapper bugs where
+=verify_deepseek_v41_multimodal_compat.sh= and
+=verify_deepseek_v41_perf_compat.sh= used ambient =python3= for the comparator
+self-test. On this host ambient =python3= lacks =numpy= while the configured
+=HF_PYTHON= has the verifier dependencies. Both wrappers now use the same
+validated =HF_PYTHON= contract as the text and DSpark verifiers.
+
+* Human Promotion Boundary
+
+This packet supports local review of the current DeepSeek V4.1 candidate. It
+does not authorize merge, push, publication, checkpoint download, high-cost
+long-context execution, native quantized kernel work, or TP serving work.
+
+Promotion to a stronger release claim requires, at minimum:
+
+- a real-checkpoint asset admission receipt;
+- numeric real text and multimodal parity;
+- numeric real DSpark =forward_spec= parity or an explicit accepted limitation;
+- a native FP8/FP4 execution ticket if performance or memory-footprint claims
+  are made;
+- a TP serving parity ticket if multi-rank serving claims are made.

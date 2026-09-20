@@ -1,12 +1,12 @@
-//! Load DeepSeek V4.1-Flash **text-only** checkpoints into a
-//! [`DeepSeekV41TextModel`].
+//! Load DeepSeek V4.1-Flash checkpoints into the inspectable tnsr model.
 //!
 //! This is deliberately *not* a rename of [`crate::qwen3_load`].  The DeepSeek
 //! release ships converted-style tensor names, tensor-parallel shards, FP8/FP4
 //! quantized weights with side-car `.scale` tensors, Engram lookup tables, and
-//! vision/DSpark surfaces that Wave 1 does not execute.  This loader reads the
-//! text subset needed to reproduce logits on CPU and makes every unsupported
-//! surface explicit.
+//! vision/DSpark surfaces. This loader has separate public entry points for
+//! text checkpoints, vision-enabled checkpoints, and one converted TP shard; it
+//! maps every loaded tensor into the small CPU-readable model used by the
+//! verifier ladder and makes unsupported full-runtime surfaces explicit.
 //!
 //! Layout adaptations (mirrors the reasoning in `qwen3_load.rs`):
 //!
@@ -32,20 +32,22 @@
 //!    tickets can special-case them.
 //!
 //! Real 510GB weights are downloaded out of band; this loader only reads a
-//! local directory.  The single-file / TP-shard fixtures written in tests are
-//! enough to exercise every path here.
+//! local directory.  The single-file, multimodal, and TP-shard fixtures written
+//! in tests are enough to exercise every local path here.
 
+use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::attention::{DeepSeekV41Attention, DeepSeekV41Compressor, DeepSeekV41Indexer};
+use super::attention::{Csa2Mode, DeepSeekV41Attention, DeepSeekV41Compressor, DeepSeekV41Indexer};
 #[cfg(test)]
 use super::checkpoint_io::{e4m3_to_f32, e8m0_to_f32};
 use super::checkpoint_io::{expect_shape, Checkpoint, QuantKind};
-use super::config::DeepSeekV41TextConfig;
-use super::engram::DeepSeekV41Engram;
+use super::config::{DeepSeekV41ReleaseIndex, DeepSeekV41TextConfig};
+use super::engram::{DeepSeekV41Engram, EngramLayout, NgramHashState};
 use super::model::{
     DeepSeekV41Block, DeepSeekV41DsparkHead, DeepSeekV41DsparkStage, DeepSeekV41TextModel,
+    EngramRuntimeState,
 };
 use super::moe::{DeepSeekV41Expert, DeepSeekV41Gate, DeepSeekV41MoE};
 use super::vision::{OwnedVisionBlock, OwnedVisionModel};
@@ -187,6 +189,41 @@ fn open_checkpoint(model_dir: &Path) -> Result<Checkpoint, String> {
     if single.exists() {
         return Checkpoint::open_single(&single);
     }
+
+    let hf_index = model_dir.join("model.safetensors.index.json");
+    if hf_index.exists() {
+        let index = DeepSeekV41ReleaseIndex::from_json(&hf_index)?;
+        let mut shards: Vec<PathBuf> = Vec::new();
+        for shard_name in index.shard_names() {
+            let shard_path = Path::new(&shard_name);
+            if shard_path.is_absolute()
+                || shard_path
+                    .components()
+                    .any(|component| matches!(component, std::path::Component::ParentDir))
+            {
+                return Err(format!(
+                    "model.safetensors.index.json shard path must stay within model dir: {shard_name}"
+                ));
+            }
+            let shard = model_dir.join(shard_path);
+            if !shard.exists() {
+                return Err(format!(
+                    "indexed safetensors shard not found: {}",
+                    shard.display()
+                ));
+            }
+            shards.push(shard);
+        }
+        if shards.is_empty() {
+            return Err(format!(
+                "model.safetensors.index.json in {} did not list any shards",
+                model_dir.display()
+            ));
+        }
+        shards.sort();
+        return Checkpoint::open(&shards);
+    }
+
     // Converted TP shards: collect every model{rank}-mp{world}.safetensors.
     let mut shards: Vec<PathBuf> = Vec::new();
     let entries =
@@ -201,7 +238,7 @@ fn open_checkpoint(model_dir: &Path) -> Result<Checkpoint, String> {
     }
     if shards.is_empty() {
         return Err(format!(
-            "no checkpoint found in {} (expected model.safetensors or model*-mp*.safetensors)",
+            "no checkpoint found in {} (expected model.safetensors, model.safetensors.index.json, or model*-mp*.safetensors)",
             model_dir.display()
         ));
     }
@@ -276,10 +313,13 @@ fn build_model(
         hidden_size: d,
         hc_mult: cfg.hc_mult,
         image_token_id: cfg.image_token_id,
+        causal_encoder_layers: cfg.causal_encoder_layers(),
+        decoder_layers: cfg.decoder_layers(),
         embed_tokens,
         layers,
         final_norm,
         lm_head,
+        engram_runtime: build_engram_runtime(cfg),
         vision,
         image_start,
         image_end,
@@ -394,23 +434,76 @@ fn load_block_at(
     let is_index_source = cfg.index_source_layer_ids.contains(&layer_id);
 
     let compressor = if is_kv_source {
-        // compressor.wkv [head_dim, D] (ratio-one) -> tnsr [D, head_dim].
+        // compressor.wkv [head_dim, D] -> tnsr [D, head_dim].
         let (cw, _) = load_linear_in_out(ckpt, &p("attn.compressor.wkv.weight"), head_dim, d)?;
         let cn = param_from(
             &[head_dim],
             ckpt.float_exact(&p("attn.compressor.norm.weight"), &[head_dim])?,
         );
-        Some(DeepSeekV41Compressor::ratio_one(cw, cn, eps))
+        if compress_ratio > 1 {
+            let (cg, _) =
+                load_linear_in_out(ckpt, &p("attn.compressor.wgate.weight"), head_dim, d)?;
+            Some(DeepSeekV41Compressor::ratio_n(
+                cw,
+                cg,
+                cn,
+                eps,
+                compress_ratio,
+            ))
+        } else {
+            Some(DeepSeekV41Compressor::ratio_one(cw, cn, eps))
+        }
     } else {
         None
     };
 
     let indexer = if is_index_source {
+        let (iwq_b, _) = load_linear_in_out(
+            ckpt,
+            &p("attn.indexer.wq_b.weight"),
+            cfg.index_n_heads * cfg.index_head_dim,
+            q_lora,
+        )?;
+        let (weights_proj, _) = load_linear_in_out(
+            ckpt,
+            &p("attn.indexer.weights_proj.weight"),
+            cfg.index_n_heads,
+            d,
+        )?;
+        let (wk, k_norm) = if is_kv_source {
+            let (wk, _) = load_linear_in_out(
+                ckpt,
+                &p("attn.indexer.wk.weight"),
+                cfg.index_head_dim,
+                head_dim,
+            )?;
+            let k_norm = param_from(
+                &[cfg.index_head_dim],
+                ckpt.float_exact(&p("attn.indexer.k_norm.weight"), &[cfg.index_head_dim])?,
+            );
+            (Some(wk), Some(k_norm))
+        } else {
+            (None, None)
+        };
         Some(DeepSeekV41Indexer {
             index_topk: cfg.index_topk,
+            candidate_topk_blocks: cfg.candidate_topk_blocks,
+            candidate_block_size: cfg.candidate_block_size,
+            wq_b: iwq_b,
+            weights_proj,
+            wk,
+            k_norm,
+            eps,
         })
     } else {
         None
+    };
+
+    let csa2_mode = match (compress_ratio > 0, is_kv_source, is_index_source) {
+        (false, _, _) => Csa2Mode::SlidingWindow,
+        (true, true, true) => Csa2Mode::Full,
+        (true, false, true) => Csa2Mode::Reindex,
+        (true, _, false) => Csa2Mode::Reuse,
     };
 
     let attn = DeepSeekV41Attention {
@@ -431,6 +524,10 @@ fn load_block_at(
         wo_a,
         wo_b,
         attn_sink,
+        layer_id,
+        kv_source_layer_id: source_layer_for(layer_id, &cfg.kv_source_layer_ids),
+        index_source_layer_id: source_layer_for(layer_id, &cfg.index_source_layer_ids),
+        csa2_mode,
         compressor,
         indexer,
     };
@@ -496,25 +593,29 @@ fn load_block_at(
         // q_weight / k_weight [hc_mult, dim] copied as-is.
         let q_weight = ckpt.float_exact(&p("engram.q_weight"), &[hc, d])?;
         let k_weight = ckpt.float_exact(&p("engram.k_weight"), &[hc, d])?;
-        // The engram embed/wkv tables are required to be present; full runtime
-        // hashing is a later ticket, so the block's key/value are seeded to
-        // zeros here. Their absence is still an error.
-        if !ckpt.has(&p("engram.wkv.weight")) {
-            return Err(format!(
-                "missing required Engram tensor `{}`",
-                p("engram.wkv.weight")
-            ));
-        }
-        if !ckpt.has(&p("engram.embed.weight")) {
-            return Err(format!(
-                "missing required Engram tensor `{}`",
-                p("engram.embed.weight")
-            ));
-        }
+        let layer_index = cfg
+            .engram_layer_ids
+            .iter()
+            .position(|&id| id == layer_id)
+            .ok_or_else(|| format!("layer {layer_id} missing from engram_layer_ids"))?;
+        let num_embeddings = cfg.engram_num_embeddings[layer_index];
+        let embed = ckpt.float_exact(
+            &p("engram.embed.weight"),
+            &[num_embeddings, cfg.engram_head_dim],
+        )?;
+        let n_hash_cols = (cfg.engram_max_ngram_size - 1) * cfg.engram_n_heads;
+        let (wkv, _) = load_linear_in_out(
+            ckpt,
+            &p("engram.wkv.weight"),
+            d * (hc + 1),
+            n_hash_cols * cfg.engram_head_dim,
+        )?;
         (
             Some(DeepSeekV41Engram {
                 q_weight,
                 k_weight,
+                embed_weight: Some(param_from(&[num_embeddings, cfg.engram_head_dim], embed)),
+                wkv_weight: Some(wkv),
                 eps,
             }),
             None,
@@ -544,6 +645,83 @@ fn load_block_at(
         engram_key,
         engram_value,
     })
+}
+
+fn source_layer_for(layer_id: usize, source_layers: &[usize]) -> Option<usize> {
+    source_layers
+        .iter()
+        .copied()
+        .rev()
+        .find(|&source| source <= layer_id)
+}
+
+fn build_engram_runtime(cfg: &DeepSeekV41TextConfig) -> Option<EngramRuntimeState> {
+    let layout = EngramLayout::from_config(cfg)?;
+    let mut hash_state = NgramHashState::new(
+        (0..cfg.vocab_size)
+            .map(|id| id % cfg.engram_compressed_vocab_size.max(1))
+            .collect(),
+        cfg.engram_pad_token_id,
+        1,
+        cfg.original_seq_len.max(cfg.sliding_window).max(1),
+    );
+    hash_state.set_multipliers(engram_hash_multipliers(
+        &cfg.engram_layer_ids,
+        cfg.engram_max_ngram_size,
+        cfg.engram_compressed_vocab_size.max(1),
+    ));
+    Some(EngramRuntimeState { layout, hash_state })
+}
+
+fn engram_hash_multipliers(
+    layer_ids: &[usize],
+    max_ngram_size: usize,
+    vocab_size: usize,
+) -> Vec<i64> {
+    let max_long = i64::MAX as u128;
+    let bound = ((max_long / vocab_size.max(1) as u128) / 2).max(1) as u64;
+    let mut out = Vec::with_capacity(layer_ids.len() * max_ngram_size);
+    for &layer_id in layer_ids {
+        let mut rng = NumpyPcg64::new(10007u128 * layer_id as u128);
+        for _ in 0..max_ngram_size {
+            out.push((rng.random_bounded_u64(bound) as i64) * 2 + 1);
+        }
+    }
+    out
+}
+
+struct NumpyPcg64 {
+    state: u128,
+    inc: u128,
+}
+
+impl NumpyPcg64 {
+    fn new(seed: u128) -> Self {
+        // NumPy's default_rng uses PCG64 with SeedSequence. This local fallback
+        // keeps loader-created Engram state deterministic until tokenizer-backed
+        // runtime metadata is available from the checkpoint directory.
+        Self {
+            state: seed.wrapping_add(0x853c49e6748fea9b),
+            inc: 0xda3e39cb94b95bdb | 1,
+        }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        let old = self.state;
+        self.state = old
+            .wrapping_mul(6364136223846793005u128)
+            .wrapping_add(self.inc);
+        let xorshifted = (((old >> 64) ^ old) >> 64) as u64;
+        let rot = (old >> 122) as u32;
+        xorshifted.rotate_right(rot)
+    }
+
+    fn random_bounded_u64(&mut self, high: u64) -> u64 {
+        if high <= 1 {
+            return 0;
+        }
+        self.next_u64() % high
+    }
 }
 
 /// Load the grouped `wo_a` weight.
@@ -795,6 +973,7 @@ fn build_dspark_head(
         embed_tokens: model.embed_tokens.clone(),
         lm_head: model.lm_head.clone(),
         stages,
+        stage_swa_caches: RefCell::new(vec![None; n_stages]),
     }))
 }
 

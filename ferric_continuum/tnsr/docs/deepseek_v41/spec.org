@@ -609,6 +609,19 @@ Bazel tests (=deepseek_v41_config_tests=, =_math_tests=, =_model_tests=,
 =lib_tests=) pass under =bazel=; the
 GPU test passes under =--config=cuda=.
 
+** Remaining evidence-bound work
+
+The source and tiny-runtime implementation waves are closed. The remaining
+release-grade work is tracked separately so prior =done= tickets keep their
+historical meaning:
+
+- [[file:../../../../.scratch/deepseek-v41-remaining-evidence/spec.org][deepseek-v41-remaining-evidence]]
+
+That effort covers real released-weight parity, native FP8/FP4 execution,
+tensor-parallel serving parity, long-context SWA/CSA2/CED/indexer stress,
+DSpark acceptance-loop scoping, architecture-deepening follow-ups, and the final
+release-candidate evidence packet.
+
 * Acceptance
 
 Wave 1 is complete only when:

@@ -1,0 +1,50 @@
+#+TITLE: D1 DSpark parity contract: what does "correct" mean with no loop?
+#+TYPE: grilling
+#+STATUS: resolved
+#+BLOCKED_BY:
+#+PARENT: ../intent.org
+
+* Decision
+
+What is the Wave-3 parity target, given upstream ships =forward_spec= but never
+calls it from =generate.py=?
+
+* Options considered
+
+1. *forward_spec numeric parity on a tiny model* -- run upstream
+   =Transformer.forward_spec= on a tiny config, dump the =(output_ids, logits,
+   confidence)= it returns, run the tnsr port, compare logits + confidence with
+   the same cosine/top-k gates as Waves 1-2. Sampling (=output_ids=) is
+   nondeterministic (Gumbel), so it is NOT part of the numeric gate.
+2. *End-to-end speculative-decoding acceptance* -- build a draft/verify loop and
+   measure acceptance rate. Rejected: upstream has no such loop, so there is no
+   reference to match; this would be inventing a spec, not porting one.
+3. *Structural-only (loader + shapes)* -- just prove the =mtp.*= tensors load.
+   Rejected: too weak, would not exercise the DSpark math at all.
+
+* Resolution
+
+Adopt option 1 with an explicit split of the return tuple:
+
+- *Numeric gate (deterministic):* =logits= from =forward_head= (the per-draft
+  full-vocab logits *after* the Markov bias is folded in) and =confidence= from
+  the confidence head. Both are pure functions of weights + inputs. Compare with
+  the Wave-1 gates: cosine >= 0.999, top-1 match, top-5 overlap >= 4 on logits;
+  a tight abs/rel tolerance on the scalar confidence.
+- *Excluded from the gate:* =output_ids=. They come from =sample()= (Gumbel-max),
+  which is nondeterministic and would make the reference unreproducible. The tiny
+  reference must therefore feed a *fixed* draft-token sequence into
+  =forward_head= rather than sampling, so both sides bias the *same* rows. We do
+  this by monkeypatching =sample()= in the reference to =argmax= (temperature 0),
+  matching how the Wave-1 reference already tames GPU-only kernels.
+
+This makes Wave-3 parity mean exactly what Waves 1-2 meant: identical logits for
+identical inputs, with sampling factored out.
+
+* Consequences
+
+- The tiny reference runs =forward_spec= at =start_pos > 0= (prefill returns
+  =None=), so the harness must first run a prefill =forward= to produce
+  =main_hidden=, then a decode step, then =forward_spec=.
+- =temperature=0= (argmax) sampling must be forced on both sides so the Markov
+  bias is applied to the same =output_ids= walk.

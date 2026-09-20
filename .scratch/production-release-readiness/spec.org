@@ -1,0 +1,72 @@
+#+TITLE: Ferric Continuum Production Release Readiness
+#+STATUS: approved
+#+PATH: gated
+#+PARENT: ultron:.scratch/production-release-readiness/issues/06-qualify-ferric-continuum.md
+
+* Outcome
+
+Produce a sanitized =ultron/mainline= candidate with a complete Ferric-owned
+bwrap rootfs, native Bazel and CUDA verification, and B200 proof for the folded
+=tnsr= functionality.
+
+The Ultron parent effort keeps rootfs implementation in =needs-info= until
+Vaso's linked =02-freeze-rootfs-spec-v1= ticket resolves and its digest is
+recorded here.
+
+* Current state
+
+Ferric has deterministic bwrap planning, environment clearing, driver
+projection, repo mounts, run records, and tests, but it requires a caller-owned
+rootfs and does not materialize, identify, select, or repair one. The standalone
+=tnsr= repository is retired, while Ferric worktrees contain its continuing
+implementation. Documentation still describes parts of that relationship as
+external. The repository has no independent public-upstream boundary and its
+history, committed tracker evidence, metadata, and branch names require a
+conservative publication review.
+
+* Rootfs adaptation
+
+Ferric owns pinned materialization, content-addressed storage, verified
+selection, the existing bwrap execution adapter, schemas, fixtures, Bazel
+integration, and sanitized receipts. The rootfs supports CPU-default Bazel
+tests and opt-in CUDA/B200 targets. It records the pinned Vaso specification
+without importing or invoking Vaso or Ultron.
+
+* Approved test seam
+
+Use materialization and selection manifests, bwrap plans, Bazel test results,
+CUDA kernel results, folded =tnsr= results, and release receipts. Negative cases
+cover tampering, environment, mounts, driver/device compatibility, and bypass
+of the documented rootfs entrypoint.
+
+Before GPU execution, a human approves the exact Bazel/CUDA and folded =tnsr=
+commands, immutable fixtures, GPU count/topology, iterations or duration,
+correctness/tolerance thresholds, any performance claim, negative cases,
+timeout/resource budget, receipt schema, and signing verification. Each child
+receipt is signed and binds the approved contract to the exact commit and
+rootfs identity.
+
+* Acceptance criteria
+
+- An approved clean publication root or trustworthy provenance boundary is
+  recorded.
+- A clean checkout materializes and runs the rootfs using repository-owned code.
+- CPU Bazel gates pass; the human-approved exact CUDA and folded =tnsr= B200
+  contract passes inside bwrap with independently verified signed receipts.
+- Documentation and ownership consistently treat =tnsr= as folded into Ferric.
+- Licenses and all local work receive explicit dispositions.
+- Sensitive history, committed evidence, metadata, and branch findings are
+  resolved without publishing raw matches.
+- Independent review has no unresolved blocking defect.
+
+* Out of scope
+
+- Restoring or publishing the standalone =tnsr= repository.
+- Package/container publication, non-B200 qualification, or a Vaso/Ultron
+  dependency.
+
+* Authority
+
+Approved tickets may modify local files and run tests in repo-local worktrees.
+Commits, branch moves, remotes, pushes, tags, releases, deletion, and merges
+require separate authorization.

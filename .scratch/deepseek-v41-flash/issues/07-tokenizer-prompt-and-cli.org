@@ -1,0 +1,87 @@
+#+TITLE: Text tokenizer, prompt fixtures, and inference CLI
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 06-deepseek-checkpoint-loader
+#+PARENT: ../spec.org
+
+* Context
+
+Text logits parity needs a command-line surface that can isolate tokenizer
+drift from model math. DeepSeek V4.1 has no Jinja chat template; upstream prompt
+formatting lives in =encoding/encoding.py= and the model card points production
+users at DeepSeek recipe tooling.
+
+Read first:
+
+- =../spec.org=
+- =../research/upstream-architecture.md=
+- =../upstream/encoding/encoding.py=
+- =../upstream/encoding/README.md=
+- =../upstream/tokenizer_config.json=
+- =ferric_continuum/tnsr/src/bin/qwen3_infer.rs=
+- =ferric_continuum/tnsr/src/bpe.rs=
+
+* Requirements
+
+- Create =ferric_continuum/tnsr/src/bin/deepseek_v41_infer.rs=.
+- Add Bazel target =//ferric_continuum/tnsr:deepseek_v41_infer=.
+- Add prompt/tokenizer fixture generation to
+  =ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py=.
+- Add prompt fixture JSON files under
+  =ferric_continuum/tnsr/testdata/deepseek_v41/=:
+  - =prompt_plain_fixture.json=
+  - =prompt_chat_fixture.json=
+  - =prompt_thinking_fixture.json=
+  - =prompt_dsml_fixture.json=
+- CLI arguments:
+  - =--model-dir <path>=
+  - =--prompt <text>=
+  - =--token-ids <comma-separated ids>=
+  - =--dump-logits <path>=
+  - =--max-new-tokens <n>=
+  - =--text-only= default true for this wave
+  - =--thinking-mode chat|thinking= for prompt fixture compatibility
+  - =--reasoning-effort <1..100>= for thinking prompt rendering
+- The CLI must reject:
+  - image placeholders in text-only mode
+  - DSpark/speculative flags if any are passed
+  - token IDs outside =vocab_size=
+- The CLI must support =--token-ids= without loading tokenizer files.
+- =--dump-logits= must write JSON with:
+  - =token_ids=
+  - =prompt=
+  - =vocab_size=
+  - =logits= last-position full-vocab row
+  - =model_type= =deepseek_v41_text=
+- Tokenizer/prompt verifier requirements:
+  - Plain prompt fixture compares rendered prompt and token IDs against upstream.
+  - Chat fixture checks upstream =</think>= suppression behavior.
+  - Thinking fixture checks numeric reasoning effort rendering.
+  - DSML fixture checks prompt-string rendering for tool syntax, even if tool
+    output parsing is not exposed in the Rust CLI.
+
+* Out of scope
+
+- No image processing.
+- No DSpark decode.
+- No full chat application API.
+- No requirement to implement the full DeepSeek recipe protocol in Rust if
+  fixture parity can be obtained through local prompt rendering plus tokenizer
+  files.
+
+* Verification
+
+- Regenerate fixtures:
+  =python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family prompt=
+- Run:
+  =bazel test //ferric_continuum/tnsr:deepseek_v41_model_tests=
+- Build CLI:
+  =bazel build -c opt --@rules_rust//rust/settings:extra_rustc_flags=-Copt-level=3 //ferric_continuum/tnsr:deepseek_v41_infer=
+- Manual smoke with tiny fixture model:
+  =bazel-bin/ferric_continuum/tnsr/deepseek_v41_infer --model-dir <tiny-fixture-dir> --token-ids 1,2,3 --max-new-tokens 0 --dump-logits /tmp/deepseek_v41_tiny_logits.json=
+
+* Comments
+
+- This ticket implements Level 5 verifier coverage and the Rust side of Level 6.
+- Preserve the Qwen3 =--token-ids= isolation pattern; it is essential for
+  separating tokenizer mismatch from model math mismatch.

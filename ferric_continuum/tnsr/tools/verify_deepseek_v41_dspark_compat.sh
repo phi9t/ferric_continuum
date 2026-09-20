@@ -15,24 +15,18 @@
 #   Level 4  dspark head + loader   -> deepseek_v41_model_tests  (Bazel)
 #            forward_spec parity        (tiny_dspark_head_forward_spec_matches_*
 #                                        + mtp.* loader cases)
-#   Level 6  tiny forward_spec       -> recompute the DSpark reference
-#            reference consistency       (output_ids/logits/confidence) from the
-#                                        shared generate_dspark_model helper and
-#                                        compare against the tracked fixture that
-#                                        the Rust forward_spec test consumes
+#   Level 6  tiny forward_spec       -> run the Rust DSpark fixture dumper and
+#            Rust-vs-reference           compare output_ids/logits/confidence
+#                                        against the recomputed Python reference
 #   Level 6* real-checkpoint parity  -> SKIP unless DEEPSEEK_V41_MODEL_DIR /
 #                                        MODEL_DIR points at real weights
 #
 # Why no `deepseek_v41_infer --dump-logits` DSpark path?  The CLI intentionally
 # REJECTS `--dspark` / `--speculative` / `--mtp` (exit 2): a text checkpoint has
 # n_mtp=0 so there is nothing to draft, and DSpark decode is out of the text CLI
-# scope.  The authoritative Rust-side DSpark parity is therefore the in-process
-# Bazel model test `tiny_dspark_head_forward_spec_matches_reference`, which runs
-# `DeepSeekV41DsparkHead::forward_spec` and asserts output_ids/logits/confidence
-# against `dspark_tiny_model_fixture.json`.  Level 6 here adds an independent
-# Python reference-consistency check (the reference recomputes the same fixture
-# from the shared `*_ref` helpers) so a helper regression is caught on both
-# sides.
+# scope.  Level 6 therefore uses a dedicated Rust fixture dumper that executes
+# `DeepSeekV41DsparkHead::forward_spec` over `dspark_tiny_model_fixture.json`
+# and compares that Rust JSON directly with the Python reference.
 #
 # This verifier NEVER presents a SKIP as a PASS. It also runs negative-control
 # self-tests first (P0): the logits comparator must FAIL a perturbed row, FAIL a
@@ -45,7 +39,8 @@
 #   DEEPSEEK_V41_MODEL_DIR / MODEL_DIR  real checkpoint dir (optional)
 #   HF_PYTHON   python with torch+numpy+safetensors
 #               (default: main-checkout .venv-hf; worktrees lack it)
-#   OUT_DIR     scratch dir for JSON dumps (default: /tmp/dsv41_dspark_compat)
+#   OUT_DIR     scratch dir for JSON dumps
+#               (default: $TMPDIR/deepseek-v41-dspark-compat)
 #   BAZEL       bazel binary (default: bazel; version pinned by .bazelversion)
 set -uo pipefail
 
@@ -55,7 +50,7 @@ cd "$REPO_ROOT"
 # The CPU venv lives in the MAIN checkout, not in worktrees. Default to it.
 MAIN_VENV="${HOME}/workspace/ferric_continuum/.venv-hf/bin/python"
 HF_PYTHON="${HF_PYTHON:-$MAIN_VENV}"
-OUT_DIR="${OUT_DIR:-/tmp/dsv41_dspark_compat}"
+OUT_DIR="${OUT_DIR:-${TMPDIR:-/tmp}/deepseek-v41-dspark-compat}"
 BAZEL="${BAZEL:-bazel}"
 TOOLS="$REPO_ROOT/ferric_continuum/tnsr/tools"
 MODEL_DIR="${DEEPSEEK_V41_MODEL_DIR:-${MODEL_DIR:-}}"
@@ -97,10 +92,14 @@ fi
 # ---------------------------------------------------------------------------
 # Preflight self-check: prove the logits comparator actually bites, including
 # the DSpark output_ids/confidence gates (moved id FAILs, out-of-tol confidence
-# FAILs, missing confidence ERRORs). numpy-only, so it runs with system python.
+# FAILs, missing confidence ERRORs). The comparator imports numpy, so run it
+# through the same interpreter validated for reference work.
 # ---------------------------------------------------------------------------
 echo "==> Preflight: comparator negative control (self-test, incl. dspark)"
-if python3 "$TOOLS/deepseek_v41_compare_logits.py" --self-test >/dev/null 2>&1; then
+if [ "$HF_OK" -eq 0 ]; then
+  echo "    SKIP: no numpy-capable interpreter ($HF_REASON); cannot run comparator self-test."
+  record "P0-comparator-selftest" SKIP
+elif "$HF_PYTHON" "$TOOLS/deepseek_v41_compare_logits.py" --self-test >/dev/null 2>&1; then
   record "P0-comparator-selftest" PASS
 else
   echo "    FAIL: comparator self-test did not behave (dspark gate not biting)."
@@ -152,14 +151,12 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Level 6: tiny forward_spec reference consistency. The Rust-side parity is the
-# in-process model test above (Level 4). Here the Python reference recomputes
-# the DSpark forward_spec (output_ids / logits / confidence) from the shared
-# `generate_dspark_model` helper and we compare it against the *tracked* fixture
-# that the Rust test consumes: agreement proves the two independent expressions
-# of the math (Rust forward_spec vs Python `*_ref`) share one numeric truth.
+# Level 6: tiny forward_spec Rust-vs-reference parity. The Python reference
+# recomputes the DSpark forward_spec (output_ids / logits / confidence) from
+# the shared `generate_dspark_model` helper. The Rust side is produced by a
+# dedicated Bazel binary that executes `DeepSeekV41DsparkHead::forward_spec`.
 # ---------------------------------------------------------------------------
-echo "==> Level 6: tiny forward_spec reference consistency"
+echo "==> Level 6: tiny forward_spec Rust-vs-reference parity"
 if [ "$HF_OK" -eq 0 ]; then
   echo "    SKIP: no reference interpreter ($HF_REASON); cannot compute reference."
   record "L6-tiny-parity" SKIP
@@ -168,7 +165,7 @@ elif [ ! -f "$FIXTURE" ]; then
   record "L6-tiny-parity" FAIL
 else
   REF_JSON="$OUT_DIR/dspark_ref.json"
-  FIX_JSON="$OUT_DIR/dspark_fixture_flat.json"
+  TNSR_JSON="$OUT_DIR/dspark_tnsr.json"
   tiny_ok=1
 
   echo "==> recomputing DSpark reference (output_ids/logits/confidence)"
@@ -177,27 +174,14 @@ else
     tiny_ok=0
   fi
 
-  # Flatten the tracked fixture into the comparator schema (the "tnsr" side):
-  # {token_ids, vocab_size, logits, output_ids, confidence}. This is the exact
-  # expected block the Rust forward_spec test asserts against, so comparing it
-  # to the freshly recomputed reference proves helper/fixture consistency.
   if [ "$tiny_ok" -eq 1 ]; then
-    if ! "$HF_PYTHON" - "$FIXTURE" "$FIX_JSON" <<'PY'
-import json, sys
-fixture = json.load(open(sys.argv[1]))
-inp, exp = fixture["input"], fixture["expected"]
-json.dump({
-    "token_ids": inp["input_ids"],
-    "prompt": "",
-    "vocab_size": inp["vocab_size"],
-    "model_type": "deepseek_v41_dspark",
-    "logits": [float(v) for v in exp["logits"]],
-    "output_ids": list(exp["output_ids"]),
-    "confidence": [float(v) for v in exp["confidence"]],
-}, open(sys.argv[2], "w"))
-PY
-    then
-      echo "    ERROR: could not flatten tracked fixture."
+    echo "==> running Rust DSpark fixture dumper"
+    if ! "$BAZEL" build //ferric_continuum/tnsr:deepseek_v41_dspark_fixture_dump; then
+      echo "    ERROR: could not build Rust DSpark fixture dumper."
+      tiny_ok=0
+    elif ! "$REPO_ROOT/bazel-bin/ferric_continuum/tnsr/deepseek_v41_dspark_fixture_dump" \
+        "$FIXTURE" >"$TNSR_JSON"; then
+      echo "    ERROR: could not run Rust DSpark fixture dumper."
       tiny_ok=0
     fi
   fi
@@ -206,7 +190,7 @@ PY
     echo "==> compare (tiny dspark: logits + output_ids + confidence)"
     # exits 0=PASS, 1=numeric/id/confidence FAIL, 2=harness/malformed ERROR.
     "$HF_PYTHON" "$TOOLS/deepseek_v41_compare_logits.py" \
-        --dspark "$FIX_JSON" "$REF_JSON"
+        --dspark "$TNSR_JSON" "$REF_JSON"
     cmp_rc=$?
     if [ "$cmp_rc" -eq 2 ]; then
       echo "    ERROR: comparator reported a malformed/non-finite input."

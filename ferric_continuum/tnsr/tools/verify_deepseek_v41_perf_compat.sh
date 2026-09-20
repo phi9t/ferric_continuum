@@ -27,17 +27,19 @@
 #   DEEPSEEK_V41_MODEL_DIR / MODEL_DIR  real checkpoint dir (optional)
 #   FERRIC_TNSR_CUDA  set to 0 to force the CUDA level to SKIP (e.g. on a host
 #                     without a GPU); auto-detected from nvidia-smi otherwise
-#   OUT_DIR     scratch dir (default: /tmp/dsv41_perf_compat)
+#   OUT_DIR     scratch dir (default: $TMPDIR/deepseek-v41-perf-compat)
 #   BAZEL       bazel binary (default: bazel; version pinned by .bazelversion)
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$REPO_ROOT"
 
-OUT_DIR="${OUT_DIR:-/tmp/dsv41_perf_compat}"
+OUT_DIR="${OUT_DIR:-${TMPDIR:-/tmp}/deepseek-v41-perf-compat}"
 BAZEL="${BAZEL:-bazel}"
 TOOLS="$REPO_ROOT/ferric_continuum/tnsr/tools"
 MODEL_DIR="${DEEPSEEK_V41_MODEL_DIR:-${MODEL_DIR:-}}"
+MAIN_VENV="${HOME}/workspace/ferric_continuum/.venv-hf/bin/python"
+HF_PYTHON="${HF_PYTHON:-$MAIN_VENV}"
 
 mkdir -p "$OUT_DIR"
 
@@ -47,6 +49,29 @@ ORDER=()
 record() { RESULT["$1"]="$2"; ORDER+=("$1"); }
 
 hr() { echo "------------------------------------------------------------"; }
+
+# ---------------------------------------------------------------------------
+# Python preflight: the comparator imports numpy. Use the same explicit
+# HF_PYTHON contract as the text, multimodal, and DSpark verifier wrappers so an
+# ambient system python without numpy does not turn a valid gate into a harness
+# failure.
+# ---------------------------------------------------------------------------
+HF_OK=1
+HF_REASON=""
+if [ ! -x "$HF_PYTHON" ] && ! command -v "$HF_PYTHON" >/dev/null 2>&1; then
+  HF_OK=0
+  HF_REASON="HF_PYTHON '$HF_PYTHON' is not an executable interpreter"
+elif ! "$HF_PYTHON" - <<'PY' >/dev/null 2>&1
+import numpy  # noqa: F401
+PY
+then
+  HF_OK=0
+  HF_REASON="HF_PYTHON '$HF_PYTHON' lacks numpy"
+fi
+if [ "$HF_OK" -eq 0 ]; then
+  echo "==> Preflight: reference interpreter unavailable ($HF_REASON)"
+  echo "    Comparator self-test will be recorded as SKIP."
+fi
 
 # ---------------------------------------------------------------------------
 # CUDA preflight: only run the GPU forward-parity level when a CUDA runtime and
@@ -70,11 +95,15 @@ if [ "$CUDA_OK" -eq 0 ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# P0: comparator negative control (self-test). numpy-only; runs with system
-# python. Proves the parity comparator actually bites before we trust any level.
+# P0: comparator negative control (self-test). Proves the parity comparator
+# actually bites before we trust any level. The comparator imports numpy, so use
+# the same validated HF_PYTHON interpreter as the reference-capable verifiers.
 # ---------------------------------------------------------------------------
 echo "==> Preflight: comparator negative control (self-test)"
-if python3 "$TOOLS/deepseek_v41_compare_logits.py" --self-test >/dev/null 2>&1; then
+if [ "$HF_OK" -eq 0 ]; then
+  echo "    SKIP: no numpy-capable interpreter ($HF_REASON); cannot run comparator self-test."
+  record "P0-comparator-selftest" SKIP
+elif "$HF_PYTHON" "$TOOLS/deepseek_v41_compare_logits.py" --self-test >/dev/null 2>&1; then
   record "P0-comparator-selftest" PASS
 else
   echo "    FAIL: comparator self-test did not behave (mutation not biting)."

@@ -1,0 +1,57 @@
+#+TITLE: D4 Reference harness and determinism for forward_spec parity
+#+TYPE: grilling
+#+STATUS: resolved
+#+BLOCKED_BY: D1-parity-contract, D3-mtp-loader-shape
+#+PARENT: ../intent.org
+
+* Decision
+
+How does the tiny =forward_spec= reference get produced deterministically, given
+the Wave-1 reference already imports upstream =model.py= under CPU stubs?
+
+* Constraints (from the existing Wave-1/2 reference tool)
+
+- =tools/deepseek_v41_reference.py= imports upstream =model.py= by path under a
+  stub installer, monkeypatching GPU-only kernels: =sparse_attn=, =act_quant=,
+  =fp4_act_quant=, =fp8_gemm=, =fp4_gemm= (raising stubs), and a pure-torch
+  =hc_split_sinkhorn=. It emits the Wave-1/2 JSON schema plus =reference_backend=
+  and =kernel_patch= metadata.
+- The DSpark tiny model needs =dspark_block_size > 0= and
+  =dspark_target_layer_ids= set (the =__main__= in model.py uses
+  =dspark_block_size=6, dspark_target_layer_ids=(3,4)=).
+
+* Resolution
+
+- *Extend the existing reference tool*, do not fork it. Add
+  =--emit-tiny-dspark-checkpoint= and a =--dspark= mode that:
+  1. builds a tiny =ModelArgs= with DSpark enabled (block_size + target layers),
+  2. runs a prefill =forward(x[:, :n])= to get =main_hidden=,
+  3. runs one decode step =forward(x[:, n:n+1], n)= to advance the caches,
+  4. calls =forward_spec(output_ids, main_hidden, n)= and emits =logits= (last
+     draft position, full row) + =confidence= in the same JSON schema.
+- *Force determinism:* monkeypatch upstream =sample= to =argmax= (equivalent to
+  =temperature=0=) so =forward_head='s= draft-token walk is reproducible and the
+  Markov bias lands on a fixed =output_ids= sequence. Record this in
+  =kernel_patch= metadata (=sample->argmax=) so the provenance is explicit, the
+  same way Wave-1 records its patched kernels.
+- *Comparator reuse:* =forward_spec= logits go through the *same*
+  =deepseek_v41_compare_logits.py= gate (cosine/top-1/top-5). Confidence is a
+  scalar (or =[block_size]= vector); add a =--confidence= path to the comparator
+  that checks =max_abs_diff= against a tight tolerance and feeds the same
+  0/1/2 exit-code scheme (PASS/FAIL/ERROR) so the verifier attribution logic is
+  unchanged.
+- *DSpark attention seeding:* the reference must exercise the prefill->decode
+  ordering so =window_kv_cache= is seeded (=start_pos==0= path) before the
+  decode read, exactly as upstream =__main__= does.
+
+* Consequences
+
+- New verifier level =L6-dspark-parity= in a dedicated
+  =verify_deepseek_v41_dspark_compat.sh= mirroring the text/multimodal
+  verifiers: P0 self-checks, HF preflight -> SKIP, tiny parity PASS,
+  real-checkpoint parity SKIP. Reuses the fortified comparator + exit codes.
+- The tnsr CLI keeps *rejecting* speculative flags in text/multimodal mode; a new
+  explicit =--dspark= dump path (or a separate tiny test binary) drives the
+  =forward_spec= dump. Decision deferred to the spec: prefer a Rust unit-test /
+  fixture-driven dump over a user-facing CLI flag, since there is no generation
+  loop to expose.

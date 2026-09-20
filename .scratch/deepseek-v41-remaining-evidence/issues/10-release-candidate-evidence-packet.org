@@ -1,0 +1,109 @@
+#+TITLE: DeepSeek V4.1 release-candidate evidence packet
+#+TYPE: task
+#+STATUS: ready-for-human
+#+BLOCKED_BY: 03-real-text-and-multimodal-parity, 04-real-dspark-mtp-parity, 05-dspark-acceptance-loop-decision, 06-long-context-cache-indexer-stress, 07-native-quantized-fp8-fp4-execution, 08-tensor-parallel-serving-parity, 09-architecture-deepening-followups
+#+PARENT: ../spec.org
+
+* Context
+
+This ticket is the completion gate for the remaining DeepSeek V4.1 work. It
+does not implement model behavior. It assembles the exact evidence package a
+human can use to decide whether to promote the candidate.
+
+Read first:
+
+- =../spec.org=
+- all tickets in =../issues/=
+- =docs/agents/evidence-bound-method.md=
+- =docs/agents/task-runs.md=
+- =ferric_continuum/tnsr/docs/deepseek_v41/spec.org=
+
+* Outcome Packet
+
+Outcome:
+
+- A release-candidate packet states which DeepSeek V4.1 claims are proven,
+  which are intentionally unsupported, which are skipped by environment, and
+  which require human authorization before promotion.
+
+Mode:
+
+- delivery
+
+Non-goals:
+
+- No merge, push, release, or publication.
+- No new implementation beyond small documentation or verifier-summary fixes.
+- No hiding skipped gates behind a pass/fail headline.
+
+Allowed change surfaces:
+
+- This effort's receipts and resolution notes.
+- DeepSeek V4.1 spec/issue docs for final closure pointers.
+
+* Requirements
+
+- Confirm every blocker ticket is done or explicitly deferred by a human-owned
+  decision.
+- Re-run the required final verifier set from a clean worktree.
+- Record the final candidate commit range and verify no dirty files remain.
+- Summarize evidence by claim:
+  - source faithfulness;
+  - CED runtime boundary;
+  - Engram runtime and loading;
+  - CSA2, DeepSeek V4 CSA contrast, indexer, and SWA runtime behavior;
+  - text/multimodal real checkpoint parity;
+  - DSpark MTP real checkpoint parity or accepted boundary;
+  - long-context cache/indexer stress;
+  - native FP8/FP4 execution;
+  - tensor-parallel serving parity;
+  - architecture hardening.
+- Name every SKIP and unsupported surface separately from PASS levels.
+- Produce a short human-promotion section with required authorization and
+  residual risks.
+
+* Acceptance Map
+
+Claim:
+
+- The DeepSeek V4.1 release candidate can be evaluated without reading the raw
+  trajectories.
+
+Evidence:
+
+- A single evidence packet with links to receipts, commands, commits, reviews,
+  skipped gates, and residual risks.
+
+Candidate:
+
+- Clean committed candidate range.
+
+Reuse rule:
+
+- Reuse only while the candidate range and every referenced receipt remain
+  unchanged.
+
+Invalidation rule:
+
+- Any candidate commit, evidence command, model asset, environment, or review
+  change requires refreshing the packet.
+
+* Verification
+
+- =git status --short= has no output.
+- =git log --oneline --decorate -5= records the candidate range.
+- All non-skipped verifier commands from the blocker tickets pass from the final
+  state.
+- =git diff --check= passes for the final documentation changes.
+
+* Comments
+
+* Answer
+
+Assembled in =../receipts/10-release-candidate-evidence-packet.org=.
+
+The candidate has source, focused Bazel, text tiny, multimodal tiny, DSpark
+tiny, reduced SWA/CED cache, and existing tiny CUDA forward evidence. Real
+released-weight parity, native FP8/FP4 execution, tensor-parallel serving, and
+publication remain human-gated and are named as residual risks rather than
+closed release claims.

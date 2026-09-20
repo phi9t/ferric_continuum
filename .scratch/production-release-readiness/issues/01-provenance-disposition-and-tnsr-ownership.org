@@ -1,0 +1,21 @@
+#+TITLE: Establish Ferric provenance, disposition, and tnsr ownership
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY:
+#+PARENT: ../spec.org
+
+* Requirements
+
+- Document that no trustworthy cached public boundary exists and prepare the
+  evidence required for the separate clean-root approval in ticket 07.
+- Inventory every branch, worktree, dirty tree, commit, tracker artifact,
+  dependency, and publication object; assign one disposition.
+- Map all retained standalone =tnsr= work to Ferric code, tests, docs, or an
+  explicit rejection.
+
+* Verification
+
+Independent provenance review confirms complete coverage without changing or
+deleting existing work.
+
+* Comments

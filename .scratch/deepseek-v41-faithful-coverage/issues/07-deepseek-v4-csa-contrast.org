@@ -1,0 +1,56 @@
+#+TITLE: DeepSeek V4 CSA contrast and V4.1 CSA2 invariants
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 04-csa2-indexer-and-swa-runtime
+#+PARENT: ../spec.org
+
+* Context
+
+The user explicitly asked to cover CSA from DeepSeek V4 as well as CSA2. This is
+not a request to implement a V4 model; it is a request to faithfully preserve the
+contrast so V4.1 tests do not accidentally encode older CSA/HCA assumptions.
+
+* Requirements
+
+- Add a short source-grounded note, either in the DeepSeek V4.1 docs or test
+  comments, naming the V4-to-V4.1 attention changes:
+  - V4 used a CSA/HCA hybrid framing.
+  - V4.1 Flash uses pure CSA2.
+  - V4.1 shares global KV, indexer K, and Top-K indices according to
+    Full/Reindex/Reuse modes.
+  - V4.1 removes or avoids older CSA assumptions such as overlapping source
+    entries and absolute-position compressor behavior unless primary-source
+    evidence requires retaining them.
+- Add regression names/assertions that make the CSA2 invariants visible when
+  reading test output.
+- Do not add a second V4 runtime or pretend the local mirror is a V4 source.
+
+* Out of scope
+
+- DeepSeek V4 checkpoint loading.
+- Numeric parity against a V4 model.
+
+* Verification
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_source_tests //ferric_continuum/tnsr:deepseek_v41_math_tests=
+
+* Answer
+
+Completed 2026-09-20.
+
+- Added a source-grounded V4-to-V4.1 contrast note to
+  =ferric_continuum/tnsr/docs/deepseek_v41/research/upstream-architecture.md=.
+  The note explicitly states that V4 used a CSA/HCA hybrid framing while V4.1
+  Flash uses pure CSA2.
+- Kept the local scope to V4.1: the note says this is not a DeepSeek V4 runtime
+  contract and points implementation expectations at V4.1 Full/Reindex/Reuse
+  sharing semantics.
+- Made the BUILD-level source-test guardrail name the DeepSeek V4 CSA contrast
+  alongside CED, CSA2, indexer, SWA, Engram, and DSpark/MTP.
+- Renamed the CSA2 runtime regression to
+  =csa2_not_v4_csa_hca_full_reindex_and_reuse_share_kv_index_k_and_topk= so
+  test output exposes the invariant directly.
+
+Verification:
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_source_tests //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests= passed.

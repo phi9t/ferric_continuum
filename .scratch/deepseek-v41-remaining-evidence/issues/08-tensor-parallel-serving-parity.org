@@ -1,0 +1,106 @@
+#+TITLE: Tensor-parallel serving parity for DeepSeek V4.1
+#+TYPE: task
+#+STATUS: ready-for-human
+#+BLOCKED_BY: 02-real-checkpoint-asset-admission, 03-real-text-and-multimodal-parity
+#+PARENT: ../spec.org
+
+* Context
+
+The current DeepSeek V4.1 loader validates static tensor-parallel shard layout
+and can load one converted TP shard fixture. It does not prove that multi-rank
+serving produces the same logits as the single-process reference.
+
+Read first:
+
+- =../spec.org=
+- =ferric_continuum/tnsr/src/deepseek_v41/load.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/model.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/checkpoint_io.rs=
+- =ferric_continuum/tnsr/docs/deepseek_v41/research/upstream-architecture.md=
+
+* Outcome Packet
+
+Outcome:
+
+- Tensor-parallel DeepSeek V4.1 execution is either proven against a
+  single-process baseline or explicitly scoped as unsupported with exact
+  missing mechanisms.
+
+Mode:
+
+- experiment if no serving substrate exists; delivery if the needed local TP
+  execution substrate is already available.
+
+Non-goals:
+
+- No remote cluster scheduler.
+- No production service deployment.
+- No native FP8/FP4 kernel requirement unless ticket 07 is already complete and
+  explicitly included.
+
+Allowed external effects:
+
+- Local multi-process or single-host multi-rank execution only.
+
+Escalation conditions:
+
+- Required collectives or process launch primitives are absent.
+- A local TP run would require external orchestration not authorized by this
+  ticket.
+- TP output diverges from the single-process baseline.
+
+* Requirements
+
+- Define a fixed TP world size and launch method for local validation.
+- Bind the serving candidate to commit, model asset receipt, launch config,
+  rank count, environment, and input prompts.
+- Check that shard-to-rank assignment follows the release or converted
+  checkpoint layout.
+- Compare TP logits to the single-process candidate from ticket 03.
+- Record all communication, sharding, and reduction assumptions as evidence,
+  not as implicit runtime folklore.
+- If full TP execution is not possible, close the experiment with the exact
+  unsupported mechanisms and follow-up delivery tickets.
+
+* Acceptance Map
+
+Claim:
+
+- Tensor-parallel serving preserves DeepSeek V4.1 logits relative to the
+  single-process reference for the fixed validation inputs.
+
+Evidence:
+
+- Launch receipt, rank logs, candidate-bound comparator output, and shard
+  assignment receipt.
+
+Candidate:
+
+- TP serving candidate commit plus admitted model-dir receipt.
+
+Reuse rule:
+
+- Reuse only for the same candidate, world size, checkpoint, input set, launch
+  config, and runtime.
+
+Invalidation rule:
+
+- Any loader sharding, collective, TP layout, serving wrapper, model asset, or
+  launch-environment change reruns this ticket.
+
+* Verification
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests=
+- A ticket-local TP verifier command that prints PASS/SKIP/FAIL and never
+  treats SKIP as PASS.
+
+* Comments
+
+* Answer
+
+Deferred to a separate human-authorized TP serving run. See
+=../receipts/08-tensor-parallel-serving-parity.org=.
+
+Static loader/config shard-layout tests remain in the baseline, but this run
+did not have admitted real assets, a real single-process parity candidate, or a
+local multi-rank serving substrate. TP serving parity is therefore not claimed.

@@ -1,0 +1,45 @@
+#+TITLE: W3-03 DSpark head model + forward_spec assembly
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: W3-02-dspark-attention-and-heads-fixtures
+#+PARENT: ../spec.org
+
+* Context
+
+Assemble the DSpark stages into a head module and implement =forward_spec= over
+the ported ops, with sampling forced to argmax so parity is deterministic.
+
+Read first: =../spec.org=, =../issues/D2-executed-vs-represented.org=,
+=../issues/D4-reference-harness-determinism.org=, upstream =DSparkBlock=
+(model.py 1100-1156) and =Transformer.forward_spec= (1274-1282), and the
+existing =src/deepseek_v41/model.rs= (Block/ResidualStream seams).
+
+* Requirements
+
+- =DeepSeekV41DsparkStage=: a =DeepSeekV41Block= plus optional
+  =main_proj/main_norm= (stage 0) and =markov_head/confidence_head/norm= (last
+  stage).
+- =DeepSeekV41DsparkHead::forward_spec(main_hidden, input_ids, start_pos) ->
+  (logits, confidence)=:
+  - stage 0 =forward_embed=: main_norm(main_proj(main_hidden)); draft ids =
+    [input_id, noise_token_id x (block_size-1)]; embed + expand to hc_mult.
+  - run stages with =main_x= threaded, no VL bias, identity pre_mix start.
+  - last-stage =forward_head=: hc_pre, norm, head -> logits; walk block_size
+    positions applying the Markov bias with =sample->argmax=; confidence head
+    over concat(hidden, stacked markov_embed).
+  - prefill (=start_pos == 0=) seeds caches and returns no head output, matching
+    upstream (=forward_spec= returns None at prefill).
+- Reuse existing HC/MoE/norm/embedding seams; do not re-derive them.
+
+* Out of scope
+
+- No checkpoint loading yet (W3-04); build from in-test tensors.
+- No user-facing CLI flag.
+
+* Verification
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_model_tests= green.
+- A tiny in-test DSpark head produces finite logits + confidence with the
+  expected shapes ([block_size, vocab] logits, [block_size] confidence).
+
+* Comments

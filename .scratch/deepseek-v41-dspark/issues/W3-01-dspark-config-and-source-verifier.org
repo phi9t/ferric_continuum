@@ -1,0 +1,41 @@
+#+TITLE: W3-01 DSpark config activation + source verifier
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY:
+#+PARENT: ../spec.org
+
+* Context
+
+Wave 1 parses DSpark config fields into =DeepSeekV41DeferredDsparkConfig= but
+never executes them. Wave 3 activates them, so drop "Deferred" and add source
+claims covering the DSpark forward pieces.
+
+Read first: =../spec.org=, =../issues/D3-mtp-loader-shape.org=,
+=../../deepseek-v41-flash/upstream/inference/model.py= (ModelArgs lines 129-136,
+=get_moe_config=, DSpark classes 1032-1156), and the existing
+=ferric_continuum/tnsr/src/deepseek_v41/config.rs=.
+
+* Requirements
+
+- Rename =DeepSeekV41DeferredDsparkConfig= -> =DeepSeekV41DsparkConfig= across
+  the crate (config.rs, model.rs, load.rs, tests). No behavior change to
+  parsing; both nested-HF and flat converted config paths keep working.
+- Add a =dspark_enabled(&self) -> bool= helper (=dspark_block_size > 0=), mirror
+  of =vision_enabled=.
+- Extend =tools/deepseek_v41_verify_sources.py= manifest with DSpark claims:
+  =forward_spec= exists but =generate.py= does not call it; =DSparkBlock= is the
+  =mtp.*= namespace; Markov + confidence heads live on the last stage; expert
+  counts fall back via =get_moe_config=.
+- Extend =verify_deepseek_v41_sources.sh= only if a new manifest path is needed.
+
+* Out of scope
+
+- No forward execution (W3-02+). No loader changes (W3-04).
+
+* Verification
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests= green.
+- =python3 tools/deepseek_v41_verify_sources.py --self-test-negative= exits 0.
+- Config tests assert DSpark fields parse and =dspark_enabled= is correct.
+
+* Comments

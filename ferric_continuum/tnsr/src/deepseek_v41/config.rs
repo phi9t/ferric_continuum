@@ -121,6 +121,24 @@ pub struct DeepSeekV41ReleaseIndex {
 }
 
 impl DeepSeekV41TextConfig {
+    /// Number of causal-encoder layers in the released V4.1 Flash architecture.
+    ///
+    /// Tiny test fixtures can use fewer than 40 layers; those fixtures are
+    /// treated as encoder-only unless they opt into the full release count.
+    pub fn causal_encoder_layers(&self) -> usize {
+        if self.num_hidden_layers == 40 {
+            20
+        } else {
+            self.num_hidden_layers
+        }
+    }
+
+    /// Number of decoder layers in the released V4.1 Flash architecture.
+    pub fn decoder_layers(&self) -> usize {
+        self.num_hidden_layers
+            .saturating_sub(self.causal_encoder_layers())
+    }
+
     pub fn from_hf_json(path: &Path) -> Result<Self, String> {
         let json = read_json(path, "config.json")?;
         let root = as_object(&json, "config.json")?;
@@ -337,6 +355,14 @@ impl DeepSeekV41TextConfig {
                 "config: rope_theta ({}) must be a positive finite value",
                 self.rope_theta
             ));
+        }
+        if self.num_hidden_layers == 40
+            && (self.causal_encoder_layers() != 20 || self.decoder_layers() != 20)
+        {
+            return Err(
+                "config: DeepSeek V4.1 release must split as 20 encoder + 20 decoder layers"
+                    .to_string(),
+            );
         }
         Ok(())
     }

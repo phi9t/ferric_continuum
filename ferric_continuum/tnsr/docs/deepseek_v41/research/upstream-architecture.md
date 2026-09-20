@@ -120,6 +120,12 @@ README description of CSA2 Full/Reindex/Reuse modes and hierarchical sparse
 indexing (`README.md:49-51`) and the tech report's statements that CSA2 shares
 main KV, indexer K, and Top-K indices across layers (`DeepSeek_V41_Tech_Report.txt:767-785`).
 
+The DeepSeek V4.1 attention note should not be read as a DeepSeek V4 runtime
+contract. The report contrasts V4's `CSA-HCA` hybrid with V4.1 Flash's pure
+CSA2 design (`DeepSeek_V41_Tech_Report.txt:739-742`): this codebase preserves
+that contrast by implementing V4.1's Full/Reindex/Reuse sharing semantics, not
+older overlapping CSA source-entry or absolute-position compressor assumptions.
+
 The FP4 main-KV cache is a runtime quantization path, not just checkpoint
 storage. The reference says compressed KV uses groups of 16 with E4M3 scales,
 while the indexer uses groups of 32 with E8M0 scales (`inference/model.py:758-760`).

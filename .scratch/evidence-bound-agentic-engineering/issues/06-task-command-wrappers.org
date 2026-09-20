@@ -1,0 +1,46 @@
+#+TITLE: Add task command wrappers over one runtime module
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 01, 02, 03, 05
+#+PARENT: ../spec.org
+
+* Context
+
+Command entry points should be thin wrappers over one deep task-runtime module.
+The interface should be stable while internals own Git inspection, Kata
+projection, trajectory adapters, snapshots, evidence records, and recovery.
+
+* Requirements
+
+- Provide the stable command surface:
+  - ~scripts/agentic/task context <ref>~
+  - ~scripts/agentic/task validate <ref>~
+  - ~scripts/agentic/task start <ref>~
+  - ~scripts/agentic/task checkpoint <ref> ...~
+  - ~scripts/agentic/task status <ref>~
+  - ~scripts/agentic/task resume <ref>~
+  - ~scripts/agentic/task rebind <ref> ...~
+  - ~scripts/agentic/task finish <ref> ...~
+- Preserve compatibility wrappers when present:
+  - ~scripts/agentic/task-start~
+  - ~scripts/agentic/task-finish~
+  - ~scripts/agentic/new-worktree~
+- Keep policy enforcement inside the shared runtime module, not copied across
+  wrappers.
+- Provide structured JSON output for machine callers and concise text output
+  for humans.
+
+* Out of scope
+
+- Implementing remote execution.
+- Automatic merge or push.
+- Replacing Kata.
+
+* Verification
+
+- CLI contract tests cover each subcommand's success and failure shape.
+- Wrapper tests prove legacy command names call the same implementation.
+- Golden JSON tests prove machine output is stable.
+- Help text names human-authorized operations explicitly.
+
+* Comments

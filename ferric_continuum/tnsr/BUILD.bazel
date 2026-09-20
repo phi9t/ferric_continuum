@@ -1,3 +1,4 @@
+load("@rules_python//python:defs.bzl", "py_test")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_doc", "rust_doc_test", "rust_library", "rust_test")
 
 # Matches `--config=cuda` / `@rules_cuda//cuda:enable=True`.
@@ -203,6 +204,20 @@ rust_binary(
     ],
 )
 
+# Emit Rust DSpark tiny-fixture output in the comparator JSON schema. The
+# DSpark verifier uses this as the tnsr side of the Level-6 parity check.
+rust_binary(
+    name = "deepseek_v41_dspark_fixture_dump",
+    srcs = ["src/bin/deepseek_v41_dspark_fixture_dump.rs"],
+    crate_name = "deepseek_v41_dspark_fixture_dump",
+    edition = "2021",
+    data = ["testdata/deepseek_v41/dspark_tiny_model_fixture.json"],
+    deps = [
+        ":tnsr",
+        "@crates//:serde_json",
+    ],
+)
+
 # Integration tests: gradient checks, checkpoint correctness, shape panics
 rust_test(
     name = "tnsr_tests",
@@ -336,6 +351,30 @@ rust_test(
         ":tnsr",
         "@crates//:serde_json",
     ],
+)
+
+# DeepSeek V4.1 primary-source claim coverage. This is intentionally small and
+# CPU-only: it fails if the manifest stops pinning the release-defining CED,
+# CSA2, DeepSeek V4 CSA contrast, indexer, SWA, Engram, or DSpark/MTP source
+# facts.
+py_test(
+    name = "deepseek_v41_source_tests",
+    srcs = [
+        "tools/deepseek_v41_verify_sources.py",
+        "tools/deepseek_v41_verify_sources_test.py",
+    ],
+    data = [
+        "testdata/deepseek_v41/source_manifest.json",
+        "third_party/deepseek_v41/upstream/DeepSeek_V41_Tech_Report.txt",
+        "third_party/deepseek_v41/upstream/README.md",
+        "third_party/deepseek_v41/upstream/inference/engram.py",
+        "third_party/deepseek_v41/upstream/inference/generate.py",
+        "third_party/deepseek_v41/upstream/inference/image_processor.py",
+        "third_party/deepseek_v41/upstream/inference/model.py",
+        "third_party/deepseek_v41/upstream/inference/vision.py",
+    ],
+    main = "tools/deepseek_v41_verify_sources_test.py",
+    deps = ["@rules_python//python/runfiles"],
 )
 
 # DeepSeek V4.1 op-level math fixtures for RoPE, sparse indices, and compression.

@@ -1,0 +1,106 @@
+#+TITLE: Native FP8/FP4 execution for DeepSeek V4.1
+#+TYPE: task
+#+STATUS: ready-for-human
+#+BLOCKED_BY: 01-baseline-evidence-inventory
+#+PARENT: ../spec.org
+
+* Context
+
+The current loader decodes FP8/FP4 checkpoint weights to f32 and records
+=QuantKind=. That is correct for inspectable CPU parity, but it does not prove
+the release's native quantized execution or FP4 main-KV cache behavior.
+
+Read first:
+
+- =../spec.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/research/upstream-architecture.md=
+- =ferric_continuum/tnsr/src/deepseek_v41/checkpoint_io.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/load.rs=
+- =ferric_continuum/tnsr/src/cuda_ffi.rs=
+- =ferric_continuum/cuda_kernels/=
+
+* Outcome Packet
+
+Outcome:
+
+- Native quantized DeepSeek V4.1 execution is available behind an explicit gate
+  and agrees with the existing f32/dequantized baseline on focused fixtures.
+
+Mode:
+
+- delivery, with an experiment subtask if kernel design tradeoffs remain open.
+
+Non-goals:
+
+- No silent replacement of CPU f32 parity.
+- No production throughput claim until ticket 10 records an evidence packet.
+- No tensor-parallel serving claim.
+
+Allowed external effects:
+
+- Local CUDA builds/tests on a GPU host.
+
+Escalation conditions:
+
+- CUDA runtime lacks required datatype support.
+- Reference quantization semantics are ambiguous after reading upstream
+  =convert.py= and =kernel.py=.
+- Native kernel output disagrees with f32/dequant baseline beyond tolerance.
+
+* Requirements
+
+- Preserve =QuantKind= through the loader to the execution path instead of
+  immediately erasing the source dtype where a native kernel can use it.
+- Add explicit data structures for FP8 E4M3 weights with E8M0 block scales and
+  FP4 E2M1 packed weights with E8M0 block scales.
+- Implement native or explicitly emulated CUDA kernels for the smallest useful
+  matmul/cache operation before broad model integration.
+- Add agreement tests against the existing f32/dequant path for:
+  - FP8 linear weight blocks;
+  - FP4 expert weight blocks;
+  - FP4 main-KV cache encode/decode or attention read, if implemented.
+- Keep the feature opt-in through =--config=cuda= or an explicit runtime knob.
+- Fail loudly when the quantized path is requested but unsupported.
+
+* Acceptance Map
+
+Claim:
+
+- Native FP8/FP4 execution is numerically consistent with the dequantized
+  baseline for supported DeepSeek V4.1 operations.
+
+Evidence:
+
+- CUDA-gated agreement tests with max_abs_diff/tolerance and architecture
+  receipt.
+
+Candidate:
+
+- Quantized execution candidate commit plus GPU runtime identity.
+
+Reuse rule:
+
+- Reuse only for the same candidate, GPU architecture, CUDA runtime, and
+  quantized fixture bytes.
+
+Invalidation rule:
+
+- Any quantization table, scale decode, kernel, loader, or CUDA runtime change
+  reruns agreement tests.
+
+* Verification
+
+- =bazel test --config=cuda //ferric_continuum/tnsr/... --test_tag_filters=cuda,requires-gpu=
+- =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_perf_compat.sh=
+- =rustfmt --edition 2021 --check= on changed Rust/CUDA-facing Rust files.
+
+* Comments
+
+* Answer
+
+Deferred to a separate human-authorized delivery or experiment run. See
+=../receipts/07-native-quantized-fp8-fp4-execution.org=.
+
+This run preserved the existing f32/dequantized DeepSeek V4.1 path and verified
+the current CUDA tiny forward level through =verify_deepseek_v41_perf_compat.sh=.
+It did not implement native FP8/FP4 kernels or claim native quantized execution.

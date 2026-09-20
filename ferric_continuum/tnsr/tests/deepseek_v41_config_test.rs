@@ -38,6 +38,8 @@ fn assert_release_text_config(config: &DeepSeekV41TextConfig) {
     assert_eq!(config.hidden_size, 5120);
     assert_eq!(config.moe_intermediate_size, 2304);
     assert_eq!(config.num_hidden_layers, 40);
+    assert_eq!(config.causal_encoder_layers(), 20);
+    assert_eq!(config.decoder_layers(), 20);
     assert_eq!(config.num_attention_heads, 64);
     assert_eq!(config.num_key_value_heads, 1);
     assert_eq!(config.head_dim, 512);

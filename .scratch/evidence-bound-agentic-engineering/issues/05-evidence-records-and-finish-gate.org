@@ -1,0 +1,44 @@
+#+TITLE: Implement evidence records and task-finish gate
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 01-contract-schema-and-validator, 02-run-journal-and-checkpoints
+#+PARENT: ../spec.org
+
+* Context
+
+Verification should challenge claims about a fixed candidate. Passing commands
+are evidence only when their inputs, environment, and candidate identity are
+recorded and still valid.
+
+* Requirements
+
+- Represent acceptance claims as a machine-readable acceptance map.
+- Record evidence with candidate identity, command or evaluator, inputs,
+  environment, exit code, retained output, and reuse/invalidation rules.
+- Distinguish targeted checks, subsystem suites, integration checks, and
+  environment qualification.
+- Invalidate evidence when candidate bytes or declared verification inputs
+  change outside the allowed reuse rule.
+- Require review findings to be disposed as corrected, rejected with
+  justification, or deferred by authorized decision.
+- Implement ~task-finish~ checks: clean worktree/index, no Git operation,
+  matching context digest, valid trailers on task-owned commits, required
+  reviews, mode-specific outputs and verification, latest checkpoint, no
+  unresolved recovery ambiguity, journal/Kata reconciliation, and stable final
+  HEAD.
+- Keep completion separate from merge, push, deploy, and publication.
+
+* Out of scope
+
+- Push, merge, deploy, or publication automation.
+- Reviewer model selection policy.
+- Cryptographic attestation against a malicious local writer.
+
+* Verification
+
+- Tests prove stale evidence is rejected after candidate changes.
+- Tests prove ~task-finish~ rejects dirty worktrees, missing reviews, missing
+  outputs, invalid trailers, changed context digest, and unresolved recovery.
+- Tests prove an experiment can finish with rejected or inconclusive results.
+
+* Comments

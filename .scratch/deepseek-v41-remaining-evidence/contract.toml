@@ -1,0 +1,72 @@
+schema_version = 1
+kata_ref = "deepseek-v41-remaining-evidence"
+mode = "delivery"
+
+[[context]]
+role = "workflow"
+path = "docs/agents/evidence-bound-method.md"
+
+[[context]]
+role = "task_run_model"
+path = "docs/agents/task-runs.md"
+
+[[context]]
+role = "domain"
+path = "ferric_continuum/tnsr/CONTEXT.md"
+
+[[context]]
+role = "parent_spec"
+path = "ferric_continuum/tnsr/docs/deepseek_v41/spec.org"
+
+[[context]]
+role = "remaining_spec"
+path = ".scratch/deepseek-v41-remaining-evidence/spec.org"
+
+[[context]]
+role = "upstream_research"
+path = "ferric_continuum/tnsr/docs/deepseek_v41/research/upstream-architecture.md"
+
+[outputs]
+required = [
+  "baseline evidence receipt",
+  "real checkpoint asset admission receipt",
+  "real text and multimodal parity disposition",
+  "real DSpark MTP parity disposition",
+  "DSpark acceptance-loop decision",
+  "long-context cache/indexer stress evidence",
+  "native FP8/FP4 execution evidence or explicit deferral",
+  "tensor-parallel serving evidence or explicit deferral",
+  "architecture-deepening disposition",
+  "release-candidate evidence packet",
+]
+
+[verification]
+commands = [
+  "ferric_continuum/tnsr/tools/verify_deepseek_v41_sources.sh",
+  "bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests //ferric_continuum/tnsr:deepseek_v41_source_tests",
+  "BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh",
+  "BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_multimodal_compat.sh",
+  "BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_dspark_compat.sh",
+  "BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_perf_compat.sh",
+]
+
+[authorization]
+gates = [
+  "download-real-deepseek-v41-checkpoint",
+  "run-high-cost-gpu-or-long-context-job",
+  "publish-release-candidate",
+  "push-or-merge",
+]
+
+[recovery]
+allow_automatic_resume = true
+checkpoint_policy = [
+  "after-baseline",
+  "after-green",
+  "after-commit",
+  "after-review",
+  "before-external-side-effect",
+  "on-failure",
+  "before-handoff",
+  "at-completion",
+]

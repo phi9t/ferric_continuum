@@ -5,6 +5,7 @@
 //! by unit verifiers and fixture generation.
 
 use crate::deepseek_v41::config::DeepSeekV41TextConfig;
+use crate::ops::linear;
 use crate::tensor::{Shape, Tensor, TensorValue};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,13 +145,55 @@ pub fn ngram_hashes(
     layout: &EngramLayout,
     state: &mut NgramHashState,
 ) -> Vec<usize> {
+    ngram_hashes_masked(input_ids, start_pos, None, layout, state)
+}
+
+pub fn ngram_hashes_masked(
+    input_ids: &[usize],
+    start_pos: usize,
+    token_mask: Option<&[bool]>,
+    layout: &EngramLayout,
+    state: &mut NgramHashState,
+) -> Vec<usize> {
+    ngram_hashes_batched(
+        input_ids,
+        1,
+        input_ids.len(),
+        start_pos,
+        token_mask,
+        layout,
+        state,
+    )
+}
+
+pub fn ngram_hashes_batched(
+    input_ids: &[usize],
+    batch: usize,
+    seqlen: usize,
+    start_pos: usize,
+    token_mask: Option<&[bool]>,
+    layout: &EngramLayout,
+    state: &mut NgramHashState,
+) -> Vec<usize> {
+    assert_eq!(
+        input_ids.len(),
+        batch * seqlen,
+        "input_ids length must be batch*seqlen"
+    );
+    if let Some(mask) = token_mask {
+        assert_eq!(
+            mask.len(),
+            batch * seqlen,
+            "token_mask length must match input_ids"
+        );
+    }
     assert!(
-        start_pos + input_ids.len() <= state.max_seq_len,
+        start_pos + seqlen <= state.max_seq_len,
         "start_pos + seqlen exceeds max_seq_len"
     );
     assert!(
-        state.max_batch_size >= 1,
-        "fixture helper assumes batch=1 but max_batch_size was 0"
+        batch <= state.max_batch_size,
+        "batch exceeds max_batch_size"
     );
     let n_layers = layout.layer_ids.len();
     let n_heads = layout.n_heads;
@@ -166,13 +209,21 @@ pub fn ngram_hashes(
         "layout offsets length mismatch"
     );
 
-    // Cache: batch fixed to 0 for these fixtures.
-    for (i, &id) in input_ids.iter().enumerate() {
-        let compressed = *state
-            .token_map
-            .get(id)
-            .unwrap_or_else(|| panic!("token id {id} out of bounds for token_map"));
-        state.cache[start_pos + i] = compressed;
+    const DEAD: i64 = -1;
+
+    for b in 0..batch {
+        for i in 0..seqlen {
+            let flat = b * seqlen + i;
+            let id = input_ids[flat];
+            let mut compressed = *state
+                .token_map
+                .get(id)
+                .unwrap_or_else(|| panic!("token id {id} out of bounds for token_map"));
+            if token_mask.is_some_and(|mask| !mask[flat]) {
+                compressed = DEAD;
+            }
+            state.cache[b * state.max_seq_len + start_pos + i] = compressed;
+        }
     }
 
     assert!(
@@ -185,29 +236,37 @@ pub fn ngram_hashes(
         "multipliers must be [n_layers * max_ngram_size]"
     );
 
-    let mut out = Vec::with_capacity(input_ids.len() * n_layers * n_hash_cols);
-    for pos_offset in 0..input_ids.len() {
-        let pos = start_pos + pos_offset;
+    let mut out = Vec::with_capacity(batch * seqlen * n_layers * n_hash_cols);
+    for b in 0..batch {
+        for pos_offset in 0..seqlen {
+            let pos = start_pos + pos_offset;
 
-        // tokens[shift] gives the compressed id shift tokens back, padded at the start.
-        let mut tokens = vec![state.pad_id; layout.max_ngram_size];
-        for shift in 0..layout.max_ngram_size {
-            if pos >= shift {
-                tokens[shift] = state.cache[pos - shift];
+            // tokens[shift] gives the compressed id shift tokens back, padded at
+            // the sequence start and after any masked image/dead token.
+            let mut tokens = vec![state.pad_id; layout.max_ngram_size];
+            let mut blocked = false;
+            for shift in 0..layout.max_ngram_size {
+                let source = if pos >= shift {
+                    state.cache[b * state.max_seq_len + pos - shift]
+                } else {
+                    state.pad_id
+                };
+                blocked = blocked || pos < shift || source == DEAD;
+                tokens[shift] = if blocked { state.pad_id } else { source };
             }
-        }
 
-        for layer in 0..n_layers {
-            let mult_base = layer * layout.max_ngram_size;
-            let mut rolling = tokens[0] * state.multipliers[mult_base];
-            for lookback in 1..layout.max_ngram_size {
-                rolling ^= tokens[lookback] * state.multipliers[mult_base + lookback];
-                let col_base = (lookback - 1) * n_heads;
-                for head in 0..n_heads {
-                    let col = col_base + head;
-                    let prime = layout.primes[layer * n_hash_cols + col] as i64;
-                    let offset = layout.offsets[layer * n_hash_cols + col] as i64;
-                    out.push(((rolling.rem_euclid(prime)) + offset) as usize);
+            for layer in 0..n_layers {
+                let mult_base = layer * layout.max_ngram_size;
+                let mut rolling = tokens[0] * state.multipliers[mult_base];
+                for lookback in 1..layout.max_ngram_size {
+                    rolling ^= tokens[lookback] * state.multipliers[mult_base + lookback];
+                    let col_base = (lookback - 1) * n_heads;
+                    for head in 0..n_heads {
+                        let col = col_base + head;
+                        let prime = layout.primes[layer * n_hash_cols + col] as i64;
+                        let offset = layout.offsets[layer * n_hash_cols + col] as i64;
+                        out.push(((rolling.rem_euclid(prime)) + offset) as usize);
+                    }
                 }
             }
         }
@@ -299,10 +358,110 @@ pub fn engram_update(
 pub struct DeepSeekV41Engram {
     pub q_weight: Vec<f32>,
     pub k_weight: Vec<f32>,
+    /// Loaded Engram hash table rows `[num_embeddings, head_dim]`.
+    ///
+    /// Older fixture tests inject precomputed key/value tensors directly, so
+    /// this remains optional until the full table-lookup runtime lands.
+    pub embed_weight: Option<Tensor>,
+    /// Loaded Engram `wkv` projection in tnsr `[in, out]` layout, where
+    /// `in = n_hash_cols * head_dim` and `out = dim * (hc_mult + 1)`.
+    pub wkv_weight: Option<Tensor>,
     pub eps: f32,
 }
 
 impl DeepSeekV41Engram {
+    pub fn lookup_key_value(
+        &self,
+        hash_ids: &[usize],
+        batch: usize,
+        seqlen: usize,
+    ) -> (Tensor, Tensor) {
+        let embed = self
+            .embed_weight
+            .as_ref()
+            .expect("Engram embed_weight is required for hash lookup");
+        let wkv = self
+            .wkv_weight
+            .as_ref()
+            .expect("Engram wkv_weight is required for hash lookup");
+        let embed_value = embed.inner.borrow().value.clone();
+        let embed_shape = embed_value.shape.0;
+        assert_eq!(
+            embed_shape.len(),
+            2,
+            "Engram embed_weight must be [rows, head_dim]"
+        );
+        assert_eq!(
+            hash_ids.len() % (batch * seqlen),
+            0,
+            "Engram hash_ids length must be batch*seqlen*n_hash_cols"
+        );
+        let n_hash_cols = hash_ids.len() / (batch * seqlen);
+        let head_dim = embed_shape[1];
+        let mut gathered = Vec::with_capacity(batch * seqlen * n_hash_cols * head_dim);
+        for &id in hash_ids {
+            assert!(
+                id < embed_shape[0],
+                "Engram hash id {id} out of bounds for table rows {}",
+                embed_shape[0]
+            );
+            let row = id * head_dim;
+            gathered.extend_from_slice(&embed_value.data.as_ref()[row..row + head_dim]);
+        }
+        let embedded = Tensor::from_value_no_grad(TensorValue::from_vec(
+            Shape(vec![batch, seqlen, n_hash_cols * head_dim]),
+            gathered,
+        ));
+        let kv = linear::linear(&embedded, wkv, "deepseek.engram.wkv");
+        let kv_value = kv.inner.borrow().value.clone();
+        let kv_shape = kv_value.shape.0;
+        assert_eq!(
+            kv_shape.len(),
+            3,
+            "Engram wkv output must be [B,S,D*(HC+1)]"
+        );
+        let hc_dim = self.q_weight.len();
+        assert!(
+            kv_shape[2] > hc_dim,
+            "Engram wkv output must contain key plus value"
+        );
+        let dim = kv_shape[2] - hc_dim;
+        assert_eq!(
+            hc_dim % dim,
+            0,
+            "Engram q_weight length must be hc_mult*dim"
+        );
+        let hc_mult = hc_dim / dim;
+        let mut key = Vec::with_capacity(batch * seqlen * hc_dim);
+        let mut value = Vec::with_capacity(batch * seqlen * dim);
+        for row in kv_value.data.as_ref().chunks_exact(kv_shape[2]) {
+            key.extend_from_slice(&row[..hc_dim]);
+            value.extend_from_slice(&row[hc_dim..]);
+        }
+        (
+            Tensor::from_value_no_grad(TensorValue::from_vec(
+                Shape(vec![batch, seqlen, hc_mult, dim]),
+                key,
+            )),
+            Tensor::from_value_no_grad(TensorValue::from_vec(
+                Shape(vec![batch, seqlen, dim]),
+                value,
+            )),
+        )
+    }
+
+    pub fn forward_hashes(
+        &self,
+        x: &Tensor,
+        hash_ids: &[usize],
+        token_mask: Option<&[bool]>,
+    ) -> Tensor {
+        let shape = x.shape().0;
+        assert_eq!(shape.len(), 4, "Engram input must be [B,S,HC,D]");
+        let (key, value) = self.lookup_key_value(hash_ids, shape[0], shape[1]);
+        self.forward_layer(x, &key, &value, token_mask)
+    }
+
     pub fn forward_layer(
         &self,
         x: &Tensor,

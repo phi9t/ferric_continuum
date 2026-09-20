@@ -219,6 +219,174 @@
         ]
       },
       "why": "Confirms the shipped generation loop never invokes DSpark, so Wave-3 parity is proven against forward_spec directly rather than an end-to-end sampling path."
+    },
+    {
+      "id": "report-ced-decoder-global-kv",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/DeepSeek_V41_Tech_Report.txt",
+      "expected": {
+        "all_phrases": [
+          "We adopt a Causal Encoder-Decoder (CED) architecture",
+          "decoder global KV is projected",
+          "from the final encoder hidden states"
+        ]
+      },
+      "why": "Pins the CED boundary that decoder global KV must source from the encoder, not from a flat decoder-only loop."
+    },
+    {
+      "id": "report-csa2-sharing-semantics",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/DeepSeek_V41_Tech_Report.txt",
+      "expected": {
+        "all_phrases": [
+          "CSA2 has three statically assigned",
+          "modes: Full, Reindex, and Reuse",
+          "Full Mode generates global KV and performs indexing",
+          "Reindex Mode reuses the global KV from a preceding layer",
+          "Reuse Mode reuses both global",
+          "KV and the Top-K indices in a preceding layer"
+        ]
+      },
+      "why": "Locks the Full/Reindex/Reuse split so runtime tests can reject a single collapsed sparse-attention mode."
+    },
+    {
+      "id": "report-v4-csa-vs-v41-csa2",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/DeepSeek_V41_Tech_Report.txt",
+      "expected": {
+        "all_phrases": [
+          "DeepSeek-V4 that employs the",
+          "Compressed Sparse Attention (CSA)–Heavily Compressed Attention (HCA) hybrid architecture",
+          "DeepSeek-V4.1-Flash uses pure CSA2"
+        ]
+      },
+      "why": "Preserves the requested DeepSeek V4 CSA contrast without pretending the V4.1 mirror is a V4 implementation source."
+    },
+    {
+      "id": "report-swa-every-layer-bounded-replay",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/DeepSeek_V41_Tech_Report.txt",
+      "expected": {
+        "all_phrases": [
+          "Sliding-Window Attention (SWA) in every layer",
+          "we introduce SWA Bounded Replay",
+          "replaying only the most recent 𝑛win tokens"
+        ]
+      },
+      "why": "Pins SWA as an every-layer runtime property, not only a helper-level window-index fixture."
+    },
+    {
+      "id": "report-hierarchical-indexer",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/DeepSeek_V41_Tech_Report.txt",
+      "expected": {
+        "all_phrases": [
+          "2.3.2. Hierarchical Sparse Indexer",
+          "used only in the decoder of CED",
+          "first layer assigned to Full Mode constructs a",
+          "candidate pool that later re-indexing layers use as their search domain",
+          "Layers in Reuse Mode perform no",
+          "new indexing and use the latest Top-K indices"
+        ]
+      },
+      "why": "Pins the decoder-only hierarchical candidate-pool behavior that must back the V4.1 indexer runtime."
+    },
+    {
+      "id": "model-indexer-v32-origin-and-v41-ops",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py",
+      "expected": {
+        "all_phrases": [
+          "Names match DeepSeek-V3.2-Exp, where this mechanism first appeared",
+          "self.weights_proj = ColumnParallelLinear(self.dim, self.n_heads, dtype=torch.bfloat16)",
+          "self.wk = Linear(args.head_dim, self.index_head_dim, dtype=torch.bfloat16)",
+          "self.k_norm = RMSNorm(self.index_head_dim, args.norm_eps)",
+          "shared_attn.candidates = select_candidate_blocks",
+          "index_score = index_score.masked_fill(~shared_attn.candidates, -torch.inf)"
+        ]
+      },
+      "why": "Covers the V3.2-origin naming comment and the V4.1 executable indexer pieces: weights projection, index K projection/norm, candidate blocks, and masks."
+    },
+    {
+      "id": "model-swa-ring-cache",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py",
+      "expected": {
+        "all_phrases": [
+          "def get_window_topk_idxs(window_size: int, bsz: int, seqlen: int, start_pos: int)",
+          "The cache is a ring of `window_size` slots",
+          "self.window_kv_cache",
+          "self.window_kv_cache[:bsz, start_pos % win] = kv.squeeze(1)",
+          "return window_kv, get_window_topk_idxs(win, bsz, seqlen, start_pos)"
+        ]
+      },
+      "why": "Pins the runtime SWA ring-buffer behavior that local attention must call during prefill and decode."
+    },
+    {
+      "id": "engram-hash-mask-and-compressed-map",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/engram.py",
+      "expected": {
+        "all_phrases": [
+          "N-grams are hashed over these compressed ids",
+          "def forward(self, input_ids: torch.Tensor, start_pos: int, token_mask: torch.Tensor | None = None) -> torch.Tensor",
+          "self.cache[:batch, start_pos : start_pos + seqlen] = compressed",
+          "if token_mask is not None",
+          "return torch.cat(hashes, dim=-1) + self.offsets"
+        ]
+      },
+      "why": "Pins Engram compressed-token hashing, cache update, and token-mask behavior needed for multimodal text compatibility."
+    },
+    {
+      "id": "model-engram-table-lookup",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py",
+      "expected": {
+        "all_phrases": [
+          "class ParallelEngramEmbedding(nn.Module)",
+          "The n-gram hash table, sharded over its rows",
+          "self.embed = ParallelEngramEmbedding(layout.num_embeddings[self.layer_hash_index], layout.head_dim)",
+          "self.wkv = Linear(n_hash_cols * layout.head_dim, args.dim * (args.hc_mult + 1))",
+          "kv = self.wkv(self.embed(hash_ids).flatten(-2))",
+          "token_mask: [B, L], False shuts"
+        ]
+      },
+      "why": "Pins the Engram table lookup and wkv projection path so helper-only q/k math is not mistaken for runtime integration."
+    },
+    {
+      "id": "model-dspark-forward-spec-start-pos",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py",
+      "expected": {
+        "all_phrases": [
+          "def forward_spec(self, input_ids: torch.Tensor, main_hidden: torch.Tensor, start_pos: int = 0)",
+          "h, main_x = self.mtp[0].forward_embed(main_hidden, input_ids)",
+          "h, pre_mix = layer(h, start_pos, pre_mix, main_x)",
+          "if start_pos == 0:",
+          "return None",
+          "return self.mtp[-1].forward_head(h, pre_mix, input_ids)"
+        ]
+      },
+      "why": "Pins DSpark forward_spec cache-seed versus decode behavior and requires carrying main_x through MTP stages."
+    },
+    {
+      "id": "model-dspark-attention-topk-main-x",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py",
+      "expected": {
+        "all_phrases": [
+          "def get_dspark_topk_idxs(window_size: int, bsz: int, block_size: int, start_pos: int)",
+          "class DSparkAttention(Attention)",
+          "def forward(self, x: torch.Tensor, start_pos: int, main_x: torch.Tensor)",
+          "main_kv = self.kv_norm(self.wkv(main_x))",
+          "topk_idxs = get_dspark_topk_idxs(win, bsz, block_size, start_pos)",
+          "kv = torch.cat([self.window_kv_cache[:bsz], kv], dim=1)"
+        ]
+      },
+      "why": "Pins the DSpark attention path that combines main-token KV cache with draft KV and DSpark-specific Top-K indices."
+    },
+    {
+      "id": "report-dspark-mtp-training-contrast",
+      "source_path": "ferric_continuum/tnsr/third_party/deepseek_v41/upstream/DeepSeek_V41_Tech_Report.txt",
+      "expected": {
+        "all_phrases": [
+          "The drafter comprises three Transformer blocks",
+          "computes base logits for five draft positions",
+          "Markov head models dependencies among the draft tokens",
+          "confidence head predicts per-position conditional acceptance probabilities",
+          "Unlike the MTP module in DeepSeek-V3"
+        ]
+      },
+      "why": "Pins DSpark as the requested MTP/speculative-draft mechanism and distinguishes it from older DeepSeek-V3 MTP training."
     }
   ]
 }

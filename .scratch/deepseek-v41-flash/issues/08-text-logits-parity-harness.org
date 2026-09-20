@@ -1,0 +1,88 @@
+#+TITLE: Text logits parity harness against upstream inference
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 07-tokenizer-prompt-and-cli
+#+PARENT: ../spec.org
+
+* Context
+
+This ticket builds the end-to-end compatibility verifier for text-only logits.
+It must compare the Rust =tnsr= implementation against upstream DeepSeek
+inference code, while keeping lower-level op/layer/block verifiers as separate
+required evidence.
+
+Read first:
+
+- =../spec.org=
+- =../research/upstream-architecture.md=
+- =../upstream/inference/model.py=
+- =../upstream/inference/generate.py=
+- =ferric_continuum/tnsr/tools/hf_reference.py=
+- =ferric_continuum/tnsr/tools/compare_logits.py=
+- =ferric_continuum/tnsr/tools/verify_hf_compat.sh=
+
+* Requirements
+
+- Create =ferric_continuum/tnsr/tools/deepseek_v41_reference.py=.
+- Create =ferric_continuum/tnsr/tools/deepseek_v41_compare_logits.py=.
+- Create =ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh=.
+- Reference script requirements:
+  - Load upstream mirrored inference code by path or load an installed upstream
+    package when explicitly requested.
+  - Support tiny deterministic fixture checkpoints.
+  - Support converted DeepSeek runtime checkpoint directories when present.
+  - Emit JSON schema matching the Rust CLI:
+    - =token_ids=
+    - =prompt=
+    - =vocab_size=
+    - =logits=
+    - =model_type=
+    - =reference_backend=
+  - Allow a pure-PyTorch monkeypatch for upstream GPU-only kernels in tiny
+    fixture mode. The output JSON must record =kernel_patch= metadata when this
+    is used.
+- Comparator requirements:
+  - report token-id equality
+  - report shape equality
+  - report =max_abs_diff=
+  - report =mean_abs_diff=
+  - report cosine similarity
+  - report top-1 agreement
+  - report top-5 overlap
+  - return nonzero on failed math thresholds
+  - if token IDs differ, print a command hint for rerunning Rust with
+    =--token-ids <reference ids>=
+- Shell verifier requirements:
+  - Build =deepseek_v41_infer= with opt Rust flags.
+  - Run source/config/index verifiers first.
+  - Run op/layer/block Bazel tests before final logits.
+  - Run tiny parity by default without released weights.
+  - Run real checkpoint parity only when =MODEL_DIR= or =DEEPSEEK_V41_MODEL_DIR=
+    points to local assets.
+  - Produce a clear SKIP, PASS, or FAIL summary per verifier level.
+
+* Out of scope
+
+- No attempt to download model shards.
+- No GPU requirement for tiny parity.
+- No image or DSpark parity.
+- No claim that full release parity passed when local weights are absent.
+
+* Verification
+
+- Run no-weight ladder:
+  =ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh=
+- Expected:
+  - source verifier PASS
+  - config/index verifier PASS
+  - op/layer/block tests PASS
+  - tiny text logits parity PASS
+  - real checkpoint parity SKIP if no model dir is supplied
+- Run real checkpoint ladder when assets exist:
+  =DEEPSEEK_V41_MODEL_DIR=/path/to/DeepSeek-V4.1-Flash-TP1-or-TPN ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh=
+
+* Comments
+
+- This is Level 6 of the verifier ladder.
+- This ticket is not complete unless the script refuses to present skipped real
+  checkpoint parity as success.
