@@ -22,4 +22,4 @@ for src in "${HOOK_SRC_DIR}"/*; do
   echo "installed hook: ${name} -> ${dst}"
 done
 
-echo "git hooks installed. Pre-commit now runs the desensitization checker on staged files."
+echo "git hooks installed. Commit-msg scans commit text; pre-commit scans staged content; pre-push scans tracked files and outgoing commits."

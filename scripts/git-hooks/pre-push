@@ -1,0 +1,60 @@
+#!/bin/bash
+# Ferric Continuum pre-push hook: block PII / machine-identifiable data.
+# Runs the full tracked-file desensitization gate before refs leave the machine.
+# Install via scripts/install-git-hooks.sh. To bypass in an emergency, push with
+# --no-verify (discouraged).
+
+set -eu -o pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+DESENSITIZE="${REPO_ROOT}/scripts/desensitize.sh"
+COMMIT_SCRUB="${REPO_ROOT}/scripts/check-commit-scrub.sh"
+
+if [[ ! -f "${DESENSITIZE}" || ! -f "${COMMIT_SCRUB}" ]]; then
+  # Wrapper not present on this branch; do not block the push.
+  exit 0
+fi
+
+if ! command -v python3 &> /dev/null; then
+  echo "pre-push: python3 not found; skipping desensitization check." >&2
+  exit 0
+fi
+
+# Local hooks should catch the current login name without committing it into the
+# repository. Humans may override/extend this with DESENSITIZE_USERNAMES.
+if [[ -z "${DESENSITIZE_USERNAMES:-}" ]]; then
+  DESENSITIZE_USERNAMES="$(id -un 2>/dev/null || true)"
+  export DESENSITIZE_USERNAMES
+fi
+
+if ! "${DESENSITIZE}"; then
+  echo "" >&2
+  echo "pre-push: desensitization check failed on tracked files." >&2
+  echo "  Fix with: python3 tools/desensitize_check.py --fix" >&2
+  echo "  Then re-run scripts/desensitize.sh and push again." >&2
+  echo "  Bypass with --no-verify only for an explicit emergency." >&2
+  exit 1
+fi
+
+zero_sha="0000000000000000000000000000000000000000"
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [[ -n "${local_ref:-}" ]] || continue
+  if [[ "${local_sha}" == "${zero_sha}" ]]; then
+    # Deleting a remote ref; no outgoing commits to scan.
+    continue
+  fi
+  if [[ "${remote_sha}" == "${zero_sha}" ]]; then
+    range="..${local_sha}"
+  else
+    range="${remote_sha}..${local_sha}"
+  fi
+  if ! "${COMMIT_SCRUB}" --range "${range}"; then
+    echo "" >&2
+    echo "pre-push: desensitization check failed on outgoing commit metadata." >&2
+    echo "  Ref: ${local_ref} -> ${remote_ref}" >&2
+    echo "  Range: ${range}" >&2
+    echo "  Rewrite the offending commit metadata before pushing." >&2
+    echo "  Bypass with --no-verify only for an explicit emergency." >&2
+    exit 1
+  fi
+done

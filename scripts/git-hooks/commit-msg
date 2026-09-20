@@ -1,0 +1,34 @@
+#!/bin/bash
+# Ferric Continuum commit-msg hook: block PII / machine-identifiable data in
+# commit messages before they enter local history.
+# Install via scripts/install-git-hooks.sh.
+
+set -eu -o pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+WRAPPER="${REPO_ROOT}/scripts/check-commit-scrub.sh"
+
+if [[ ! -f "${WRAPPER}" ]]; then
+  # Wrapper not present on this branch; do not block the commit.
+  exit 0
+fi
+
+if ! command -v python3 &> /dev/null; then
+  echo "commit-msg: python3 not found; skipping commit-message scrub." >&2
+  exit 0
+fi
+
+# Local hooks should catch the current login name without committing it into the
+# repository. Humans may override/extend this with DESENSITIZE_USERNAMES.
+if [[ -z "${DESENSITIZE_USERNAMES:-}" ]]; then
+  DESENSITIZE_USERNAMES="$(id -un 2>/dev/null || true)"
+  export DESENSITIZE_USERNAMES
+fi
+
+if ! "${WRAPPER}" --message-file "$1"; then
+  echo "" >&2
+  echo "commit-msg: desensitization check failed on the commit message." >&2
+  echo "  Remove local usernames, home paths, IPs, MACs, or personal emails." >&2
+  echo "  Bypass with --no-verify only for an explicit emergency." >&2
+  exit 1
+fi

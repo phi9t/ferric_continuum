@@ -77,7 +77,8 @@ bazel test //path/to/tests
 - [ ] All functions have unit tests
 - [ ] Edge cases tested
 - [ ] Error handling implemented
-- [ ] No sensitive information in code
+- [ ] `scripts/desensitize.sh` and PR commit scrub pass; no sensitive
+      information in code, commit text, or PR text
 - [ ] Backward compatibility maintained (or breaking changes documented)
 
 ## Screenshots/Output

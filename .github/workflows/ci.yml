@@ -27,17 +27,33 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.x'
 
-    - name: Run desensitize self-test
-      run: python3 tools/desensitize_check.py --self-test
-
     - name: Scan repository for PII / machine-identifiable info
-      run: python3 tools/desensitize_check.py
+      run: scripts/desensitize.sh
+
+    - name: Scan pull request commits for PII / machine-identifiable info
+      if: github.event_name == 'pull_request'
+      run: scripts/check-commit-scrub.sh --range "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+
+    - name: Scan pull request text for PII / machine-identifiable info
+      if: github.event_name == 'pull_request'
+      env:
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        PR_BODY: ${{ github.event.pull_request.body }}
+      run: |
+        tmp="$(mktemp)"
+        {
+          printf '%s\n\n' "${PR_TITLE}"
+          printf '%s\n' "${PR_BODY}"
+        } > "${tmp}"
+        python3 tools/desensitize_check.py "${tmp}"
 
   build-and-test:
     name: Build and Test

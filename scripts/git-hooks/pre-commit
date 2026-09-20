@@ -19,6 +19,13 @@ if ! command -v python3 &> /dev/null; then
   exit 0
 fi
 
+# Local hooks should catch the current login name without committing it into the
+# repository. Humans may override/extend this with DESENSITIZE_USERNAMES.
+if [[ -z "${DESENSITIZE_USERNAMES:-}" ]]; then
+  DESENSITIZE_USERNAMES="$(id -un 2>/dev/null || true)"
+  export DESENSITIZE_USERNAMES
+fi
+
 # Collect staged, non-deleted files (NUL-delimited to survive odd names).
 mapfile -d '' -t staged < <(git diff --cached --name-only --diff-filter=ACMR -z)
 

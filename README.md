@@ -186,19 +186,24 @@ home absolute paths, real usernames, MAC addresses, routable IPv4 literals, or
 personal emails). This is enforced by a dependency-free checker:
 
 ```
-# Scan tracked files (exit 1 on any finding)
-python3 tools/desensitize_check.py
+# Scan tracked files, including the checker self-test (exit 1 on findings)
+scripts/desensitize.sh
 
 # Auto-fix the safe substitutions (home abspaths -> ${HOME}, pinned bazel
 # launcher path -> plain `bazel`), then re-run the scan
 python3 tools/desensitize_check.py --fix
 
-# Install the local pre-commit hook that scans staged content
+# Install local hooks:
+# - commit-msg scans commit text
+# - pre-commit scans staged content
+# - pre-push scans tracked files and outgoing commits
 scripts/install-git-hooks.sh
 ```
 
-The same scan runs as the blocking `Desensitize` job in CI. Allowlisted
-intended-public tokens live in `tools/desensitize_allowlist.txt`.
+The same wrapper runs as the blocking `Desensitize` job on pull requests and
+pushes, and PR commits are scanned with `scripts/check-commit-scrub.sh`.
+Allowlisted intended-public tokens live in
+`tools/desensitize_allowlist.txt`.
 
 ---
 
