@@ -1,0 +1,26 @@
+#+TITLE: DeepSeek V4.1 tensor-parallel serving parity disposition
+#+TYPE: receipt
+#+STATUS: ready-for-human
+#+PARENT: ../issues/08-tensor-parallel-serving-parity.org
+
+* Disposition
+
+Tensor-parallel serving parity remains deferred. This run did not find or add a
+local TP serving substrate that can launch multiple ranks, assign shards, and
+compare TP logits against a single-process candidate.
+
+* Evidence
+
+- Ticket 02 did not admit a real release checkpoint, so ticket 08's model-asset
+  dependency is unmet.
+- Ticket 03 did not produce a real single-process parity candidate, so there is
+  no real baseline for TP serving comparison.
+- Existing loader/config tests continue to cover static shard-layout behavior,
+  but they do not prove multi-rank serving equivalence.
+
+* Required Human Action
+
+Authorize a separate TP serving experiment or delivery task after real assets
+are admitted. The next task should define world size, process launch mechanism,
+collective/reduction assumptions, shard-to-rank mapping, prompt inputs, and a
+PASS/SKIP/FAIL verifier that never treats SKIP as PASS.

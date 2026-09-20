@@ -1,0 +1,29 @@
+#+TITLE: DeepSeek V4.1 remaining evidence intent
+#+TYPE: task
+#+STATUS: ready-for-human
+#+PARENT:
+
+* Outcome
+
+Turn the existing DeepSeek V4.1 implementation from source-grounded tiny parity
+into a release-candidate work package with candidate-bound evidence for real
+assets, long-context behavior, quantized/device execution, tensor-parallel
+serving, and final human promotion.
+
+* Execution Contract
+
+- Contract: =contract.toml=
+
+* Authority Boundary
+
+- This tracker effort authorizes specification and local implementation tickets.
+- It does not authorize checkpoint downloads, high-cost GPU campaigns, push,
+  merge, publication, or release.
+- Skipped verifier levels stay visible as SKIP unless a ticket explicitly
+  converts them into PASS with fresh evidence.
+
+* Spec
+
+- [[file:spec.org][DeepSeek V4.1 remaining evidence and production closure]]
+
+* Comments

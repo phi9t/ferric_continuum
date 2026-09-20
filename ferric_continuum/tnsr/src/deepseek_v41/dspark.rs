@@ -1,11 +1,12 @@
 //! DeepSeek V4.1 DSpark (MTP speculative-decoding) op helpers.
 //!
 //! These functions model the parameter-free math of the upstream DSpark heads
-//! and stage plumbing so the verifier ladder can pin numeric parity before the
-//! stage model and `forward_spec` are wired. They implement the Markov head, the
-//! fp32 confidence head, the noise-token draft-input construction, and the
-//! `main_proj`/`main_norm` seam that turns target-layer hiddens into the stage-0
-//! embedding. Checkpoint loading and stage execution are later tickets.
+//! and stage plumbing. They implement the Markov head, the fp32 confidence
+//! head, the noise-token draft-input construction, the `main_proj`/`main_norm`
+//! seam that turns target-layer hiddens into the stage-0 embedding, and the
+//! decode top-k layout used by the model-level `forward_spec` path. Full
+//! upstream acceptance-loop policy is not claimed here; the verifier records
+//! that boundary explicitly.
 
 use super::sparse::dspark_topk_indices;
 

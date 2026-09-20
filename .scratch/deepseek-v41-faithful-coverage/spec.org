@@ -1,0 +1,180 @@
+#+TITLE: DeepSeek V4.1 faithful-coverage kata
+#+TYPE: spec
+#+STATUS: done
+#+PARENT:
+
+* Summary
+
+The current DeepSeek V4.1 implementation has a broad text/vision/DSpark scaffold,
+but the reviewed runtime still leaves several release-defining mechanisms either
+helper-only, fixture-only, or represented by names without faithful execution.
+
+This kata turns those gaps into a blocker-linked queue. The acceptance bar is not
+"a field exists"; each requested concept must have:
+
+- a primary-source claim pinned in the verifier manifest,
+- a small deterministic fixture or unit test,
+- a runtime path that uses the mechanism, and
+- a parity or behavior check that would fail if the implementation silently
+  regressed to the current skeleton behavior.
+
+* Primary Sources
+
+- =ferric_continuum/tnsr/third_party/deepseek_v41/upstream/README.md=
+- =ferric_continuum/tnsr/third_party/deepseek_v41/upstream/DeepSeek_V41_Tech_Report.txt=
+- =ferric_continuum/tnsr/third_party/deepseek_v41/upstream/model.safetensors.index.json=
+- =ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py=
+- =ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/engram.py=
+- =ferric_continuum/tnsr/docs/deepseek_v41/research/upstream-architecture.md=
+
+* Faithfulness Contract
+
+** CED
+
+DeepSeek V4.1 Flash is a 40-layer model organized as 20 causal-encoder layers
+followed by 20 decoder layers. Decoder global KV is projected from final encoder
+hidden states. The local Rust path must stop treating the model as an
+undifferentiated flat loop when global KV and DSpark target hidden states depend
+on this boundary.
+
+** CSA2
+
+CSA2 has statically assigned =Full=, =Reindex=, and =Reuse= modes. Full produces
+global KV and indexer state, Reindex reuses global KV but computes fresh Top-K
+indices from its own query against shared indexer K, and Reuse reuses both global
+KV and Top-K indices. Every mode still owns its local query and SWA KV.
+
+** CSA from DeepSeek V4
+
+The kata must preserve the contrast with DeepSeek V4 CSA: V4.1 uses pure CSA2,
+removes the CSA/HCA hybrid framing, shares main KV and indexer K across layers,
+and uses the V4.1 compressor/indexer flow rather than the older overlapping CSA
+source-entry behavior. Where the upstream report says V4.1 differs from V4, the
+Rust docs/tests should name that difference explicitly.
+
+** Indexer Evolution
+
+The indexer is not just a helper that picks integer windows. It is the small
+attention path over compressed positions: =weights_proj=, indexer =wk=,
+=k_norm=, indexer K cache, Top-K selection, optional hierarchical candidate
+blocks, and candidate masks. The spec and fixtures should name the V3.2-origin
+indexer lineage only where the local mirror has primary-source support, and the
+runtime must implement the V4.1 behavior from the mirrored upstream code.
+
+** Sliding-Window Attention
+
+Every layer uses SWA. The runtime must use a ring-buffer/window index path in
+actual attention, including prefill and decode behavior, rather than only testing
+standalone index helpers.
+
+** Engram
+
+Engram is part of text compatibility, not a later vision-only extension. The
+runtime must load Engram table tensors, compute compressed-token n-gram hashes
+with image-token masking, perform table lookup and =wkv= projection, and apply
+the residual update through the same gate semantics as upstream.
+
+** DSpark MTP
+
+DSpark lives under the =mtp.*= namespace and is represented by the upstream
+=forward_spec= path. Prefill at =start_pos = 0= seeds caches and returns =None=;
+decode uses =main_x= from =main_hidden=, =get_dspark_topk_idxs=, DSpark attention,
+Markov logits, and confidence scores. A token-acceptance loop is outside this
+kata unless a later ticket explicitly adds it.
+
+** HF Indexed Release Loading
+
+Faithful runtime tests must be able to load the public release shape:
+=model.safetensors.index.json= and =model-000xx-of-00048.safetensors= shard
+names. Converted TP-only paths are not enough for this queue.
+
+* Tickets
+
+- [[file:issues/01-source-coverage-gate.org][01-source-coverage-gate]]
+- [[file:issues/02-indexed-checkpoint-and-engram-loading.org][02-indexed-checkpoint-and-engram-loading]]
+- [[file:issues/03-ced-runtime-boundary.org][03-ced-runtime-boundary]]
+- [[file:issues/04-csa2-indexer-and-swa-runtime.org][04-csa2-indexer-and-swa-runtime]]
+- [[file:issues/05-engram-runtime-integration.org][05-engram-runtime-integration]]
+- [[file:issues/06-dspark-mtp-forward-spec.org][06-dspark-mtp-forward-spec]]
+- [[file:issues/07-deepseek-v4-csa-contrast.org][07-deepseek-v4-csa-contrast]]
+- [[file:issues/08-faithful-parity-closure.org][08-faithful-parity-closure]]
+
+* Acceptance
+
+- =ferric_continuum/tnsr/tools/deepseek_v41_verify_sources.py= verifies claims
+  for every requested concept.
+- Focused Bazel tests pass for source claims, config/load behavior, helper math,
+  and model runtime composition.
+- DSpark verification exercises Rust =forward_spec= behavior against upstream
+  semantics rather than only fixture self-consistency.
+- Text-compatible runs with Engram-enabled fixtures no longer panic because
+  Engram tensors are absent from loaded weights.
+- Remaining GPU/performance-only checks are explicitly tagged and separated from
+  CPU correctness gates.
+
+* Progress
+
+2026-09-20:
+
+- Ticket 01 is done: the manifest now pins CED, Engram, CSA2, DeepSeek V4 CSA
+  contrast, V3.2-origin indexer naming plus V4.1 indexer behavior, SWA, and
+  DSpark MTP claims; both the new Bazel source test and existing shell verifier
+  pass.
+- Ticket 02 is done: HF index JSON shard discovery is implemented and tested,
+  and Engram table/projection tensors now load into the runtime representation.
+- Ticket 03 is done: the runtime now exposes the CED split, runs
+  encoder-then-decoder loops, carries final encoder hidden state through
+  =SharedAttentionState=, and tests that decoder attention consumes the
+  encoder-derived KV source.
+- Ticket 04 is done: runtime attention now uses SWA window indices and CSA2
+  mode state. =Full= publishes compressed KV, index K, Top-K, and candidate
+  masks; =Reindex= recomputes Top-K from cached index K; =Reuse= consumes cached
+  Top-K. The required math/model Bazel tests pass.
+- Ticket 05 is done: masked Engram n-gram hashing now follows the upstream
+  dead-token cache behavior, Engram runtime can perform table lookup plus =wkv=
+  projection, and model/block forward consumes per-layer hash IDs instead of
+  relying only on precomputed fixture key/value tensors.
+- Ticket 06 is done: DSpark now has a =start_pos=-aware =forward_spec= runtime
+  path. Prefill returns =None=, decode consumes =main_x= from =main_hidden=,
+  DSpark top-k indices, attention, Markov logits, and confidence. The DSpark
+  verifier passes through tiny parity, with real-checkpoint parity honestly
+  skipped when no model directory is configured.
+- Ticket 07 is done: the V4 CSA/HCA versus V4.1 pure-CSA2 distinction is now
+  captured in the source-grounded architecture note, the source-test guardrail,
+  and a visible CSA2 runtime regression name that asserts Full/Reindex/Reuse
+  sharing of KV, index K, and Top-K state.
+- Ticket 08 is done: the CPU closure ladder passes. Source claims, config/index
+  parsing, math fixtures, model/runtime fixtures, text tiny parity, and DSpark
+  tiny parity all pass. Real-checkpoint parity remains an honest skip until
+  =DEEPSEEK_V41_MODEL_DIR= or =MODEL_DIR= points at local weights; GPU/CUDA
+  performance compatibility remains outside this CPU kata closure.
+
+* Resolution
+
+This kata now captures and exercises the requested DeepSeek V4.1 mechanisms:
+CED, Engram, CSA2, the DeepSeek V4 CSA/HCA contrast, the V3.2-origin indexer
+lineage with V4.1 indexer runtime pieces, SWA, and DSpark MTP.
+
+The faithful CPU surface is:
+
+- primary-source manifest claims for all requested concepts,
+- HF indexed-shard discovery and Engram tensor loading,
+- CED encoder/decoder handoff through final encoder hidden state,
+- CSA2 Full/Reindex/Reuse runtime state with SWA and compressed Top-K indices,
+- Engram masked n-gram hashing plus loaded table lookup and =wkv= projection,
+- DSpark =start_pos=-aware =forward_spec= behavior with =main_x=, Top-K
+  attention, Markov logits, and confidence.
+
+Verified commands:
+
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_sources.sh=
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests=
+- =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh=
+- =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_dspark_compat.sh=
+
+Still scoped out:
+
+- Real-checkpoint parity until =DEEPSEEK_V41_MODEL_DIR= or =MODEL_DIR= is set.
+- GPU/CUDA forward-agreement and performance compatibility; run
+  =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_perf_compat.sh=
+  for that separate device tier.

@@ -714,6 +714,102 @@ def _mm_moe_forward_ref(fg, x, tokens, dim, cfg, moe_params, image_mask, bias_vl
     return out
 
 
+def _mm_sparse_attention_ref(fg, q, kv, sparse_indices, batch, seqlen, kv_seqlen, n_heads, head_dim, attn_sink):
+    """Sparse attention variant matching tnsr's multi-width SWA prefill path."""
+    import math
+
+    out = [0.0] * (batch * seqlen * n_heads * head_dim)
+    scale = head_dim ** -0.5
+    sparse_width = len(sparse_indices) // (batch * seqlen) if sparse_indices is not None else 1
+    for b in range(batch):
+        for qi in range(seqlen):
+            row = b * seqlen + qi
+            fallback = min(max(qi - 1, 0), qi)
+            candidates = (
+                sparse_indices[row * sparse_width : (row + 1) * sparse_width]
+                if sparse_indices is not None
+                else [fallback]
+            )
+            for h in range(n_heads):
+                if sparse_width == 1:
+                    src = candidates[0]
+                    if src == -1:
+                        continue
+                    score = attn_sink[h]
+                    for d in range(head_dim):
+                        q_idx = ((b * seqlen + qi) * n_heads + h) * head_dim + d
+                        k_idx = (b * kv_seqlen + src) * head_dim + d
+                        score += q[q_idx] * kv[k_idx] * scale
+                    gate = 1.0 / (1.0 + math.exp(-score))
+                    for d in range(head_dim):
+                        out_idx = ((b * seqlen + qi) * n_heads + h) * head_dim + d
+                        v_idx = (b * kv_seqlen + src) * head_dim + d
+                        out[out_idx] = gate * kv[v_idx]
+                    continue
+
+                scores = [(-1, attn_sink[h])]
+                for src in candidates:
+                    if src == -1:
+                        continue
+                    score = 0.0
+                    for d in range(head_dim):
+                        q_idx = ((b * seqlen + qi) * n_heads + h) * head_dim + d
+                        k_idx = (b * kv_seqlen + src) * head_dim + d
+                        score += q[q_idx] * kv[k_idx] * scale
+                    scores.append((src, score))
+                max_score = max(score for _, score in scores)
+                denom = sum(math.exp(score - max_score) for _, score in scores)
+                for src, score in scores:
+                    if src == -1:
+                        continue
+                    weight = math.exp(score - max_score) / denom
+                    for d in range(head_dim):
+                        out_idx = ((b * seqlen + qi) * n_heads + h) * head_dim + d
+                        v_idx = (b * kv_seqlen + src) * head_dim + d
+                        out[out_idx] += weight * kv[v_idx]
+    return out
+
+
+def _mm_attention_forward_ref(fg, x, batch, seqlen, dim, attention, params, eps, window_size):
+    """Attention reference for multimodal parity, including SWA prefill windows.
+
+    The shared fixture helper models one selected KV position per query unless
+    top-k indices are injected.  The multimodal prompt is intentionally longer
+    than the tiny model's sliding window, so this local helper supplies the same
+    window indices that tnsr generates in `DeepSeekV41Attention::forward_layer`.
+    """
+    q_lora_rank = attention["q_lora_rank"]
+    n_heads = attention["n_heads"]
+    head_dim = attention["head_dim"]
+    o_groups = attention["o_groups"]
+    o_lora_rank = attention["o_lora_rank"]
+    qr = fg.fallback_rms_norm(
+        fg.matmul_rows(x, params["wq_a"], dim, q_lora_rank),
+        q_lora_rank,
+        params["q_norm"],
+        eps,
+    )
+    q = fg.matmul_rows(qr, params["wq_b"], q_lora_rank, n_heads * head_dim)
+    kv = fg.fallback_rms_norm(
+        fg.matmul_rows(x, params["wkv"], dim, head_dim),
+        head_dim,
+        params["kv_norm"],
+        eps,
+    )
+    sparse = (
+        fg.fallback_window_topk(window_size, batch, seqlen, 0)
+        if window_size < seqlen
+        else None
+    )
+    attended = _mm_sparse_attention_ref(
+        fg, q, kv, sparse, batch, seqlen, seqlen, n_heads, head_dim, params["attn_sink"]
+    )
+    low_rank = fg.grouped_wo_a(
+        attended, batch, seqlen, n_heads, head_dim, o_groups, o_lora_rank, params["wo_a"]
+    )
+    return fg.matmul_rows(low_rank, params["wo_b"], o_groups * o_lora_rank, dim)
+
+
 def _mm_block_forward_ref(fg, x, pre_mix, cfg, params, image_mask):
     """One block forward mirroring `try_forward_multimodal`'s per-layer step.
 
@@ -736,9 +832,16 @@ def _mm_block_forward_ref(fg, x, pre_mix, cfg, params, image_mask):
     )
     attn_in = fg.hc_pre_ref(residual, pre_mix, batch, seqlen, hc_mult, dim)
     attn_in = fg.fallback_rms_norm(attn_in, dim, params["attn_norm"], cfg["rms_norm_eps"])
-    attn_out = fg.attention_forward_ref(
-        attn_in, batch, seqlen, dim, cfg["attention_shape"], params["attention"],
-        state, cfg["rms_norm_eps"], False, False,
+    attn_out = _mm_attention_forward_ref(
+        fg,
+        attn_in,
+        batch,
+        seqlen,
+        dim,
+        cfg["attention_shape"],
+        params["attention"],
+        cfg["rms_norm_eps"],
+        cfg["window_size"],
     )
     x = fg.hc_post_ref(attn_out, residual, attn_mix["post"], attn_mix["comb"], batch, seqlen, hc_mult, dim)
 
@@ -805,6 +908,7 @@ def _reference_multimodal_logits(fg, vision_module) -> tuple[list[float], list[i
     pre_mix = [1.0, 0.0] * (batch * seqlen)  # identity_pre_mix for hc_mult=2
 
     cfg = {
+        "mode": "sliding_window",
         "batch": batch,
         "seqlen": seqlen,
         "dim": dim,
@@ -819,6 +923,7 @@ def _reference_multimodal_logits(fg, vision_module) -> tuple[list[float], list[i
             "o_lora_rank": o_lora,
             "o_groups": o_groups,
         },
+        "window_size": t["window"],
         "tokens": batch * seqlen,
         "experts": experts,
         "topk": t["topk"],

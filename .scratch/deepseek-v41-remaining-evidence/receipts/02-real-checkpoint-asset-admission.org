@@ -1,0 +1,35 @@
+#+TITLE: DeepSeek V4.1 real checkpoint asset admission disposition
+#+TYPE: receipt
+#+STATUS: ready-for-human
+#+PARENT: ../issues/02-real-checkpoint-asset-admission.org
+
+* Candidate
+
+- Context commit: =f58239798719ddf9350aa5e7db7f514459073c15=
+- Execution branch: =deepseek-v41-remaining-exec=
+
+* Disposition
+
+No local DeepSeek V4.1 release checkpoint was admitted in this run.
+
+The verifier ladder was run without =DEEPSEEK_V41_MODEL_DIR= or =MODEL_DIR= set.
+Every real-checkpoint level that depends on those assets reported an honest
+SKIP rather than a PASS.
+
+* Evidence
+
+- =logs/10-text-compat.log=: =L6-real-parity SKIP= because no
+  =DEEPSEEK_V41_MODEL_DIR= / =MODEL_DIR= was set.
+- =logs/10-multimodal-compat.log=: =L6-real-parity SKIP= for the same reason.
+- =logs/10-dspark-compat.log=: =L6-real-parity SKIP= for the same reason.
+- =logs/10-perf-compat.log=: =L6-real-parity SKIP= for the same reason.
+
+* Required Human Action
+
+Provide an already-provisioned local model directory by setting
+=DEEPSEEK_V41_MODEL_DIR= or =MODEL_DIR=. This task must not download the 510GB
+checkpoint without explicit authorization.
+
+After assets exist, rerun this ticket as a read-only admission scout and record
+config/index digests, shard count, total bytes, shard stat or hash evidence,
+and representative namespace probes.

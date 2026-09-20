@@ -1,0 +1,21 @@
+#+TITLE: Complete the self-contained Ferric rootfs
+#+TYPE: task
+#+STATUS: needs-info
+#+BLOCKED_BY: 01-provenance-disposition-and-tnsr-ownership, 07-approve-publication-root
+#+PARENT: ../spec.org
+
+* Requirements
+
+- Remain =needs-info= until Ultron's parent ticket records the resolved Vaso
+  =02-freeze-rootfs-spec-v1= digest and changes this ticket's status.
+
+- Add immutable materialization, complete recipe/content identity, content
+  storage, verified selection, and repair around the existing runner.
+- Keep state repo-local; integrate Bazel/CUDA inputs; emit sanitized receipts.
+- Implement Vaso v1 behavior with Ferric-owned code.
+
+* Verification
+
+Visible red-green tests cover lifecycle success and fail-closed behavior.
+
+* Comments

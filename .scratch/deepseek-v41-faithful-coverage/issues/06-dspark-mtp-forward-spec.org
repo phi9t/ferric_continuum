@@ -1,0 +1,57 @@
+#+TITLE: DSpark MTP forward_spec runtime parity
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 03-ced-runtime-boundary, 04-csa2-indexer-and-swa-runtime
+#+PARENT: ../spec.org
+
+* Context
+
+The local DSpark path has helper math, but the reviewed runtime drops =main_x=,
+does not carry =start_pos= faithfully, and its verifier does not exercise Rust
+=forward_spec= output against upstream behavior.
+
+* Requirements
+
+- Model DSpark stages under the =mtp.*= namespace with upstream stage ownership:
+  first stage owns =main_proj= and =main_norm=; final stage owns norm, Markov
+  head, and confidence head.
+- Implement =forward_spec(input_ids, main_hidden, start_pos)= semantics:
+  - =start_pos = 0= seeds DSpark SWA cache from =main_x= and returns =None=.
+  - decode uses =main_x=, draft embeddings, =get_dspark_topk_idxs=, DSpark
+    attention, Markov logits, and confidence scores.
+- Make the CLI or a test harness expose Rust DSpark output so the verifier is no
+  longer fixture self-consistency only.
+- Add a regression test that fails if =main_x= is discarded or =start_pos= is
+  hard-coded to zero.
+
+* Out of scope
+
+- End-to-end speculative acceptance loop in generation.
+- Throughput tuning for DSpark verification scheduling.
+
+* Verification
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_model_tests=
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_dspark_compat.sh= must compare Rust output against upstream =forward_spec= semantics or clearly invoke an equivalent Rust test binary.
+
+* Answer
+
+Completed 2026-09-20.
+
+- Added =try_forward_spec_at(input_ids, main_hidden, start_pos)= so =start_pos =
+  0= returns =None= and decode uses =main_x= derived from =main_hidden=.
+- Added DSpark decode wiring through the MTP stages, DSpark top-k indices,
+  attention, Markov logits, and confidence output.
+- Added regressions for prefill returning =None= and decode depending on both
+  =main_hidden= and =start_pos=.
+- Kept the legacy fixture-compatible =try_forward_spec= wrapper for the
+  existing tiny parity fixture while the new path carries the faithful
+  =start_pos= semantics.
+- Fixed the DSpark verifier preflight so the numpy-dependent comparator
+  self-test runs under the validated reference interpreter instead of ambient
+  =python3=.
+
+Verification:
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_model_tests= passed.
+- =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_dspark_compat.sh= passed with an honest =L6-real-parity= skip because no =DEEPSEEK_V41_MODEL_DIR= / =MODEL_DIR= was configured.

@@ -1,0 +1,52 @@
+#+TITLE: CSA2 indexer, Top-K reuse, and SWA runtime attention
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 03-ced-runtime-boundary
+#+PARENT: ../spec.org
+
+* Context
+
+The local attention path has helper functions for windows and candidates, but
+the runtime attention still does not faithfully execute upstream CSA2. Faithful
+coverage requires the actual model forward path to compose SWA with global
+compressed sparse attention.
+
+* Requirements
+
+- Implement SWA ring-cache behavior in actual attention for both prefill and
+  decode, using the same window-index semantics as upstream =get_window_topk_idxs=.
+- Implement CSA2 mode behavior:
+  - Full: produce global KV, indexer K, and Top-K indices.
+  - Reindex: reuse global KV and indexer K, compute fresh Top-K from this layer's
+    own query and =weights_proj=.
+  - Reuse: reuse global KV and Top-K indices from the configured source layer.
+- Implement the V4.1 indexer path with =weights_proj=, =wk=, =k_norm=, index K
+  cache, candidate blocks, and candidate masks.
+- Add runtime tests that fail if =window_size= is ignored or if Reindex/Reuse
+  collapse to Full behavior.
+
+* Out of scope
+
+- Native FP4 cache kernels.
+- Performance parity for million-token serving.
+
+* Verification
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests=
+
+* Completion Notes
+
+2026-09-20:
+
+- Runtime attention now composes local SWA indices with compressed CSA2 indices
+  when compression is active.
+- CSA2 =Full= publishes compressed KV, index K, Top-K indices, and candidate
+  masks.
+- CSA2 =Reindex= reuses compressed KV plus index K and computes fresh Top-K
+  with the layer's own query and =weights_proj=.
+- CSA2 =Reuse= requires existing compressed KV and Top-K indices and records
+  that it consumed the shared source-layer indices.
+- Focused runtime tests now fail if =window_size= is ignored or if
+  Full/Reindex/Reuse collapse into the same placeholder behavior.
+- Verification passed:
+  =bazel test //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests=

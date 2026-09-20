@@ -188,7 +188,7 @@ impl Checkpoint {
     ///
     /// Each file is read into an owned buffer whose header is parsed once; the
     /// per-tensor byte offsets are read from the header (relative to the data
-    /// section) and stored so [`Checkpoint::bytes`] can slice the owned buffer
+    /// section) and stored so the byte-slice accessor can read the owned buffer
     /// without leaking it for `'static`.
     pub fn open(paths: &[PathBuf]) -> Result<Checkpoint, String> {
         let mut shards: Vec<Vec<u8>> = Vec::with_capacity(paths.len());

@@ -1,0 +1,44 @@
+#+TITLE: W3-04 DSpark checkpoint loader (mtp.* namespace)
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: W3-03-dspark-head-model-forward_spec
+#+PARENT: ../spec.org
+
+* Context
+
+Load the =mtp.*= tensors into the DSpark head, reusing the backbone block
+loader. Text/multimodal loaders keep ignoring =mtp.*=.
+
+Read first: =../spec.org=, =../issues/D3-mtp-loader-shape.org=,
+=../../deepseek-v41-flash/upstream/model.safetensors.index.json= (=mtp.*=
+names), and the existing =src/deepseek_v41/load.rs=.
+
+* Requirements
+
+- =load_dspark_head(model_dir) -> Result<Option<DeepSeekV41DsparkHead>, String>=:
+  =None= when config =dspark_block_size == 0=; else load each stage.
+- Reuse the backbone block loader on the =mtp.N.= prefix for
+  =attn/ffn/attn_norm/ffn_norm/hc_*=. MTP expert counts come from
+  =get_moe_config(layer >= n_layers)=.
+- Load DSpark-only tensors by stage position:
+  - stage 0: =mtp.0.main_proj.{weight,scale}=, =mtp.0.main_norm.weight=.
+  - last stage: =mtp.LAST.norm.weight=,
+    =mtp.LAST.markov_head.{embed,head}.weight=,
+    =mtp.LAST.confidence_head.proj.weight= (kept fp32).
+- Same dequant paths as Wave 1 (BF16/F16/F32, FP8 E4M3 + .scale, FP4 E2M1 +
+  .scale), transpose PyTorch =[out,in]= -> tnsr =[in,out]=, =wo_a= grouped.
+- Missing required DSpark tensor -> =Err= naming the tensor. Wrong shape ->
+  =Err= naming the tensor.
+
+* Out of scope
+
+- No multi-rank TP merge of =mtp.*= (single shard / single-file only).
+- No change to =load_text_model= / =load_multimodal_model= behavior.
+
+* Verification
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_model_tests= green.
+- Loader test: tiny in-test =mtp.*= safetensors loads; missing/wrong-shape
+  tensor errors and names it; a text-only config yields =None=.
+
+* Comments

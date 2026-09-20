@@ -1,0 +1,106 @@
+#+TITLE: DeepSeek V4.1 architecture deepening follow-ups
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY: 01-baseline-evidence-inventory
+#+PARENT: ../spec.org
+
+* Context
+
+Ticket 29 landed the highest-risk hardening items: owned checkpoint buffers,
+config validation, NaN-safe CLI top-k, and fallible DSpark/multimodal seams.
+It explicitly left lower-ranked architecture follow-ups open.
+
+Read first:
+
+- =../spec.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/29-architecture-hardening-production-readiness.org=
+- =ferric_continuum/tnsr/src/deepseek_v41/load.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/model.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/config.rs=
+- =ferric_continuum/tnsr/src/deepseek_v41/attention.rs=
+
+* Outcome Packet
+
+Outcome:
+
+- The remaining DeepSeek V4.1 architecture seams are either deepened with
+  behavior-preserving tests or rejected with concrete evidence that the split
+  would add complexity without leverage.
+
+Mode:
+
+- delivery for accepted seams; scout for any seam that needs a design decision
+  before code.
+
+Non-goals:
+
+- No behavior changes unless a failing characterization test proves an existing
+  bug.
+- No broad rewrite of the DeepSeek V4.1 module.
+- No Qwen3 loader churn.
+
+Allowed change surfaces:
+
+- =ferric_continuum/tnsr/src/deepseek_v41/=
+- =ferric_continuum/tnsr/tests/deepseek_v41*= and focused testdata if needed.
+- DeepSeek V4.1 tracker docs for resolution notes.
+
+* Requirements
+
+- Evaluate and implement or explicitly reject these follow-ups from ticket 29:
+  - C2: component-level =from_checkpoint= builders for attention, MoE, Engram,
+    vision, and DSpark pieces;
+  - C3: a planning module for CED, CSA2 source mapping, index-source mapping,
+    Engram placement, and DSpark stage geometry;
+  - C5: a =weight_adapt= module for transposes, grouped =wo_a= layout, and
+    quantized shape adaptation;
+  - C6: a =typed= or shape-contract module for named DeepSeek dimensions where
+    it reduces real errors.
+- Preserve the public loader and model behavior.
+- Add characterization tests before each refactor.
+- Keep new interfaces narrow and named by domain concepts already present in
+  =ferric_continuum/tnsr/CONTEXT.md= and the DeepSeek spec.
+
+* Acceptance Map
+
+Claim:
+
+- The DeepSeek V4.1 module has clearer task-sized interfaces without behavior
+  drift.
+
+Evidence:
+
+- Before/after tests, focused diffs, and notes explaining accepted or rejected
+  seams.
+
+Candidate:
+
+- Each refactor commit independently.
+
+Reuse rule:
+
+- Reuse characterization evidence only while the behavior under the moved code
+  is unchanged.
+
+Invalidation rule:
+
+- Any loader/model/attention behavior change reruns the relevant DeepSeek
+  verifier level.
+
+* Verification
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests=
+- =bazel test //ferric_continuum/tnsr/...=
+- =rustfmt --edition 2021 --check= on changed Rust files.
+
+* Comments
+
+* Answer
+
+Resolved by =../receipts/09-architecture-deepening-followups.org=.
+
+The release-candidate evidence pass did not need a broad refactor. It accepted
+only the verifier-directed multimodal reference fix and the reduced SWA cache
+characterization test. C2/C3/C5/C6 remain deferred until real-checkpoint,
+native quantized execution, or TP serving work demonstrates that a deeper seam
+will reduce actual implementation or review risk.

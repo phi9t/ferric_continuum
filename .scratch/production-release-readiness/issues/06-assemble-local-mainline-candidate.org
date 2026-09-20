@@ -1,0 +1,17 @@
+#+TITLE: Assemble the Ferric local federated candidate
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 03-prove-bazel-rootfs-conformance, 04-qualify-b200-cuda-and-tnsr, 05-sanitize-publication-closure, 07-approve-publication-root, 08-freeze-b200-qualification-contract
+#+PARENT: ../spec.org
+
+* Requirements
+
+- Complete ticket/branch review and repeat rootfs, Bazel, B200, license,
+  clean-checkout, ownership, and sanitization gates.
+- Present the exact local =ultron/mainline= update for human authorization.
+
+* Out of scope
+
+Unauthorized commit, push, tag, release, remote mutation, deletion, or merge.
+
+* Comments

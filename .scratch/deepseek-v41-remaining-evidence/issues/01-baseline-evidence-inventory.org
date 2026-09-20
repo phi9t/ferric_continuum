@@ -1,0 +1,112 @@
+#+TITLE: Baseline evidence inventory for remaining DeepSeek V4.1 work
+#+TYPE: task
+#+STATUS: resolved
+#+BLOCKED_BY:
+#+PARENT: ../spec.org
+
+* Context
+
+Before new DeepSeek V4.1 work starts, the next agent needs a candidate-bound
+baseline that says what is already proven and what remains only represented or
+skipped. This prevents repeated reimplementation of CED, Engram, CSA2, V4 CSA
+contrast, indexer lineage, SWA, and DSpark MTP.
+
+Read first:
+
+- =../spec.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/spec.org=
+- =.scratch/deepseek-v41-faithful-coverage/spec.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/20-multimodal-parity-harness-and-closure.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/25-dspark-parity-harness-and-closure.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/28-perf-device-closure.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/29-architecture-hardening-production-readiness.org=
+
+* Outcome Packet
+
+Outcome:
+
+- A compact baseline receipt identifies the exact commit, commands, PASS/SKIP
+  levels, source claims, and remaining evidence gaps for DeepSeek V4.1.
+
+Mode:
+
+- scout
+
+Non-goals:
+
+- No model code changes.
+- No checkpoint download.
+- No attempt to convert SKIP levels into PASS without the required assets.
+
+Allowed change surfaces:
+
+- =.scratch/deepseek-v41-remaining-evidence/=
+- =ferric_continuum/tnsr/docs/deepseek_v41/spec.org= only for cross-links or a
+  short remaining-work pointer.
+
+* Requirements
+
+- Run the existing source and focused CPU verifier ladder from the current
+  candidate.
+- Capture per-level results exactly, including SKIP reasons.
+- Identify which baseline claims cover:
+  - CED;
+  - Engram;
+  - CSA2;
+  - DeepSeek V4 CSA contrast;
+  - indexer lineage and current V4.1 behavior;
+  - sliding-window attention;
+  - DSpark MTP.
+- Write a receipt under =.scratch/deepseek-v41-remaining-evidence/receipts/=
+  with command lines, exit codes, candidate commit, and summary.
+- Do not edit implementation files.
+
+* Acceptance Map
+
+Claim:
+
+- The existing DeepSeek V4.1 implementation baseline is known before remaining
+  work starts.
+
+Evidence:
+
+- Fresh verifier output recorded in the receipt.
+
+Candidate:
+
+- The current HEAD at ticket execution time.
+
+Reuse rule:
+
+- Reuse only while DeepSeek source, tests, fixtures, tools, and docs are
+  unchanged from the recorded commit.
+
+Invalidation rule:
+
+- Any change under =ferric_continuum/tnsr/src/deepseek_v41/=,
+  =ferric_continuum/tnsr/tests/deepseek_v41*=,
+  =ferric_continuum/tnsr/tools/deepseek_v41*=, or
+  =ferric_continuum/tnsr/testdata/deepseek_v41/= invalidates the receipt.
+
+* Verification
+
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_sources.sh=
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests //ferric_continuum/tnsr:deepseek_v41_source_tests=
+- =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh=
+- =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_multimodal_compat.sh=
+- =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_dspark_compat.sh=
+- =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_perf_compat.sh=
+
+* Comments
+
+* Answer
+
+Resolved by =../receipts/01-baseline-evidence.org=.
+
+Fresh source, focused Bazel, text, multimodal, DSpark, and perf/device
+verifiers were run from the execution branch. The source verifier checked 30
+DeepSeek V4.1 source claims, including CED, Engram, CSA2, the DeepSeek V4 CSA
+contrast, indexer lineage/current behavior, sliding-window attention, and
+DSpark MTP. Focused Bazel tests passed. Text, multimodal, DSpark, and perf
+compatibility scripts exited 0 with explicit real-checkpoint SKIPs where
+=DEEPSEEK_V41_MODEL_DIR= / =MODEL_DIR= was absent.

@@ -1,6 +1,6 @@
 #+TITLE: Decide tensor layout and provenance boundary
 #+TYPE: research
-#+STATUS: open
+#+STATUS: claimed
 #+BLOCKED_BY: 02-mesh-plan-model
 #+PARENT: ../map.org
 
@@ -50,3 +50,24 @@ this ticket decides what the TLA+ side should reuse or mirror.
   collective work.
 
 * Answer
+
+* Comments
+
+** 2026-09-19 gated-path claim
+
+- Outcome: add the smallest executable layout/provenance refinement above
+  ~StepTxn.tla~, with a legal fixture and a partial-value-escape counterexample.
+- Acceptance: the model carries tensor/shard identity, layout, logical version,
+  membership epoch, and multiplicity-preserving provenance; checks the five
+  requested invariants; maps its vocabulary to the graduated DTensor simulator;
+  and runs as a hermetic Bazel TLC good/bad gate.
+- Constraints: preserve ~StepTxn.tla~ and the existing
+  ~tnsr.mesh_sim_trace.v0~ -> ~StepTxn.tla~ bridge unchanged; do not add runtime
+  DTensor behavior, generated trace validation, floating-point semantics, or
+  ordered reduction trees.
+- Route: gated, because this ticket defines distributed-state invariants and a
+  refinement boundary. The unavailable Matt routing/design owners are being
+  applied through ~docs/agents/agentic-engineering.md~ and
+  ~docs/agents/skill-orchestration.md~ as required by repository policy.
+- Authority boundary: implementation, tests, and tracker documentation are in
+  scope. Commit, push, pull-request creation, and merge are not authorized.

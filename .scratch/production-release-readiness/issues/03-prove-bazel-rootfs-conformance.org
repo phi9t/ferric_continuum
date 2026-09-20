@@ -1,0 +1,18 @@
+#+TITLE: Prove Ferric Bazel and rootfs conformance
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 02-complete-self-contained-rootfs
+#+PARENT: ../spec.org
+
+* Requirements
+
+- Run clean-bootstrap, Vaso v1 behavior, negative-path, CPU-default Bazel, and
+  relevant CUDA structural tests inside bwrap.
+- Prove native entrypoints cannot bypass the release rootfs contract.
+
+* Verification
+
+Fresh machine-readable results bind exact repository, dependency, and rootfs
+identities.
+
+* Comments

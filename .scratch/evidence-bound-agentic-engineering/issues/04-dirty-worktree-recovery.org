@@ -1,0 +1,47 @@
+#+TITLE: Implement dirty-worktree recovery for replacement attempts
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 02-run-journal-and-checkpoints, 03-task-start-admission
+#+PARENT: ../spec.org
+
+* Context
+
+A failed Agent Attempt can be replaced without discarding the Task Run worktree,
+but recovery must start read-only and prove it is safe to admit a new writer.
+
+* Requirements
+
+- Resolve the open Task Run from Kata metadata.
+- Locate and verify the recorded worktree, branch, Git common directory, task
+  boundary, context digest, and current HEAD.
+- Prove the previous writer is gone using session status, process identity,
+  lease nonce, heartbeat, host identity, and an enforceable exclusion mechanism.
+- Inventory dirty state with ~git status --porcelain=v2 -z~.
+- Detect staged, unstaged, untracked, conflicted, ignored, submodule, and
+  in-progress Git-operation state.
+- Create an immutable private recovery snapshot with tracked patch, exact index
+  copy, no-follow archive of regular untracked files, path metadata, modes,
+  sizes, content hashes, and ~manifest.sha256~.
+- Classify non-source state: caches, ignored outputs, running processes, remote
+  jobs, notebooks, databases, and credentials.
+- Reconcile trajectory facts with filesystem state and checkpoints.
+- Admit a replacement Agent Attempt only when automatic-recovery predicates are
+  satisfied.
+- Transition to ~needs-human~ for ambiguous writer, changed contract, changed
+  worktree identity, unsupported untracked state, unreconciled external effect,
+  or failed snapshot.
+
+* Out of scope
+
+- Implementing remote scheduler semantics.
+- Claiming host-loss recovery or backup guarantees.
+- Retrying uncertain external effects before reconciliation.
+
+* Verification
+
+- Crash-injection tests preserve staged, unstaged, and declared untracked files.
+- Tests reject ambiguous live writer state and active Git operations.
+- Tests prove unsupported untracked file types cause ~needs-human~.
+- Lost-acknowledgement fixtures require reconciliation before relaunch.
+
+* Comments

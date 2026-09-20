@@ -1,0 +1,18 @@
+#+TITLE: Qualify Ferric CUDA and folded tnsr behavior on B200
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 03-prove-bazel-rootfs-conformance, 08-freeze-b200-qualification-contract
+#+PARENT: ../spec.org
+
+* Requirements
+
+- Run the exact human-approved B200 CUDA and folded =tnsr= contract from ticket
+  08 in bwrap without changing its inputs or thresholds.
+- Exercise meaningful device/parallelism behavior and emit sanitized receipts.
+
+* Verification
+
+Signed exact-commit B200 receipts verify independently against the federation
+trust root and schema; incompatible GPU state fails closed.
+
+* Comments

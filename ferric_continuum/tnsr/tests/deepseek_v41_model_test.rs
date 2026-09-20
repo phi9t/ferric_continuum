@@ -1,11 +1,13 @@
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
+
 use tnsr::{
     deepseek_v41::{
         attention::{
-            AttentionLayerInput, DeepSeekV41Attention, DeepSeekV41Compressor, DeepSeekV41Indexer,
-            SharedAttentionState,
+            AttentionLayerInput, Csa2Mode, DeepSeekV41Attention, DeepSeekV41Compressor,
+            DeepSeekV41Indexer, SharedAttentionState,
         },
         engram::DeepSeekV41Engram,
         model::{
@@ -211,6 +213,10 @@ fn attention_from_fixture(
         wo_a: tensor_param(&params["attention"]["wo_a"]),
         wo_b: tensor_param(&params["attention"]["wo_b"]),
         attn_sink: tensor_param(&params["attention"]["attn_sink"]),
+        layer_id: usize_field(input, "layer_id"),
+        kv_source_layer_id: None,
+        index_source_layer_id: None,
+        csa2_mode: Csa2Mode::SlidingWindow,
         compressor: compressor.then(|| {
             DeepSeekV41Compressor::ratio_one(
                 tensor_param(&params["attention"]["compressor_wkv"]),
@@ -220,6 +226,36 @@ fn attention_from_fixture(
         }),
         indexer: indexer.then(|| DeepSeekV41Indexer {
             index_topk: usize_field(shape, "index_topk"),
+            candidate_topk_blocks: 0,
+            candidate_block_size: 0,
+            wq_b: param(
+                &[
+                    usize_field(shape, "q_lora_rank"),
+                    usize_field(shape, "n_heads") * usize_field(shape, "head_dim"),
+                ],
+                vec![
+                    1.0;
+                    usize_field(shape, "q_lora_rank")
+                        * usize_field(shape, "n_heads")
+                        * usize_field(shape, "head_dim")
+                ],
+            ),
+            weights_proj: param(
+                &[usize_field(input, "dim"), usize_field(shape, "n_heads")],
+                vec![1.0; usize_field(input, "dim") * usize_field(shape, "n_heads")],
+            ),
+            wk: Some(param(
+                &[
+                    usize_field(shape, "head_dim"),
+                    usize_field(shape, "head_dim"),
+                ],
+                vec![1.0, 0.0, 0.0, 1.0],
+            )),
+            k_norm: Some(param(
+                &[usize_field(shape, "head_dim")],
+                vec![1.0; usize_field(shape, "head_dim")],
+            )),
+            eps: f32_field(input, "rms_norm_eps"),
         }),
     }
 }
@@ -286,6 +322,8 @@ fn block_from_fixture(fixture: &Value) -> DeepSeekV41Block {
         engram: has_engram.then(|| DeepSeekV41Engram {
             q_weight: f32_array(&params["engram"]["q_weight"], "data"),
             k_weight: f32_array(&params["engram"]["k_weight"], "data"),
+            embed_weight: None,
+            wkv_weight: None,
             eps: f32_field(input, "hc_eps"),
         }),
         engram_key: has_engram.then(|| tensor_param(&params["engram"]["key"])),
@@ -344,6 +382,10 @@ fn attention_layer_checks_paths_sparse_indices_grouped_projection_and_shape() {
             &usize_array(&params["attn_sink"], "shape"),
             f32_array(&params["attn_sink"], "data"),
         ),
+        layer_id: 0,
+        kv_source_layer_id: Some(0),
+        index_source_layer_id: Some(0),
+        csa2_mode: Csa2Mode::Full,
         compressor: Some(DeepSeekV41Compressor::ratio_one(
             param(
                 &usize_array(&params["compressor_wkv"], "shape"),
@@ -357,6 +399,13 @@ fn attention_layer_checks_paths_sparse_indices_grouped_projection_and_shape() {
         )),
         indexer: Some(DeepSeekV41Indexer {
             index_topk: usize_field(shape, "index_topk"),
+            candidate_topk_blocks: 0,
+            candidate_block_size: 0,
+            wq_b: param(&[3, 4], vec![1.0; 12]),
+            weights_proj: param(&[4, 2], vec![1.0; 8]),
+            wk: Some(param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0])),
+            k_norm: Some(param(&[2], vec![1.0, 1.0])),
+            eps: f32_field(input, "rms_norm_eps"),
         }),
     };
 
@@ -387,6 +436,465 @@ fn attention_layer_checks_paths_sparse_indices_grouped_projection_and_shape() {
         tol,
     );
     assert!(state.consumed_sparse_indices);
+}
+
+fn attention_with_identity_output() -> DeepSeekV41Attention {
+    DeepSeekV41Attention {
+        n_heads: 1,
+        head_dim: 2,
+        rope_head_dim: 0,
+        q_lora_rank: 2,
+        o_lora_rank: 2,
+        o_groups: 1,
+        compress_ratio: 1,
+        window_size: 4,
+        rms_norm_eps: 1e-6,
+        wq_a: param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0]),
+        q_norm: param(&[2], vec![1.0, 1.0]),
+        wq_b: param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0]),
+        wkv: param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0]),
+        kv_norm: param(&[2], vec![1.0, 1.0]),
+        wo_a: param(&[1, 2, 2], vec![1.0, 0.0, 0.0, 1.0]),
+        wo_b: param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0]),
+        attn_sink: param(&[1], vec![8.0]),
+        layer_id: 0,
+        kv_source_layer_id: None,
+        index_source_layer_id: None,
+        csa2_mode: Csa2Mode::SlidingWindow,
+        compressor: None,
+        indexer: None,
+    }
+}
+
+#[test]
+fn decoder_attention_uses_encoder_global_kv_handoff() {
+    let attention = attention_with_identity_output();
+    let x = Tensor::from_value_no_grad(TensorValue::from_vec(
+        Shape(vec![1, 2, 2]),
+        vec![1.0, 1.0, 2.0, 2.0],
+    ));
+    let mut state = SharedAttentionState::default();
+    state.decoder_encoder_hidden = Some(Tensor::from_value_no_grad(TensorValue::from_vec(
+        Shape(vec![1, 2, 2]),
+        vec![10.0, 20.0, 30.0, 40.0],
+    )));
+    state.topk_indices = Some(vec![1, 0]);
+
+    let out = attention.forward_layer(AttentionLayerInput {
+        x: &x,
+        start_pos: 0,
+        shared: &mut state,
+    });
+
+    let value = out.inner.borrow().value.clone();
+    assert_close_slice(
+        value.data.as_ref(),
+        &[0.003332341, 0.0045239152, 0.0033323406, 0.004523915],
+        1e-5,
+    );
+    assert!(state.consumed_decoder_encoder_hidden);
+    let cache = state
+        .swa_cache
+        .as_ref()
+        .expect("decoder local KV should still seed SWA");
+    assert_eq!(cache.batch, 1);
+    assert_eq!(cache.window_size, 4);
+    assert_eq!(cache.head_dim, 2);
+    assert_close_slice(
+        &cache.data,
+        &[
+            0.9999995, 0.9999995, 0.9999999, 0.9999999, 0.0, 0.0, 0.0, 0.0,
+        ],
+        1e-5,
+    );
+}
+
+#[test]
+fn attention_prefill_uses_window_size_for_local_swa_indices() {
+    let mut attention = attention_with_identity_output();
+    attention.window_size = 1;
+    let x = Tensor::from_value_no_grad(TensorValue::from_vec(
+        Shape(vec![1, 3, 2]),
+        vec![1.0, 0.0, 0.0, 2.0, -3.0, 0.0],
+    ));
+    let mut state = SharedAttentionState::default();
+
+    let out = attention.forward_layer(AttentionLayerInput {
+        x: &x,
+        start_pos: 0,
+        shared: &mut state,
+    });
+
+    let value = out.inner.borrow().value.clone();
+    assert_close_slice(
+        value.data.as_ref(),
+        &[1.4140968, 0.0, 0.0, 1.4140968, -1.4140968, 0.0],
+        1e-5,
+    );
+}
+
+#[test]
+fn attention_decode_wraps_swa_cache_without_reusing_evicted_positions() {
+    fn norm2(pair: [f32; 2]) -> [f32; 2] {
+        let inv = ((pair[0] * pair[0] + pair[1] * pair[1]) / 2.0 + 1e-6)
+            .sqrt()
+            .recip();
+        [pair[0] * inv, pair[1] * inv]
+    }
+
+    let attention = attention_with_identity_output();
+    let mut state = SharedAttentionState::default();
+
+    let prefill = Tensor::from_value_no_grad(TensorValue::from_vec(
+        Shape(vec![1, 2, 2]),
+        vec![1.0, 0.0, 0.0, 2.0],
+    ));
+    let _ = attention.forward_layer(AttentionLayerInput {
+        x: &prefill,
+        start_pos: 0,
+        shared: &mut state,
+    });
+
+    for (step, pair) in [
+        (2, [3.0, 0.0]),
+        (3, [0.0, 4.0]),
+        (4, [5.0, 0.0]),
+        (5, [0.0, 6.0]),
+    ] {
+        let x =
+            Tensor::from_value_no_grad(TensorValue::from_vec(Shape(vec![1, 1, 2]), pair.to_vec()));
+        let _ = attention.forward_layer(AttentionLayerInput {
+            x: &x,
+            start_pos: step,
+            shared: &mut state,
+        });
+    }
+
+    let cache = state
+        .swa_cache
+        .as_ref()
+        .expect("decode should keep SWA cache");
+    assert_eq!(cache.batch, 1);
+    assert_eq!(cache.window_size, 4);
+    assert_eq!(cache.head_dim, 2);
+    let mut expected = Vec::new();
+    for pair in [[5.0, 0.0], [0.0, 6.0], [3.0, 0.0], [0.0, 4.0]] {
+        expected.extend_from_slice(&norm2(pair));
+    }
+    assert_close_slice(&cache.data, &expected, 1e-5);
+}
+
+#[test]
+fn csa2_not_v4_csa_hca_full_reindex_and_reuse_share_kv_index_k_and_topk() {
+    fn indexer(wk: bool, weights: [f32; 2], candidates: bool) -> DeepSeekV41Indexer {
+        DeepSeekV41Indexer {
+            index_topk: 1,
+            candidate_topk_blocks: if candidates { 1 } else { 0 },
+            candidate_block_size: if candidates { 1 } else { 0 },
+            wq_b: param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0]),
+            weights_proj: param(&[2, 1], weights.to_vec()),
+            wk: wk.then(|| param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0])),
+            k_norm: wk.then(|| param(&[2], vec![1.0, 1.0])),
+            eps: 0.0,
+        }
+    }
+
+    let base = attention_with_identity_output();
+    let mut full = attention_with_identity_output();
+    full.csa2_mode = Csa2Mode::Full;
+    full.layer_id = 2;
+    full.kv_source_layer_id = Some(2);
+    full.index_source_layer_id = Some(2);
+    full.compress_ratio = 1;
+    full.window_size = 1;
+    full.attn_sink = param(&[1], vec![-8.0]);
+    full.compressor = Some(DeepSeekV41Compressor::ratio_one(
+        param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0]),
+        param(&[2], vec![1.0, 1.0]),
+        0.0,
+    ));
+    full.indexer = Some(indexer(true, [1.0, 0.0], true));
+
+    let x = Tensor::from_value_no_grad(TensorValue::from_vec(
+        Shape(vec![1, 2, 2]),
+        vec![2.0, 0.0, 0.0, 4.0],
+    ));
+    let mut shared = SharedAttentionState::default();
+    let _ = full.forward_layer(AttentionLayerInput {
+        x: &x,
+        start_pos: 0,
+        shared: &mut shared,
+    });
+    assert_eq!(shared.csa2_full_updates, 1);
+    assert_eq!(shared.csa2_reindex_updates, 0);
+    assert_eq!(shared.csa2_reuse_reads, 0);
+    assert!(shared.compressed_kv.is_some());
+    assert!(shared.index_k.is_some());
+    assert_eq!(shared.topk_indices.as_deref(), Some(&[0, 2, 1, 3][..]));
+    assert_eq!(
+        shared.candidate_mask.as_deref(),
+        Some(&[true, false, false, true][..])
+    );
+
+    let compressed_after_full = shared.compressed_kv.clone();
+    let mut reindex = base;
+    reindex.csa2_mode = Csa2Mode::Reindex;
+    reindex.layer_id = 3;
+    reindex.kv_source_layer_id = Some(2);
+    reindex.index_source_layer_id = Some(3);
+    reindex.compress_ratio = 1;
+    reindex.window_size = 1;
+    reindex.indexer = Some(indexer(false, [1.0, 0.0], false));
+    let _ = reindex.forward_layer(AttentionLayerInput {
+        x: &x,
+        start_pos: 0,
+        shared: &mut shared,
+    });
+    assert_eq!(shared.csa2_full_updates, 1);
+    assert_eq!(shared.csa2_reindex_updates, 1);
+    assert_eq!(shared.csa2_reuse_reads, 0);
+    assert_eq!(shared.compressed_kv, compressed_after_full);
+    assert_eq!(shared.topk_indices.as_deref(), Some(&[0, 2, 1, 2][..]));
+
+    let topk_after_reindex = shared.topk_indices.clone();
+    let mut reuse = attention_with_identity_output();
+    reuse.csa2_mode = Csa2Mode::Reuse;
+    reuse.layer_id = 4;
+    reuse.kv_source_layer_id = Some(2);
+    reuse.index_source_layer_id = Some(3);
+    reuse.compress_ratio = 1;
+    let _ = reuse.forward_layer(AttentionLayerInput {
+        x: &x,
+        start_pos: 0,
+        shared: &mut shared,
+    });
+    assert_eq!(shared.csa2_full_updates, 1);
+    assert_eq!(shared.csa2_reindex_updates, 1);
+    assert_eq!(shared.csa2_reuse_reads, 1);
+    assert_eq!(shared.topk_indices, topk_after_reindex);
+}
+
+#[test]
+fn csa2_full_source_layer_uses_ratio_n_prefill_compression() {
+    let mut full = attention_with_identity_output();
+    full.csa2_mode = Csa2Mode::Full;
+    full.layer_id = 2;
+    full.kv_source_layer_id = Some(2);
+    full.index_source_layer_id = Some(2);
+    full.compress_ratio = 2;
+    full.window_size = 2;
+    full.attn_sink = param(&[1], vec![-8.0]);
+    full.compressor = Some(DeepSeekV41Compressor::ratio_n(
+        param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0]),
+        param(&[2, 2], vec![0.0, 0.0, 0.0, 0.0]),
+        param(&[2], vec![1.0, 1.0]),
+        0.0,
+        2,
+    ));
+    full.indexer = Some(DeepSeekV41Indexer {
+        index_topk: 1,
+        candidate_topk_blocks: 0,
+        candidate_block_size: 0,
+        wq_b: param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0]),
+        weights_proj: param(&[2, 1], vec![1.0, 0.0]),
+        wk: Some(param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0])),
+        k_norm: Some(param(&[2], vec![1.0, 1.0])),
+        eps: 0.0,
+    });
+
+    let x = Tensor::from_value_no_grad(TensorValue::from_vec(
+        Shape(vec![1, 2, 2]),
+        vec![2.0, 0.0, 0.0, 4.0],
+    ));
+    let mut shared = SharedAttentionState::default();
+    let _ = full.forward_layer(AttentionLayerInput {
+        x: &x,
+        start_pos: 0,
+        shared: &mut shared,
+    });
+
+    let compressed = shared
+        .compressed_kv
+        .as_ref()
+        .expect("CSA2 Full should publish compressed KV");
+    assert_eq!(
+        compressed.len(),
+        2,
+        "ratio-2 prefill compression should publish one KV row for two tokens"
+    );
+    assert_close_slice(compressed, &[0.6324555, 1.2649111], 1e-5);
+    assert_eq!(
+        shared.topk_indices.as_deref(),
+        Some(&[0, usize::MAX, usize::MAX, 0, 1, 2][..]),
+        "local window entries are followed by the visible compressed block"
+    );
+}
+
+#[test]
+fn compressor_ratio_n_prefill_drops_incomplete_group_per_batch() {
+    let compressor = DeepSeekV41Compressor::ratio_n(
+        param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0]),
+        param(&[2, 2], vec![0.0, 0.0, 0.0, 0.0]),
+        param(&[2], vec![1.0, 1.0]),
+        0.0,
+        2,
+    );
+    let x = Tensor::from_value_no_grad(TensorValue::from_vec(
+        Shape(vec![2, 3, 2]),
+        vec![
+            1.0, 2.0, 3.0, 4.0, 99.0, 99.0, //
+            5.0, 6.0, 7.0, 8.0, 88.0, 88.0,
+        ],
+    ));
+
+    let compressed = compressor
+        .forward(&x, 0)
+        .expect("two-token groups should compress during prefill");
+
+    assert_eq!(compressed.shape().0, vec![2, 1, 2]);
+    assert_close_slice(
+        &compressed.inner.borrow().value.data,
+        &[0.78446454, 1.1766968, 0.9203580, 1.0737510],
+        1e-5,
+    );
+}
+
+#[test]
+fn csa2_reindex_and_reuse_hold_source_kv_across_decode_boundary() {
+    fn indexer(wk: bool, weights: [f32; 2], candidates: bool) -> DeepSeekV41Indexer {
+        DeepSeekV41Indexer {
+            index_topk: 1,
+            candidate_topk_blocks: if candidates { 1 } else { 0 },
+            candidate_block_size: if candidates { 1 } else { 0 },
+            wq_b: param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0]),
+            weights_proj: param(&[2, 1], weights.to_vec()),
+            wk: wk.then(|| param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0])),
+            k_norm: wk.then(|| param(&[2], vec![1.0, 1.0])),
+            eps: 0.0,
+        }
+    }
+
+    let mut full = attention_with_identity_output();
+    full.csa2_mode = Csa2Mode::Full;
+    full.layer_id = 2;
+    full.kv_source_layer_id = Some(2);
+    full.index_source_layer_id = Some(2);
+    full.compress_ratio = 1;
+    full.window_size = 2;
+    full.compressor = Some(DeepSeekV41Compressor::ratio_one(
+        param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0]),
+        param(&[2], vec![1.0, 1.0]),
+        0.0,
+    ));
+    full.indexer = Some(indexer(true, [1.0, 0.0], true));
+
+    let prefill = Tensor::from_value_no_grad(TensorValue::from_vec(
+        Shape(vec![1, 2, 2]),
+        vec![2.0, 0.0, 0.0, 4.0],
+    ));
+    let mut shared = SharedAttentionState::default();
+    let _ = full.forward_layer(AttentionLayerInput {
+        x: &prefill,
+        start_pos: 0,
+        shared: &mut shared,
+    });
+    let source_full = shared
+        .csa2_sources
+        .get(&2)
+        .expect("Full should publish source layer 2")
+        .clone();
+    let source_compressed = source_full
+        .compressed_kv
+        .as_ref()
+        .expect("Full should publish compressed KV")
+        .clone();
+    let source_index_k = source_full
+        .index_k
+        .as_ref()
+        .expect("Full should publish index K")
+        .clone();
+
+    let mut reindex = attention_with_identity_output();
+    reindex.csa2_mode = Csa2Mode::Reindex;
+    reindex.layer_id = 3;
+    reindex.kv_source_layer_id = Some(2);
+    reindex.index_source_layer_id = Some(3);
+    reindex.compress_ratio = 1;
+    reindex.window_size = 2;
+    reindex.indexer = Some(indexer(false, [0.0, 1.0], false));
+    let decode =
+        Tensor::from_value_no_grad(TensorValue::from_vec(Shape(vec![1, 1, 2]), vec![5.0, 0.0]));
+    let _ = reindex.forward_layer(AttentionLayerInput {
+        x: &decode,
+        start_pos: 2,
+        shared: &mut shared,
+    });
+    assert_eq!(shared.csa2_full_updates, 1);
+    assert_eq!(shared.csa2_reindex_updates, 1);
+    assert_eq!(shared.csa2_reuse_reads, 0);
+    assert_eq!(shared.compressed_kv.as_ref(), Some(&source_compressed));
+    assert_eq!(shared.index_k.as_ref(), Some(&source_index_k));
+    assert_eq!(
+        shared.topk_indices.as_ref().map(Vec::len),
+        Some(3),
+        "decode row should combine two SWA slots and one recomputed compressed top-k"
+    );
+
+    let source_after_reindex = shared
+        .csa2_sources
+        .get(&3)
+        .expect("Reindex should publish index source layer 3");
+    assert_eq!(
+        source_after_reindex.compressed_kv.as_ref(),
+        Some(&source_compressed),
+        "Reindex must not replace compressed KV from the KV source layer"
+    );
+    assert_eq!(source_after_reindex.index_k.as_ref(), Some(&source_index_k));
+    assert_eq!(source_after_reindex.topk_indices, shared.topk_indices);
+    let topk_after_reindex = shared.topk_indices.clone();
+    let candidate_mask_after_reindex = shared.candidate_mask.clone();
+
+    let mut reuse = attention_with_identity_output();
+    reuse.csa2_mode = Csa2Mode::Reuse;
+    reuse.layer_id = 4;
+    reuse.kv_source_layer_id = Some(2);
+    reuse.index_source_layer_id = Some(3);
+    reuse.compress_ratio = 1;
+    reuse.window_size = 2;
+    let _ = reuse.forward_layer(AttentionLayerInput {
+        x: &decode,
+        start_pos: 3,
+        shared: &mut shared,
+    });
+    assert_eq!(shared.csa2_full_updates, 1);
+    assert_eq!(shared.csa2_reindex_updates, 1);
+    assert_eq!(shared.csa2_reuse_reads, 1);
+    assert_eq!(shared.compressed_kv.as_ref(), Some(&source_compressed));
+    assert_eq!(shared.index_k.as_ref(), Some(&source_index_k));
+    assert_eq!(shared.topk_indices, topk_after_reindex);
+    assert_eq!(shared.candidate_mask, candidate_mask_after_reindex);
+}
+
+#[test]
+#[should_panic(expected = "CSA2 Reuse mode requires source layer 99")]
+fn csa2_reuse_requires_configured_index_source_layer() {
+    let mut shared = SharedAttentionState::default();
+    shared.topk_indices = Some(vec![0, 0]);
+
+    let mut reuse = attention_with_identity_output();
+    reuse.csa2_mode = Csa2Mode::Reuse;
+    reuse.layer_id = 4;
+    reuse.index_source_layer_id = Some(99);
+    let x = Tensor::from_value_no_grad(TensorValue::from_vec(
+        Shape(vec![1, 2, 2]),
+        vec![2.0, 0.0, 0.0, 4.0],
+    ));
+
+    let _ = reuse.forward_layer(AttentionLayerInput {
+        x: &x,
+        start_pos: 0,
+        shared: &mut shared,
+    });
 }
 
 #[test]
@@ -461,6 +969,8 @@ fn engram_layer_updates_text_tokens_and_leaves_masked_tokens_unchanged() {
     let engram = DeepSeekV41Engram {
         q_weight: f32_array(&params["q_weight"], "data"),
         k_weight: f32_array(&params["k_weight"], "data"),
+        embed_weight: None,
+        wkv_weight: None,
         eps: f32_field(input, "eps"),
     };
 
@@ -481,6 +991,58 @@ fn engram_layer_updates_text_tokens_and_leaves_masked_tokens_unchanged() {
             [usize_field(input, "masked_token_start")..usize_field(input, "masked_token_end")],
         &f32_array(&fixture["expected"], "masked_token_original"),
         tol,
+    );
+}
+
+#[test]
+#[should_panic(expected = "Engram embed_weight is required for hash lookup")]
+fn engram_hash_forward_requires_loaded_table_weights() {
+    let engram = DeepSeekV41Engram {
+        q_weight: vec![1.0, 1.0],
+        k_weight: vec![1.0, 1.0],
+        embed_weight: None,
+        wkv_weight: None,
+        eps: 1e-6,
+    };
+    let x = Tensor::from_value_no_grad(TensorValue::from_vec(
+        Shape(vec![1, 1, 1, 2]),
+        vec![1.0, 2.0],
+    ));
+    let _ = engram.forward_hashes(&x, &[0], None);
+}
+
+#[test]
+fn engram_hash_forward_uses_table_lookup_and_wkv_projection() {
+    let engram = DeepSeekV41Engram {
+        q_weight: vec![1.0, 1.0],
+        k_weight: vec![1.0, 1.0],
+        embed_weight: Some(param(&[3, 1], vec![10.0, 20.0, 30.0])),
+        wkv_weight: Some(param(&[1, 4], vec![0.1, 0.2, 0.3, 0.4])),
+        eps: 1e-6,
+    };
+    let x = Tensor::from_value_no_grad(TensorValue::from_vec(
+        Shape(vec![1, 2, 1, 2]),
+        vec![1.0, 1.0, 2.0, 2.0],
+    ));
+
+    let via_hash = engram.forward_hashes(&x, &[0, 2], None);
+    let (key, value) = engram.lookup_key_value(&[0, 2], 1, 2);
+    let direct = engram.forward_layer(&x, &key, &value, None);
+    assert_close_slice(
+        via_hash.inner.borrow().value.data.as_ref(),
+        direct.inner.borrow().value.data.as_ref(),
+        1e-6,
+    );
+
+    let skipped_key =
+        Tensor::from_value_no_grad(TensorValue::from_vec(Shape(vec![1, 2, 1, 2]), vec![0.0; 4]));
+    let skipped_value =
+        Tensor::from_value_no_grad(TensorValue::from_vec(Shape(vec![1, 2, 2]), vec![0.0; 4]));
+    let skipped = engram.forward_layer(&x, &skipped_key, &skipped_value, None);
+    assert_ne!(
+        via_hash.inner.borrow().value.data.as_ref(),
+        skipped.inner.borrow().value.data.as_ref(),
+        "hash runtime must not skip table lookup and wkv projection"
     );
 }
 
@@ -585,10 +1147,13 @@ fn tiny_text_model_emits_bsv_logits_and_rejects_image_token_ids() {
         hidden_size: usize_field(input, "hidden_size"),
         hc_mult: usize_field(input, "hc_mult"),
         image_token_id: usize_field(input, "image_token_id"),
+        causal_encoder_layers: 1,
+        decoder_layers: 0,
         embed_tokens: tensor_param(&params["embed_tokens"]),
         layers: vec![block_from_fixture(&params["block_fixture"])],
         final_norm: tensor_param(&params["final_norm"]),
         lm_head: tensor_param(&params["lm_head"]),
+        engram_runtime: None,
         vision: None,
         image_start: None,
         image_end: None,
@@ -659,6 +1224,7 @@ fn tiny_dspark_head_forward_spec_matches_reference() {
         embed_tokens: tensor_param(&params["embed_tokens"]),
         lm_head: tensor_param(&params["lm_head"]),
         stages: vec![stage],
+        stage_swa_caches: RefCell::new(vec![None]),
     };
 
     let input_ids = usize_array(input, "input_ids");
@@ -682,6 +1248,88 @@ fn tiny_dspark_head_forward_spec_matches_reference() {
         &f32_array(expected, "confidence"),
         tol,
         "dspark confidence",
+    );
+}
+
+fn dspark_head_from_fixture(fixture: &Value) -> DeepSeekV41DsparkHead {
+    let input = &fixture["input"];
+    let params = &fixture["parameters"];
+    let stage = DeepSeekV41DsparkStage {
+        block: {
+            let mut block = block_from_fixture(&params["block_fixture"]);
+            block.ffn.gate.tokens = usize_field(input, "batch") * usize_field(input, "block_size");
+            block
+        },
+        main_proj: Some(param_vec(&params["main_proj"])),
+        main_norm: Some(param_vec(&params["main_norm"])),
+        head_norm: Some(param_vec(&params["head_norm"])),
+        markov_embed: Some(param_vec(&params["markov_embed"])),
+        markov_head: Some(param_vec(&params["markov_head"])),
+        confidence_proj: Some(param_vec(&params["confidence_proj"])),
+    };
+    DeepSeekV41DsparkHead {
+        vocab_size: usize_field(input, "vocab_size"),
+        dim: usize_field(input, "dim"),
+        hc_mult: usize_field(input, "hc_mult"),
+        block_size: usize_field(input, "block_size"),
+        noise_token_id: usize_field(input, "noise_token_id"),
+        markov_rank: usize_field(input, "markov_rank"),
+        head_eps: f32_field(input, "head_eps"),
+        embed_tokens: tensor_param(&params["embed_tokens"]),
+        lm_head: tensor_param(&params["lm_head"]),
+        stages: vec![stage],
+        stage_swa_caches: RefCell::new(vec![None]),
+    }
+}
+
+#[test]
+fn dspark_forward_spec_prefill_returns_none() {
+    let fixture = fixture("dspark_tiny_model_fixture.json");
+    let input = &fixture["input"];
+    let head = dspark_head_from_fixture(&fixture);
+    let input_ids = usize_array(input, "input_ids");
+    let main_hidden = f32_array(input, "main_hidden");
+
+    let out = head
+        .try_forward_spec_at(&input_ids, &main_hidden, 0)
+        .expect("prefill should seed and return no draft");
+
+    assert!(
+        out.is_none(),
+        "DSpark forward_spec(start_pos=0) should return None"
+    );
+}
+
+#[test]
+fn dspark_decode_uses_main_hidden_and_start_pos() {
+    let fixture = fixture("dspark_tiny_model_fixture.json");
+    let input = &fixture["input"];
+    let head = dspark_head_from_fixture(&fixture);
+    let input_ids = usize_array(input, "input_ids");
+    let main_hidden = f32_array(input, "main_hidden");
+    let mut changed_main_hidden = main_hidden.clone();
+    changed_main_hidden[0] += 1.0;
+
+    let out = head
+        .try_forward_spec_at(&input_ids, &main_hidden, 2)
+        .expect("decode should succeed")
+        .expect("decode should return draft output");
+    let changed = head
+        .try_forward_spec_at(&input_ids, &changed_main_hidden, 2)
+        .expect("decode with changed main_hidden should succeed")
+        .expect("decode should return draft output");
+
+    assert_ne!(
+        out.logits, changed.logits,
+        "DSpark decode must use main_x derived from main_hidden"
+    );
+
+    let start_pos_zero = head
+        .try_forward_spec_at(&input_ids, &main_hidden, 0)
+        .expect("prefill should succeed");
+    assert!(
+        start_pos_zero.is_none(),
+        "start_pos must not be hard-coded to decode behavior"
     );
 }
 

@@ -1,0 +1,76 @@
+#+TITLE: DeepSeek V4.1 baseline evidence receipt
+#+TYPE: receipt
+#+STATUS: resolved
+#+PARENT: ../issues/01-baseline-evidence-inventory.org
+
+* Candidate
+
+- Context commit: =f58239798719ddf9350aa5e7db7f514459073c15=
+- Execution branch: =deepseek-v41-remaining-exec=
+- Worktree:
+  =${HOME}/workspace/ferric_continuum/.worktrees/deepseek-v41-remaining-exec=
+
+This receipt records the pre-release baseline plus the local fix-and-stress
+candidate executed by this run. The final candidate is the local commit
+containing this receipt and the DeepSeek V4.1 code changes.
+
+* Commands
+
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_sources.sh=
+  - Local raw log: =logs/10-sources.log=, ignored by Git.
+  - Exit: 0
+  - Result: =PASS: checked 30 DeepSeek V4.1 source claim(s)=
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests //ferric_continuum/tnsr:deepseek_v41_source_tests=
+  - Local raw log: =logs/10-focused-bazel.log=, ignored by Git.
+  - Exit: 0
+  - Result: 4 passing, 0 skipped, 0 failing
+- =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh=
+  - Local raw log: =logs/10-text-compat.log=, ignored by Git.
+  - Exit: 0
+  - Result: =PASS-WITH-SKIPS=; tiny parity PASS, real parity SKIP because no
+    =DEEPSEEK_V41_MODEL_DIR= / =MODEL_DIR= was set.
+- =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_multimodal_compat.sh=
+  - Local raw log: =logs/10-multimodal-compat.log=, ignored by Git.
+  - Exit: 0
+  - Result: =PASS-WITH-SKIPS=; tiny multimodal parity PASS, B200 GPU parity
+    SKIP, real parity SKIP.
+- =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_dspark_compat.sh=
+  - Local raw log: =logs/10-dspark-compat.log=, ignored by Git.
+  - Exit: 0
+  - Result: =PASS-WITH-SKIPS=; tiny =forward_spec= parity PASS, real parity
+    SKIP because no =DEEPSEEK_V41_MODEL_DIR= / =MODEL_DIR= was set.
+- =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_perf_compat.sh=
+  - Local raw log: =logs/10-perf-compat.log=, ignored by Git.
+  - Exit: 0
+  - Result: =PASS-WITH-SKIPS=; existing tiny CUDA forward parity PASS, real
+    parity SKIP.
+
+The durable evidence is this committed receipt plus the ticket receipts below.
+The raw logs are local run artifacts and are not required to audit the recorded
+PASS/SKIP disposition.
+
+* Covered Baseline Claims
+
+- CED: source manifest and model tests cover decoder use of encoder-derived
+  global KV; ticket 06 adds stronger SWA-cache state assertions.
+- Engram: source manifest covers hash-mask and compressed-map behavior; model
+  tests cover table lookup.
+- CSA2: source manifest covers Full/Reindex/Reuse semantics and the DeepSeek V4
+  CSA contrast; model tests cover shared KV/index/top-k reuse.
+- Indexer lineage/current behavior: source manifest covers V3.2 origin and V4.1
+  hierarchical indexer operations.
+- Sliding-window attention: source manifest covers bounded replay and ring
+  cache; ticket 06 adds decode wraparound stress.
+- DSpark MTP: source manifest covers =forward_spec= surface and the training
+  contrast; the DSpark verifier proves tiny =forward_spec= parity.
+
+* Remaining Gaps
+
+- Real release checkpoint asset admission skipped because no
+  =DEEPSEEK_V41_MODEL_DIR= or =MODEL_DIR= was configured.
+- Real text, multimodal, DSpark, and perf parity skipped for the same missing
+  model asset.
+- B200 multimodal reference parity skipped because the verifier saw no CUDA
+  torch runtime on this host.
+- Native FP8/FP4 execution and tensor-parallel serving remain human-gated
+  follow-up work, not claims proven by this receipt.

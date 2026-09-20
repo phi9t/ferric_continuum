@@ -104,7 +104,7 @@ upstream =model.py= needs GPU-only kernels — out of scope).
 Evidence commands:
 - =python3 -m py_compile ferric_continuum/tnsr/tools/deepseek_v41_reference.py= → OK
 - =bash -n .../verify_deepseek_v41_multimodal_compat.sh= → OK
-- =~/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_config_tests
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests
   //ferric_continuum/tnsr:deepseek_v41_math_tests
   //ferric_continuum/tnsr:deepseek_v41_model_tests
   //ferric_continuum/tnsr:lib_tests= → 4 tests pass

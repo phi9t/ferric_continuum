@@ -1,0 +1,19 @@
+#+TITLE: Sanitize the Ferric publication closure
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 01-provenance-disposition-and-tnsr-ownership
+#+PARENT: ../spec.org
+
+* Requirements
+
+- Reconstruct unsafe local work with approved public identity.
+- Resolve machine paths, company metadata, sensitive branch names, committed
+  tracker evidence, binaries, licenses, and proprietary findings.
+- Preserve attribution for licensed folded =tnsr= material.
+
+* Verification
+
+Pinned automated scans and independent human review have no unresolved
+publication blocker.
+
+* Comments

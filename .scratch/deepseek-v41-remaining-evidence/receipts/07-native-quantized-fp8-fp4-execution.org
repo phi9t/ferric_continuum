@@ -1,0 +1,27 @@
+#+TITLE: DeepSeek V4.1 native FP8/FP4 execution disposition
+#+TYPE: receipt
+#+STATUS: ready-for-human
+#+PARENT: ../issues/07-native-quantized-fp8-fp4-execution.org
+
+* Disposition
+
+Native FP8/FP4 execution remains deferred. This run did not implement new
+quantized kernels or change the loader's current inspectable CPU behavior of
+recording =QuantKind= while decoding checkpoint tensors to f32.
+
+* Evidence
+
+- =logs/10-perf-compat.log= reports PASS for the existing local performance and
+  device checks, including =L6-cuda-forward-parity= on the tiny CUDA forward
+  test.
+- The same receipt reports =L6-real-parity SKIP= because no
+  =DEEPSEEK_V41_MODEL_DIR= / =MODEL_DIR= was configured.
+- No native FP8/FP4 kernel agreement test exists in this candidate, so no native
+  quantized execution claim is made.
+
+* Required Human Action
+
+Authorize a dedicated delivery or experiment run for native quantized execution.
+That run needs a GPU-runtime budget, explicit dtype semantics from upstream
+=convert.py= / =kernel.py=, opt-in CUDA execution, and agreement tests against
+the existing dequantized baseline.

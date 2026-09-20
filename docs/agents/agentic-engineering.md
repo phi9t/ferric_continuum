@@ -7,6 +7,11 @@ Use this workflow for planning, building, fixing, or changing code. The human
 owns architectural authority and merge. Agents receive bounded work, isolated
 execution, and an independent verification budget.
 
+For the evidence-bound working method behind this workflow, including outcome
+packets, uncertainty ledgers, acceptance maps, candidate-bound evidence,
+delegation rules, experiment discipline, and human supervision packets, read
+`docs/agents/evidence-bound-method.md`.
+
 When Matt and Superpowers both apply, read
 `docs/agents/skill-orchestration.md`. Load every applicable skill, then execute
 one combined phase under the owner named there. Do not repeat equivalent
@@ -81,6 +86,9 @@ Complete these gates in order:
    `docs/superpowers/specs` or `docs/superpowers/plans`.
 5. **Isolated execution:** Implement each ticket in its own worktree. Parallel
    agents receive non-overlapping tickets and never share a mutable checkout.
+   For Kata-backed task admission, task contracts, run journals, checkpointing,
+   dirty-worktree recovery, trajectory binding, and finish gates, read
+   `docs/agents/task-runs.md`.
 6. **Behavioral proof:** Approve the public test seam once during design or
    specification, then drive every behavior slice with visible red-green
    evidence. Only behavior-preserving cleanup follows green. Run focused tests

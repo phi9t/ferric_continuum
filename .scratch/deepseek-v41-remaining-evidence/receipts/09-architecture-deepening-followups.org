@@ -1,0 +1,47 @@
+#+TITLE: DeepSeek V4.1 architecture deepening disposition
+#+TYPE: receipt
+#+STATUS: resolved
+#+PARENT: ../issues/09-architecture-deepening-followups.org
+
+* Decision
+
+Defer broad architecture refactors from the release-candidate evidence pass.
+Implement only evidence-directed fixes that close a concrete verifier gap.
+
+* Evidence
+
+- The previous hardening ticket
+  =ferric_continuum/tnsr/docs/deepseek_v41/issues/29-architecture-hardening-production-readiness.org=
+  already landed the high-risk items: owned checkpoint buffers, config
+  validation, NaN-safe CLI top-k, and fallible DSpark/multimodal seams.
+- The current run found one verifier correctness gap in the multimodal Python
+  reference, not a production loader/model boundary defect. The focused fix
+  stayed inside =deepseek_v41_reference.py=.
+- The reduced SWA cache stress was added as characterization in
+  =deepseek_v41_model_test.rs= and did not require moving runtime boundaries.
+
+* Follow-up Disposition
+
+- C2 component-level =from_checkpoint= builders: defer until real-checkpoint
+  admission exposes which builders remove meaningful loader complexity.
+- C3 planning module for CED/CSA2/index-source/Engram/DSpark geometry: defer
+  until a second implementation slice needs the same planning state outside the
+  current model constructors.
+- C5 standalone =weight_adapt= module: defer. It is tied to native FP8/FP4 and
+  tensor layout work, which this run keeps behind separate human-gated tickets.
+- C6 typed/named dimensions: defer unless a failing test shows shape confusion
+  that plain config validation does not catch.
+
+* Verification
+
+- Command:
+  =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests //ferric_continuum/tnsr:deepseek_v41_source_tests=
+- Log: =logs/10-focused-bazel.log=
+- Exit: 0
+- Result: 4 passing, 0 skipped, 0 failing.
+
+* Invalidation
+
+Reopen this after real-checkpoint admission, native quantized execution, or TP
+serving work proves that the current boundaries are blocking implementation or
+review.

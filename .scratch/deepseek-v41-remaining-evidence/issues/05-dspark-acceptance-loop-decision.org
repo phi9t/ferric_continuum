@@ -1,0 +1,93 @@
+#+TITLE: DSpark speculative acceptance loop decision
+#+TYPE: research
+#+STATUS: resolved
+#+BLOCKED_BY: 01-baseline-evidence-inventory
+#+PARENT: ../spec.org
+
+* Context
+
+The shipped DeepSeek V4.1 reference exposes =forward_spec= but the released
+=generate.py= does not call it. The current local implementation therefore
+proves DSpark MTP forward-spec parity, not end-to-end speculative decoding.
+
+Read first:
+
+- =../spec.org=
+- =.scratch/deepseek-v41-dspark/issues/D1-parity-contract.org=
+- =ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py=
+- =ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/generate.py=
+- =ferric_continuum/tnsr/src/deepseek_v41/model.rs=
+
+* Outcome Packet
+
+Outcome:
+
+- Decide whether this repo should implement a DSpark acceptance loop now, defer
+  it until upstream publishes one, or run it as a tnsr-native experiment.
+
+Mode:
+
+- scout
+
+Non-goals:
+
+- No production speculative decoder.
+- No performance claim.
+- No change to the existing =forward_spec= parity contract.
+
+Allowed change surfaces:
+
+- Tracker docs and, if useful, a source-grounded research note.
+
+* Requirements
+
+- Re-read upstream =generate.py= and =model.py= and confirm whether any
+  acceptance-loop contract exists beyond =forward_spec=.
+- Inspect current Rust API shape and identify what data would be needed for an
+  acceptance loop without inventing upstream semantics.
+- Produce one of three decisions:
+  - upstream-faithful loop exists and should become delivery tickets;
+  - no upstream-faithful loop exists, so keep it deferred;
+  - no upstream-faithful loop exists, but authorize a separate experiment with a
+    hypothesis, protocol, and metrics.
+- If delivery or experiment is recommended, write follow-up tickets rather than
+  implementing in this scout.
+
+* Acceptance Map
+
+Claim:
+
+- The DSpark acceptance-loop boundary is explicit and not silently conflated
+  with =forward_spec= parity.
+
+Evidence:
+
+- Cited source lines from upstream plus a decision note in this ticket.
+
+Candidate:
+
+- Documentation-only decision candidate.
+
+Reuse rule:
+
+- Reuse while upstream mirrored =model.py= and =generate.py= are unchanged.
+
+Invalidation rule:
+
+- Any upstream mirror refresh or new DeepSeek release notes mentioning DSpark
+  generation invalidate the decision.
+
+* Verification
+
+- =rg -n \"forward_spec|sample|generate|DSpark|mtp\" ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/model.py ferric_continuum/tnsr/third_party/deepseek_v41/upstream/inference/generate.py=
+- =git diff --check -- .scratch/deepseek-v41-remaining-evidence=
+
+* Comments
+
+* Answer
+
+Resolved by =../receipts/05-dspark-acceptance-loop-decision.org=.
+
+No upstream-faithful DSpark acceptance-loop contract exists in the mirrored
+reference. The repository should keep DSpark scoped to =forward_spec= parity
+unless a separate tnsr-native experiment is authorized.

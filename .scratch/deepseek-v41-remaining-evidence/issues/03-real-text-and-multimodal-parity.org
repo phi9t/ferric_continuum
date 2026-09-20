@@ -1,0 +1,120 @@
+#+TITLE: Real released-weight text and multimodal parity
+#+TYPE: task
+#+STATUS: ready-for-human
+#+BLOCKED_BY: 02-real-checkpoint-asset-admission
+#+PARENT: ../spec.org
+
+* Context
+
+Text and multimodal tiny parity are already proven. Real released-weight parity
+is not: current verifiers report an honest SKIP when no model directory is
+configured, and the text verifier currently treats real-checkpoint execution as
+a smoke check rather than numeric parity.
+
+Read first:
+
+- =../spec.org=
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh=
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_multimodal_compat.sh=
+- =ferric_continuum/tnsr/tools/deepseek_v41_reference.py=
+- =ferric_continuum/tnsr/tools/deepseek_v41_compare_logits.py=
+- =ferric_continuum/tnsr/src/bin/deepseek_v41_infer.rs=
+
+* Outcome Packet
+
+Outcome:
+
+- Real released-weight text and multimodal checks either pass with numeric
+  candidate-bound evidence or remain explicitly unclaimable with a precise
+  blocker.
+
+Mode:
+
+- delivery when admitted assets and reference runtime exist; scout when the
+  environment cannot support numeric parity.
+
+Non-goals:
+
+- No native FP8/FP4 kernel performance claim.
+- No tensor-parallel serving claim.
+- No DSpark MTP parity; ticket 04 owns that.
+
+Allowed external effects:
+
+- Local read-only model checkpoint access.
+- Local CPU/GPU reference execution within an explicit time and memory budget.
+
+Escalation conditions:
+
+- Upstream reference requires unavailable GPU-only kernels for a required claim.
+- Real checkpoint execution exceeds memory or time budget.
+- Rust and reference outputs disagree beyond tolerance.
+
+* Requirements
+
+- Define fixed text prompts/token-id inputs and fixed multimodal image fixtures
+  used for real released-weight parity.
+- Bind every parity run to:
+  - code commit;
+  - model asset receipt from ticket 02;
+  - reference interpreter identity;
+  - Rust binary path or Bazel target;
+  - prompt/image input hashes;
+  - comparator version.
+- Extend verifiers so real-checkpoint levels can PASS only on numeric
+  comparison, not on loader smoke.
+- Preserve honest SKIP behavior when assets or faithful reference runtime are
+  unavailable.
+- Retain tiny parity as a lower-level guard, but do not let it satisfy this
+  ticket's real-weight claim.
+
+* Acceptance Map
+
+Claim:
+
+- Text logits from Rust match the real upstream checkpoint for fixed text
+  inputs.
+
+Evidence:
+
+- Numeric comparator output with cosine, max_abs_diff, top-1, and top-5 overlap.
+
+Claim:
+
+- Multimodal logits from Rust match the real upstream checkpoint for fixed image
+  prompts.
+
+Evidence:
+
+- Numeric comparator output plus image preprocessor receipt.
+
+Candidate:
+
+- Clean commit range plus admitted release model-dir receipt.
+
+Reuse rule:
+
+- Reuse only when candidate, model assets, prompt/image inputs, reference
+  runtime, and comparator are unchanged.
+
+Invalidation rule:
+
+- Any change to loader, model forward, tokenizer/prompt/image path, comparator,
+  reference adapter, or model assets reruns the affected parity.
+
+* Verification
+
+- =BAZEL=bazel DEEPSEEK_V41_MODEL_DIR=/path/to/model ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh=
+- =BAZEL=bazel DEEPSEEK_V41_MODEL_DIR=/path/to/model ferric_continuum/tnsr/tools/verify_deepseek_v41_multimodal_compat.sh=
+
+* Comments
+
+* Answer
+
+Partially executed and deferred for real weights. See
+=../receipts/03-real-text-and-multimodal-parity.org=.
+
+The text tiny parity gate passes. The multimodal tiny parity gate now also
+passes after correcting the Python reference to model the same sliding-window
+prefill indices as Rust. Real released-weight text and multimodal parity remain
+unproven because ticket 02 did not admit a local release checkpoint.

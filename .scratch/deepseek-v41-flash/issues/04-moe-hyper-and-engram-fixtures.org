@@ -1,0 +1,97 @@
+#+TITLE: MoE, Hyper-Connection, and Engram unit verifiers
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 03-rope-sparse-and-compressor-fixtures
+#+PARENT: ../spec.org
+
+* Context
+
+This ticket adds unit verifiers for DeepSeek V4.1's non-attention text
+components. It must cover both op-level behavior and layer-level behavior,
+because full logits can look plausible while routing, HC mixing, or Engram
+updates are wrong.
+
+Read first:
+
+- =../spec.org=
+- =../research/upstream-architecture.md=
+- =../upstream/inference/model.py= classes =Gate=, =Expert=, =MoE=, =Block=,
+  =Engram= and helper =make_identity_pre_mix=.
+- =../upstream/inference/engram.py= functions/classes
+  =build_compressed_token_map=, =compute_hash_multipliers=,
+  =EngramLayout=, and =NgramHashState=.
+- =ferric_continuum/tnsr/src/ops/activations.rs=
+- =ferric_continuum/tnsr/src/ops/norm.rs=
+
+* Requirements
+
+- Create =ferric_continuum/tnsr/src/deepseek_v41/moe.rs=.
+- Create =ferric_continuum/tnsr/src/deepseek_v41/hyper.rs=.
+- Create =ferric_continuum/tnsr/src/deepseek_v41/engram.rs=.
+- Extend =ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py= with fixture
+  families =moe=, =hyper=, and =engram=.
+- Add fixture JSON files:
+  - =moe_gate_fixture.json=
+  - =expert_swiglu_fixture.json=
+  - =hyper_connection_fixture.json=
+  - =engram_layout_fixture.json=
+  - =engram_hash_fixture.json=
+  - =engram_update_fixture.json=
+- Extend =ferric_continuum/tnsr/tests/deepseek_v41_math_test.rs= or create a
+  second test file if it becomes too large. Keep Bazel target
+  =//ferric_continuum/tnsr:deepseek_v41_math_tests= green.
+
+Required Rust APIs:
+
+- =sqrtsoftplus_scores(x: &[f32], gate_weight: &[f32], gate_temp: f32, shape: GateShape) -> Vec<f32>=.
+- =select_experts(scores: &[f32], correction_bias: &[f32], topk: usize) -> Vec<usize>=.
+- =route_weights(scores: &[f32], indices: &[usize], norm_topk_prob: bool, route_scale: f32) -> Vec<f32>=.
+- =expert_swiglu(gate: &[f32], up: &[f32], swiglu_limit: f32) -> Vec<f32>=.
+- =hc_mixes(flat_hc: &[f32], hc_fn: &[f32], hc_scale: &[f32], hc_base: &[f32], hc_mult: usize, dim: usize, iters: usize, eps: f32) -> HcMixes=.
+- =hc_pre(x: &[f32], pre_mix: &[f32], shape: HcShape) -> Vec<f32>=.
+- =hc_post(sublayer: &[f32], residual: &[f32], post: &[f32], comb: &[f32], shape: HcShape) -> Vec<f32>=.
+- =EngramLayout::from_config(config: &DeepSeekV41TextConfig) -> Option<EngramLayout>=.
+- =compressed_token_map_from_vocab_entries(entries: &[(usize, String)]) -> Vec<usize>= for fixture-sized vocab entries.
+- =ngram_hashes(input_ids: &[usize], start_pos: usize, layout: &EngramLayout, state: &mut NgramHashState) -> Vec<usize>=.
+- =engram_update(x: &[f32], key: &[f32], value: &[f32], q_weight: &[f32], k_weight: &[f32], eps: f32, token_mask: Option<&[bool]>) -> Vec<f32>=.
+
+Unit verifier requirements:
+
+- Op verifier for =sqrtsoftplus= checks exact selected experts differ from raw
+  top-k when correction bias changes the order.
+- Op verifier for route weights checks normalization uses =+1e-20= and
+  =route_scale=.
+- Op verifier for SwiGLU checks =up= clamps to both sides and =gate= clamps
+  only above before =silu(gate) * up=.
+- Op verifier for HC split checks pre/post/comb shapes and row/column sums of
+  =comb= after Sinkhorn are within tolerance.
+- Layer verifier for HC pre/post checks collapse and expansion on a tiny
+  =[B,S,hc_mult,D]= residual.
+- Op verifier for Engram layout checks prime bucket assignment and per-layer
+  offsets against upstream.
+- Op verifier for Engram hash state checks prefill and decode update on text
+  tokens.
+- Layer verifier for Engram update checks signed-square-root gate and token mask
+  behavior.
+
+* Out of scope
+
+- No full Transformer block forward.
+- No real Engram table loading.
+- No image-span token masks beyond fixture-level mask behavior.
+- No DSpark.
+
+* Verification
+
+- Regenerate fixtures:
+  =python3 ferric_continuum/tnsr/tools/deepseek_v41_fixture_gen.py --repo-root . --family moe,hyper,engram=
+- Run:
+  =bazel test //ferric_continuum/tnsr:deepseek_v41_math_tests=
+- Expected: all op and layer unit verifiers pass.
+
+* Comments
+
+- This ticket satisfies the user's explicit requirement for unit verifiers
+  across model operations and layers for MoE, HC, and Engram.
+- Keep pure math helpers separate from parameter-owning structs so later block
+  tests can call the same logic directly.

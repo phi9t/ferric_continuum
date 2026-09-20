@@ -1,0 +1,82 @@
+#+TITLE: Evidence-bound agentic engineering workflow
+#+TYPE: spec
+#+STATUS: ready-for-agent
+#+PARENT:
+
+* Summary
+
+Set up Ferric's agentic workflow around durable tasks that accumulate
+candidate-bound evidence. The repository already distinguishes Engineering
+Task, Task Contract, Task Run, and Agent Attempt in
+~docs/agents/task-runs.md~. This effort adds the working method and the
+implementation queue needed to turn that design into tool behavior.
+
+The operating loop is:
+
+#+begin_example
+Frame an outcome
+  -> resolve consequential uncertainty
+  -> contract a bounded task
+  -> execute in evidence-producing increments
+  -> independently verify a fixed candidate
+  -> authorize promotion
+  -> improve the method from observed failures
+#+end_example
+
+This is a local, environment-first workflow. Remote execution, distributed
+delegation, deployment, publication, and destructive cleanup remain explicit
+human-authorized extensions.
+
+* Primary docs
+
+- ~docs/agents/agentic-engineering.md~
+- ~docs/agents/task-runs.md~
+- ~docs/agents/evidence-bound-method.md~
+- ~docs/agents/issue-tracker.org~
+- ~docs/agents/skill-orchestration.md~
+- ~CONSTITUTION.md~
+
+* Work modes
+
+Every task contract declares exactly one mode:
+
+- ~delivery~: specified behavior, tests, reviewed candidate, operational docs
+  when needed.
+- ~remediation~: defect provenance, reproduction, regression evidence,
+  correction, review.
+- ~scout~: bounded questions, evidence anchors, uncertainties, and recommended
+  follow-up tickets.
+- ~experiment~: hypothesis, fixed protocol, attempt ledger, and a supported,
+  rejected, or inconclusive disposition.
+
+* Acceptance
+
+This setup is complete when:
+
+- The workflow docs define the evidence-bound method without claiming
+  non-existent automation exists.
+- The task-run architecture captures dirty-worktree recovery, trajectory
+  binding, checkpoints, rebinding, and finish gates.
+- The implementation backlog is represented as org-mode tickets under this
+  effort.
+- The first automation tickets preserve existing script compatibility while
+  routing through one deep task-runtime module.
+- Documentation checks pass for ASCII and line length.
+
+* Tickets
+
+- [[file:issues/01-contract-schema-and-validator.org][01-contract-schema-and-validator]]
+- [[file:issues/02-run-journal-and-checkpoints.org][02-run-journal-and-checkpoints]]
+- [[file:issues/03-task-start-admission.org][03-task-start-admission]]
+- [[file:issues/04-dirty-worktree-recovery.org][04-dirty-worktree-recovery]]
+- [[file:issues/05-evidence-records-and-finish-gate.org][05-evidence-records-and-finish-gate]]
+- [[file:issues/06-task-command-wrappers.org][06-task-command-wrappers]]
+- [[file:issues/07-human-supervision-packets.org][07-human-supervision-packets]]
+
+* Non-goals
+
+- No remote scheduler or security broker in the initial implementation.
+- No automatic push, merge, deploy, publication, or destructive cleanup.
+- No raw trajectory copy into Kata.
+- No replacement of Kata as the durable issue system.
+- No blanket requirement for large design documents on small tasks.

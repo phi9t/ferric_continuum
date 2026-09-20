@@ -22,10 +22,10 @@ class DetectorTests(unittest.TestCase):
 
     # -- home abspaths -------------------------------------------------------
     def test_home_abspath_data02_fires(self):
-        self.assertIn("home_abspath", self.cats("cd /data02/home/philip.yang/workspace"))
+        self.assertIn("home_abspath", self.cats("cd /mnt/home/local.user/workspace"))
 
     def test_home_abspath_plain_home_fires(self):
-        self.assertIn("home_abspath", self.cats("see /home/philip.yang/models"))
+        self.assertIn("home_abspath", self.cats("see /home/local.user/models"))
 
     def test_home_ferric_sandbox_is_allowlisted(self):
         self.assertEqual([], self.find('HOME=/home/ferric USER=ferric'))
@@ -35,7 +35,7 @@ class DetectorTests(unittest.TestCase):
 
     # -- bare usernames ------------------------------------------------------
     def test_bare_username_fires(self):
-        self.assertIn("username", self.cats("author: philip.yang did this"))
+        self.assertIn("username", self.cats("author: local.user did this"))
 
     def test_public_handle_phi9t_allowlisted(self):
         self.assertEqual([], self.find("github.com/phi9t/ferric_continuum"))
@@ -76,7 +76,7 @@ class DetectorTests(unittest.TestCase):
 
     # -- multiple categories on one line ------------------------------------
     def test_multiple_findings_same_line(self):
-        cats = self.cats("owner philip.yang used /data02/home/bob mailed x@example.com from 8.8.8.8")
+        cats = self.cats("owner local.user used /mnt/home/bob mailed x@example.com from 8.8.8.8")
         self.assertEqual(cats, ["email", "home_abspath", "ipv4", "username"])
 
 
@@ -85,31 +85,31 @@ class FixTests(unittest.TestCase):
         self.allow = dc.Allowlist.default()
 
     def test_fix_bazel_launcher_path_to_plain_bazel(self):
-        src = "/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //x"
+        src = "/mnt/home/local.user/.local/bin/bazel-9.2.0 build //x"
         fixed, changed = dc.fix_text(src, self.allow)
         self.assertTrue(changed)
         self.assertEqual(fixed, "bazel build //x")
 
     def test_fix_home_abspath_to_home_var(self):
-        src = "path /data02/home/philip.yang/workspace/tnsr end"
+        src = "path /mnt/home/local.user/workspace/tnsr end"
         fixed, changed = dc.fix_text(src, self.allow)
         self.assertTrue(changed)
         self.assertEqual(fixed, "path ${HOME}/workspace/tnsr end")
 
     def test_fix_plain_home_abspath(self):
-        src = "/home/philip.yang/models/qwen3"
+        src = "/home/local.user/models/qwen3"
         fixed, _ = dc.fix_text(src, self.allow)
         self.assertEqual(fixed, "${HOME}/models/qwen3")
 
     def test_fix_is_idempotent(self):
-        src = "/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //y"
+        src = "/mnt/home/local.user/.local/bin/bazel-9.2.0 test //y"
         once, _ = dc.fix_text(src, self.allow)
         twice, changed2 = dc.fix_text(once, self.allow)
         self.assertEqual(once, twice)
         self.assertFalse(changed2)
 
     def test_fixed_text_has_no_findings(self):
-        src = "run /data02/home/philip.yang/.local/bin/bazel-9.2.0 in /home/philip.yang/x"
+        src = "run /mnt/home/local.user/.local/bin/bazel-9.2.0 in /home/local.user/x"
         fixed, _ = dc.fix_text(src, self.allow)
         self.assertEqual([], dc.scan_text("f", fixed, self.allow))
 
@@ -149,7 +149,7 @@ class VendorScopeTests(unittest.TestCase):
         self.assertEqual([], vendor)
 
     def test_vendor_still_flags_our_home_abspath(self):
-        text = "built at /data02/home/philip.yang/x"
+        text = "built at /mnt/home/local.user/x"
         vendor = dc.scan_text("x/third_party/deepseek/notes.md", text, self.allow)
         self.assertEqual(["home_abspath"], sorted({f.category for f in vendor}))
 

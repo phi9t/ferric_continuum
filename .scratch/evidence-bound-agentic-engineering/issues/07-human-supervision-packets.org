@@ -1,0 +1,50 @@
+#+TITLE: Design task-and-evidence supervision packets
+#+TYPE: scout
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 02-run-journal-and-checkpoints, 05-evidence-records-and-finish-gate
+#+PARENT: ../spec.org
+
+* Context
+
+Human supervision should focus on task state and evidence. Raw conversation is
+a drill-down view, not the primary interface.
+
+* Questions
+
+- What fields should the default task view show for outcome, binding, next
+  acceptance claim, latest verified result, active jobs, remaining budget,
+  unresolved uncertainty, and required decisions?
+- What event and artifact identities are stable enough to include in evidence
+  packets?
+- How should marked events/artifacts become a bounded reviewer prompt?
+- What escalation template best asks for a decision instead of status
+  acknowledgement?
+
+* Requirements
+
+- Produce a proposed packet schema for:
+  - task overview;
+  - evidence packet;
+  - escalation;
+  - handoff.
+- Include examples grounded in this repo's local workflow.
+- Identify any command/runtime fields needed from earlier tickets.
+- Recommend follow-up delivery tickets if implementation is larger than this
+  scout.
+
+* Out of scope
+
+- Building an Emacs UI.
+- Implementing task runtime commands.
+- Copying raw trajectory content into Kata.
+
+* Verification
+
+- The scout answer cites concrete fields from ~docs/agents/task-runs.md~ and
+  ~docs/agents/evidence-bound-method.md~.
+- The proposed schemas avoid raw prompts, credentials, full command logs, and
+  unbounded source excerpts.
+- The recommendation distinguishes required implementation work from optional
+  interface polish.
+
+* Comments

@@ -8,8 +8,8 @@ use tnsr::deepseek_v41::{
         markov_head_forward, DraftLoopOutput,
     },
     engram::{
-        compressed_token_map_from_vocab_entries, engram_update, ngram_hashes, EngramLayout,
-        NgramHashState,
+        compressed_token_map_from_vocab_entries, engram_update, ngram_hashes, ngram_hashes_masked,
+        EngramLayout, NgramHashState,
     },
     hyper::{hc_mixes, hc_post, hc_pre, HcShape},
     moe::{expert_swiglu, route_weights, select_experts, sqrtsoftplus_scores, GateShape},
@@ -851,6 +851,44 @@ fn engram_hashes_match_prefill_and_decode_updates() {
         &mut state,
     );
     assert_eq!(decode, usize_array(&fixture["expected"], "decode_hashes"));
+}
+
+#[test]
+fn engram_hash_mask_breaks_ngrams_across_image_tokens() {
+    let layout = EngramLayout {
+        max_ngram_size: 3,
+        layer_ids: vec![1],
+        num_embeddings: vec![23],
+        primes: vec![11, 13],
+        offsets: vec![0, 11],
+        n_heads: 1,
+        head_dim: 1,
+    };
+    let mut masked = NgramHashState::new(vec![0, 1, 2, 3, 4], 0, 1, 8);
+    masked.set_multipliers(vec![3, 5, 7]);
+    let mut text_only = NgramHashState::new(vec![0, 1, 2, 3, 4], 0, 1, 8);
+    text_only.set_multipliers(vec![3, 5, 7]);
+
+    let ids = [1, 2, 3, 4];
+    let masked_hashes = ngram_hashes_masked(
+        &ids,
+        0,
+        Some(&[true, false, true, true]),
+        &layout,
+        &mut masked,
+    );
+    let text_hashes = ngram_hashes(&ids, 0, &layout, &mut text_only);
+
+    assert_ne!(
+        &masked_hashes[2 * 2..],
+        &text_hashes[2 * 2..],
+        "image-token mask must change later text-token n-grams across the span"
+    );
+    assert_eq!(
+        masked_hashes,
+        vec![3, 14, 0, 11, 9, 20, 3, 14],
+        "masked/dead token should reset rolling n-gram history to pad"
+    );
 }
 
 #[test]

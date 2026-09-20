@@ -1,0 +1,49 @@
+#+TITLE: CED runtime boundary and encoder-derived decoder global KV
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 02-indexed-checkpoint-and-engram-loading
+#+PARENT: ../spec.org
+
+* Context
+
+The local text model currently behaves like a flat layer loop. DeepSeek V4.1
+Flash uses a causal encoder-decoder organization: 20 encoder layers, then 20
+decoder layers whose global KV is projected from final encoder hidden states.
+
+* Requirements
+
+- Represent encoder and decoder layers explicitly in the Rust model structure.
+- Add config validation for the 20+20 release split while preserving tiny-fixture
+  configurability.
+- Carry final encoder hidden states into decoder global-KV construction.
+- Preserve existing Hyper-Connection and MoE behavior across the boundary.
+- Add a fixture-level test that fails if decoder layers source global KV from the
+  decoder residual stream instead of final encoder hidden states.
+
+* Out of scope
+
+- Optimized serving cache migration.
+- Distributed tensor parallel placement.
+
+* Verification
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_model_tests=
+
+* Progress
+
+2026-09-20:
+
+- Added explicit CED split metadata to =DeepSeekV41TextConfig= and
+  =DeepSeekV41TextModel=.
+- Release config tests now assert the 40-layer model splits as 20 causal
+  encoder layers and 20 decoder layers.
+- The text and multimodal forward paths now execute through explicit
+  encoder-then-decoder loops rather than one invisible flat loop.
+- Tiny fixtures remain encoder-only with split =(1, 0)=.
+- =SharedAttentionState= now carries the final encoder hidden tensor across the
+  CED boundary, and decoder attention projects KV from that encoder-derived
+  source when present.
+- Added regression coverage for both the CED boundary publication and decoder
+  attention consumption path.
+- Verification passed:
+  - =bazel test //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:deepseek_v41_config_tests //ferric_continuum/tnsr:deepseek_v41_model_tests //ferric_continuum/tnsr:deepseek_v41_source_tests=

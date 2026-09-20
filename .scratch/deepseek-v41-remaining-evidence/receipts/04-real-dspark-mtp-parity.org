@@ -1,0 +1,35 @@
+#+TITLE: DeepSeek V4.1 real DSpark MTP parity disposition
+#+TYPE: receipt
+#+STATUS: ready-for-human
+#+PARENT: ../issues/04-real-dspark-mtp-parity.org
+
+* Candidate
+
+- Context commit: =f58239798719ddf9350aa5e7db7f514459073c15=
+- Execution branch: =deepseek-v41-remaining-exec=
+
+* Local Evidence
+
+- Command:
+  =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_dspark_compat.sh=
+- Log: =logs/10-dspark-compat.log=
+- Exit: 0
+- Tiny =forward_spec= parity: PASS.
+- Tiny logits: =max_abs_diff 1.80135e-07=,
+  =cosine_sim 1.00000000=, top-1 match, top-5 overlap 5/5.
+- Tiny output ids: exact match.
+- Tiny confidence: =confidence max 1.62208e-07=,
+  =confidence mean 8.60166e-08=, tolerance true for abs <= 0.0001.
+- Real-checkpoint DSpark parity: SKIP, no =DEEPSEEK_V41_MODEL_DIR= /
+  =MODEL_DIR= set.
+
+* Disposition
+
+The existing DSpark MTP implementation remains proven at the tiny
+=forward_spec= parity level. Real released-weight =forward_spec= logits and
+confidence remain unproven until ticket 02 admits local assets and this verifier
+runs against them.
+
+This receipt intentionally does not claim end-to-end speculative acceptance.
+Ticket 05 records that upstream exposes =forward_spec= but no acceptance-loop
+contract in the mirrored generation path.

@@ -1,0 +1,42 @@
+#+TITLE: DeepSeek V4.1 Wave 3: DSpark/MTP speculative-draft forward
+#+TYPE: wayfinding
+#+STATUS: open
+#+PARENT: ../deepseek-v41-flash/spec.org
+
+* Idea
+
+Port the DeepSeek V4.1 DSpark (multi-token-prediction / MTP) draft head to
+=tnsr= to the same evidence bar as Waves 1-2: source -> config -> op -> layer ->
+block -> forward parity against the upstream reference, on a tiny
+upstream-executed model, with real-checkpoint parity an honest SKIP.
+
+* The fog
+
+DSpark is the least-scoped remaining wave because of one upstream fact: the
+=Transformer.forward_spec= method is fully defined, but the released
+=generate.py= never calls it. Upstream says so directly
+(=upstream/inference/model.py= lines 129-130):
+
+#+begin_quote
+dspark draft head. Only the forward pass is implemented here -- nothing calls
+forward_spec, so these are read but the speculative-decoding loop itself is out
+of scope for this repo.
+#+end_quote
+
+So "parity" cannot mean "matching a speculative-decoding loop" -- there is no
+reference loop to match. Before writing tickets we must decide what the parity
+target actually is, what gets executed vs merely represented, and how the
+=mtp.*= namespace slots onto the Wave-1 loader. Those are decisions, not
+deliverables -- hence a short wayfinding pass, not a straight /to-tickets.
+
+* Destination
+
+A resolved decision map that /to-spec can collapse into a buildable Wave-3
+spec: the parity contract fixed, the executed/represented boundary drawn, the
+=mtp.*= loader shape chosen, and the sampling/determinism question settled.
+
+* Non-goals (carried from Wave 1 spec)
+
+- No speculative-decoding *generation loop* (upstream doesn't ship one).
+- No production FP8/FP4 kernels (Wave 4).
+- No distributed all-reduce; single-process only.

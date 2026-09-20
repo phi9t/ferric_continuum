@@ -1,0 +1,54 @@
+#+TITLE: HF indexed checkpoint and Engram tensor loading
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 01-source-coverage-gate
+#+PARENT: ../spec.org
+
+* Context
+
+The release checkpoint is indexed by =model.safetensors.index.json= and shard
+files named =model-000xx-of-00048.safetensors=. The local loader currently works
+best for single-file or converted =-mp= layouts, and Engram tables are checked
+but not loaded into the runtime.
+
+* Requirements
+
+- Load tensors through the HF index JSON and public shard names.
+- Preserve support for existing converted/local fixture layouts.
+- Load Engram tensors needed by the runtime path:
+  - =engram.*.embed.weight= or the release-equivalent table names.
+  - =engram.*.wkv.weight= and related q/k weights.
+- Add negative tests for missing required Engram tensors when Engram is enabled.
+- Add tiny indexed-shard fixture coverage that proves the loader resolves a
+  tensor from the JSON index rather than guessing shard names.
+
+* Out of scope
+
+- Full 48-shard release model validation.
+- GPU loading or quantized-kernel execution.
+
+* Verification
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests //ferric_continuum/tnsr:deepseek_v41_model_tests=
+
+* Progress
+
+2026-09-20:
+
+- Implemented HF index discovery in =open_checkpoint=: when
+  =model.safetensors.index.json= is present, the loader opens the unique shard
+  names from the index and supports public release names like
+  =model-00001-of-00048.safetensors=.
+- Added tests for public indexed-shard loading, unsafe =..= shard rejection, and
+  missing indexed-shard errors.
+- Verification passed:
+  - =bazel test //ferric_continuum/tnsr:lib_tests=
+  - =bazel test //ferric_continuum/tnsr:deepseek_v41_model_tests=
+  - =bazel test //ferric_continuum/tnsr:deepseek_v41_source_tests //ferric_continuum/tnsr:deepseek_v41_config_tests=
+
+Completed in this ticket:
+
+- Loaded Engram table/projection tensors into the runtime representation while
+  preserving the existing precomputed key/value fixture seam for ticket 05.
+- Added a positive Engram-enabled load test that proves the loaded model has the
+  table-backed tensors needed by ticket 05.

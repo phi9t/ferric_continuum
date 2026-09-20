@@ -1,0 +1,62 @@
+#+TITLE: DeepSeek V4.1 long-context cache/indexer stress receipt
+#+TYPE: receipt
+#+STATUS: resolved
+#+PARENT: ../issues/06-long-context-cache-indexer-stress.org
+
+* Candidate
+
+- Context commit: =f58239798719ddf9350aa5e7db7f514459073c15=
+- Execution branch: =deepseek-v41-remaining-exec=
+
+* Implemented Evidence
+
+- Strengthened =decoder_attention_uses_encoder_global_kv_handoff= so it now
+  checks that the CED decoder consumes encoder-derived global KV while retaining
+  an independent decoder-local SWA cache with expected normalized contents.
+- Added
+  =attention_decode_wraps_swa_cache_without_reusing_evicted_positions=.
+  The reduced geometry pre-fills two tokens with =window_size= 4, then decodes
+  positions 2, 3, 4, and 5. This crosses the window boundary and verifies the
+  final ring slots contain normalized KV for positions 4, 5, 2, and 3, proving
+  decode wraparound does not reuse evicted positions.
+- Added
+  =csa2_reindex_and_reuse_hold_source_kv_across_decode_boundary=.
+  The reduced geometry runs CSA2 =Full= in prefill, then =Reindex= and =Reuse=
+  across decode positions. It asserts that =Reindex= reads the cached
+  compressed KV and index K from the KV-source layer, publishes fresh decode
+  top-k under the index-source layer, and that =Reuse= consumes the cached
+  top-k/candidate mask without recomputing or replacing compressed KV.
+
+* Existing Coverage Reused
+
+- CSA2 one-shot Full/Reindex/Reuse state sharing and indexer behavior remain
+  covered by
+  =csa2_not_v4_csa_hca_full_reindex_and_reuse_share_kv_index_k_and_topk=.
+- Source-level coverage for V3.2 indexer lineage, V4.1 indexer operations,
+  sliding-window attention, CED, and CSA2 is verified by
+  =verify_deepseek_v41_sources.sh=.
+
+* Verification
+
+- Command:
+  =bazel test //ferric_continuum/tnsr:deepseek_v41_model_tests --test_filter=attention_decode_wraps_swa_cache_without_reusing_evicted_positions --test_output=errors=
+  - Exit: 0
+  - Result: focused new wraparound test passed.
+- Command:
+  =bazel test //ferric_continuum/tnsr:deepseek_v41_model_tests --test_filter=csa2_reindex_and_reuse_hold_source_kv_across_decode_boundary --test_output=errors=
+  - Exit: 0
+  - Result: focused CSA2/indexer decode-boundary test passed after keeping the
+    reduced window geometry consistent across Full/Reindex/Reuse layers.
+- Command:
+  =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests //ferric_continuum/tnsr:deepseek_v41_source_tests=
+  - Log: =logs/10-focused-bazel.log=
+  - Exit: 0
+  - Result: 4 passing, 0 skipped, 0 failing.
+- Command:
+  =rustfmt --edition 2021 --check ferric_continuum/tnsr/tests/deepseek_v41_model_test.rs=
+  - Exit: 0 after formatting.
+
+* Limit
+
+This is a bounded reduced-geometry stress receipt. It does not claim a
+million-token full-model execution or release-checkpoint long-context run.

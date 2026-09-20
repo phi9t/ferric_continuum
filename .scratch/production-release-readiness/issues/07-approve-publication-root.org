@@ -1,0 +1,25 @@
+#+TITLE: Approve the Ferric clean publication root
+#+TYPE: decision
+#+STATUS: ready-for-human
+#+BLOCKED_BY: 01-provenance-disposition-and-tnsr-ownership
+#+PARENT: ../spec.org
+
+* Requirements
+
+- Review the provenance inventory and the absence of a trustworthy public
+  boundary.
+- Select and explicitly approve an exact clean publication root whose admitted
+  content has complete license, authorship, and =tnsr= ownership evidence.
+- Record how retained local work will be reconstructed without copying unsafe
+  history or metadata.
+
+* Verification
+
+Independent review confirms the approved root is exact, reproducible, and does
+not silently discard or publish undispositioned work.
+
+* Out of scope
+
+Creating commits, deleting history, changing branches, or publishing.
+
+* Comments

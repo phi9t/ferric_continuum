@@ -1,0 +1,57 @@
+#+TITLE: D2 Executed vs represented: which DSpark pieces run in tnsr?
+#+TYPE: grilling
+#+STATUS: resolved
+#+BLOCKED_BY: D1-parity-contract
+#+PARENT: ../intent.org
+
+* Decision
+
+Which DSpark pieces does the tnsr port *execute* (with numeric parity), and
+which are only *represented* (loaded/validated but not run), for the CPU/f32
+inspectable path?
+
+* The pieces (from upstream/inference/model.py)
+
+- =DSparkBlock.forward_embed= -- main_proj + main_norm, then embed the draft
+  token block (first slot = real token, rest = noise_token_id), expand to
+  hc_mult. Pure linear/norm/embedding -> *EXECUTE*.
+- =DSparkBlock.forward= (decode) -- reuses =Block.forward= (attn + MoE + HC) with
+  =main_x= threaded through and no VL bias. The HC/MoE/norm math is already
+  ported for Waves 1-2 -> *EXECUTE*, reusing existing seams.
+- =DSparkAttention.forward= -- this is the hard one. It calls =act_quant= and
+  =sparse_attn= (GPU-only kernels) and maintains a =window_kv_cache=. Wave-1
+  already ports a CPU/f32 sparse-window attention; DSpark attention is a
+  window-only variant (=compress_ratio == 0=) with a rolling cache seeded at
+  prefill -> *EXECUTE* on the CPU/f32 path, reusing the Wave-1 sparse-window
+  math with the DSpark topk-index construction (=get_dspark_topk_idxs=).
+- =DSparkMarkovHead= -- ParallelEmbedding + ParallelHead over a small rank; adds
+  a per-position logits bias walked over the draft block -> *EXECUTE*.
+- =DSparkConfidenceHead= -- one fp32 Linear over concat(hidden, markov_embed) ->
+  *EXECUTE*.
+- =forward_head= draft walk -- applies Markov bias, samples next id, repeats
+  over block_size -> *EXECUTE* the bias+concat math with sampling forced to
+  argmax (per D1).
+
+* Resolution
+
+*Everything executes* on the CPU/f32 path. There is no piece we can only
+represent, because the whole point of Wave-3 is =forward_spec= numeric parity
+(D1) and every sub-block is either already ported (HC/MoE/norm/embedding) or a
+small variant of a ported op (sparse-window attn, small linears).
+
+Two things stay *represented only* and out of the numeric gate:
+
+- FP8/FP4 quantized kernels (=act_quant=, =fp8_gemm=, =fp4_gemm=). Wave-3 uses
+  eager dequantized f32 like Waves 1-2; native kernels are Wave 4.
+- The =window_kv_cache= as a *persistent decode cache across many steps*. The
+  parity harness exercises one prefill + one decode + one =forward_spec=, which
+  seeds and reads the cache once. A long multi-step rolling-cache soak is a
+  smoke test, not part of numeric parity.
+
+* Consequences
+
+- Reuse, do not re-derive: DSpark attention should call the same CPU sparse
+  window helper Wave 1 uses, differing only in index construction and the
+  main_kv seeding path.
+- The confidence head must stay fp32 end-to-end (upstream stores proj in bf16
+  but computes in fp32); the tnsr port dequantizes to f32 and keeps it f32.

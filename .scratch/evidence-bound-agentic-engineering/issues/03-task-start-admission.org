@@ -1,0 +1,43 @@
+#+TITLE: Implement task-start admission gate
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 01-contract-schema-and-validator, 02-run-journal-and-checkpoints
+#+PARENT: ../spec.org
+
+* Context
+
+A new Task Run starts only from committed context and a clean dedicated linked
+worktree. Admission freezes the contract and records the baseline.
+
+* Requirements
+
+- Resolve a Kata issue and require exactly one contract pointer.
+- Verify the issue is open and represents an engineering task.
+- Resolve the contract and every context document through Git objects at the
+  proposed context commit.
+- Reject authoritative context that exists only as untracked or working-tree
+  bytes.
+- Verify the current checkout is a dedicated linked worktree with clean index
+  and worktree.
+- Reject active Git operations: merge, rebase, cherry-pick, revert, or bisect.
+- Check branch and issue ownership compatibility.
+- Reject worktrees already owned by another live Task Run.
+- Validate dependency-ticket prerequisite receipts.
+- Record the admission snapshot in the run journal and project the portable
+  lifecycle state to Kata metadata.
+
+* Out of scope
+
+- Dirty-worktree recovery.
+- Finish gate.
+- Remote execution.
+
+* Verification
+
+- Integration tests cover clean admission, dirty-tree rejection, missing
+  contract, untracked context rejection, active Git operation rejection, and
+  duplicate live run ownership.
+- Baseline evidence distinguishes pre-existing failures from later regressions.
+- Kata metadata projection excludes raw trajectory data.
+
+* Comments

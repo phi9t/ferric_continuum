@@ -1,0 +1,77 @@
+#+TITLE: Text compatibility closure and review
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 08-text-logits-parity-harness
+#+PARENT: ../spec.org
+
+* Context
+
+This ticket closes Wave 1 by proving that the text-only implementation matches
+the spec, has enough verifier coverage, and records any remaining asset-related
+blockers honestly.
+
+Read first:
+
+- =../spec.org=
+- All prior Wave 0 and Wave 1 tickets.
+- =docs/agents/skill-orchestration.md= for the review and completion gates.
+
+* Requirements
+
+- Inspect the final diff for unintended scope.
+- Confirm text-only implementation rejects unsupported multimodal and DSpark
+  surfaces.
+- Confirm every verifier level has evidence:
+  - Level 1 source/paper claims
+  - Level 2 config/index metadata
+  - Level 3 op unit fixtures
+  - Level 4 layer and block fixtures
+  - Level 5 tokenizer/prompt fixtures
+  - Level 6 tiny logits parity
+  - Level 6 real checkpoint parity or explicit SKIP with missing-asset reason
+- Run a Standards review:
+  - code follows existing =tnsr= style
+  - modules are small and inspectable
+  - Qwen3 code remains behaviorally unchanged unless intentionally shared
+  - Bazel targets use pinned Bazel 9.2.0
+  - CUDA targets remain opt-in
+- Run a Spec review:
+  - every Wave 1 requirement in =../spec.org= is either implemented, tested, or
+    explicitly documented as blocked on missing local assets
+  - multimodal and DSpark remain TODOs, not silent behavior changes
+- Update =ferric_continuum/tnsr/CONTEXT.md= only if new durable vocabulary is
+  needed for DeepSeek V4.1 text implementation.
+- Append a resolution note to this ticket with exact command evidence.
+
+* Out of scope
+
+- No commit unless separately authorized.
+- No push or merge.
+- No expansion into multimodal or DSpark implementation.
+
+* Verification
+
+Run:
+
+=bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests=
+
+Run:
+
+=ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh=
+
+If local real assets exist, run:
+
+=DEEPSEEK_V41_MODEL_DIR=/path/to/local/assets ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh=
+
+Expected:
+
+- Focused Bazel tests pass.
+- No-weight verifier ladder passes through tiny logits parity.
+- Real checkpoint parity passes or is recorded as skipped due to absent local
+  assets/dependencies.
+- Standards and Spec reviews have no unresolved blocking findings.
+
+* Comments
+
+- This ticket is the handoff point before any human-authorized commit or branch
+  finish.

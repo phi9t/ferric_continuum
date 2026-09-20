@@ -1,0 +1,23 @@
+#+TITLE: Freeze the Ferric B200 qualification contract
+#+TYPE: research
+#+STATUS: needs-info
+#+BLOCKED_BY: 03-prove-bazel-rootfs-conformance
+#+PARENT: ../spec.org
+
+* Requirements
+
+- Remain =needs-info= until Ultron issue 09 records the approved trust-root
+  digest and receipt schema here and advances this ticket.
+- Propose exact Bazel/CUDA and folded =tnsr= commands, immutable fixtures, GPU
+  count/topology, iterations or duration, correctness/tolerance thresholds, any
+  performance claim, negative cases, timeout/resource budget, receipt schema
+  version, and signature verification.
+- Obtain explicit human approval before resolution; execution may not weaken
+  or silently revise the contract.
+
+* Verification
+
+Independent review confirms the contract is bounded, reproducible, and
+exercises actual Ferric CUDA and folded =tnsr= behavior.
+
+* Comments

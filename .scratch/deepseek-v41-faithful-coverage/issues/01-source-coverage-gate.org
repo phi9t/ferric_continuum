@@ -1,0 +1,56 @@
+#+TITLE: Source coverage gate for faithful DeepSeek V4.1 mechanisms
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY:
+#+PARENT: ../spec.org
+
+* Context
+
+The earlier verifier manifest pins broad release facts, but the current review
+found that CED, CSA2, Engram, indexer, SWA, and DSpark can still be present as
+names without faithful runtime behavior.
+
+* Requirements
+
+- Extend =ferric_continuum/tnsr/testdata/deepseek_v41/source_manifest.json= so
+  it pins primary-source claims for:
+  - CED 20+20 organization and decoder global KV from encoder hidden states.
+  - CSA2 =Full=, =Reindex=, =Reuse= sharing semantics.
+  - DeepSeek V4 CSA contrast: CSA/HCA hybrid versus pure CSA2.
+  - V4.1 indexer runtime pieces: =weights_proj=, =wk=, =k_norm=, candidate
+    blocks, candidate masks, and Top-K indices.
+  - SWA ring-buffer/window behavior.
+  - Engram compressed-token hashes, token mask, table lookup, =wkv= projection,
+    and residual gate.
+  - DSpark =forward_spec=, =start_pos= behavior, =main_x=, =get_dspark_topk_idxs=,
+    Markov head, and confidence head.
+- Add a Bazel-runnable verifier test that imports the existing source verifier
+  and checks the manifest without needing network, model weights, CUDA, or a
+  Python package install.
+- Keep the old shell verifier usable.
+
+* Out of scope
+
+- Runtime implementation of the mechanisms.
+- Numeric parity against upstream logits.
+
+* Verification
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_source_tests=
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_sources.sh=
+
+* Comments
+
+This ticket is the kata guardrail. Later tickets should add runtime tests under
+the same claim ids rather than weakening the manifest.
+
+* Resolution
+
+Implemented a Bazel-runnable source verifier target and expanded the manifest to
+pin the requested CED, Engram, CSA2, DeepSeek V4 CSA contrast, V3.2-origin
+indexer naming plus V4.1 indexer behavior, SWA, and DSpark MTP claims.
+
+Verification:
+
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_source_tests= passed.
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_sources.sh= passed and checked 30 claims.

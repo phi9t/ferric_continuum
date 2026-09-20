@@ -1,0 +1,71 @@
+#+TITLE: Source manifest and paper claim verifiers
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY:
+#+PARENT: ../spec.org
+
+* Context
+
+DeepSeek V4.1 Flash compatibility must be grounded in primary sources, not in
+memory of a model-card skim. This ticket creates a local source manifest and a
+cheap verifier that checks the paper/model-card claims this implementation
+depends on.
+
+Read first:
+
+- =../spec.org=
+- =../research/upstream-architecture.md=
+- =../upstream/README.md=
+- =../upstream/DeepSeek_V41_Tech_Report.txt=
+- =ferric_continuum/tnsr/tools/verify_hf_compat.sh= for the local style of
+  shell verifier entrypoints.
+
+* Requirements
+
+- Create =ferric_continuum/tnsr/testdata/deepseek_v41/source_manifest.json=.
+- Create =ferric_continuum/tnsr/tools/deepseek_v41_verify_sources.py=.
+- Add a thin shell or documented command path that can run the source verifier
+  without model weights.
+- The manifest must record:
+  - upstream source file path
+  - expected claim identifier
+  - expected phrase or structured value
+  - why the claim matters to the Rust implementation
+- The source verifier must check these claims:
+  - README names =DeepSeek-V4.1-Flash=.
+  - README describes a multimodal MoE model.
+  - README describes CED as 20 causal-encoder layers followed by 20 decoder
+    layers.
+  - README describes CSA2 modes or sharing behavior.
+  - README describes FP4 main KV caching and a reduced KV footprint.
+  - README describes support for 1M context.
+  - Technical report text includes the 552B backbone parameter claim.
+  - Technical report text includes the Engram parameter claim when present in
+    the mirrored extraction.
+  - Technical report text includes FP4 main KV cache scale semantics or the
+    corresponding local extracted phrase.
+- The verifier must fail with a clear message naming the missing source path
+  or claim id.
+- Do not hardcode absolute checkout paths. Resolve paths relative to the repo
+  root or an explicit =--repo-root= argument.
+
+* Out of scope
+
+- No Rust production model code.
+- No model weight download.
+- No attempt to parse the PDF binary directly; use the mirrored text extraction
+  already present under =../upstream/=.
+
+* Verification
+
+- Run:
+  =python3 ferric_continuum/tnsr/tools/deepseek_v41_verify_sources.py --repo-root . --manifest ferric_continuum/tnsr/testdata/deepseek_v41/source_manifest.json=
+- Expected: PASS summary listing every checked claim id.
+- Add a negative unit path inside the Python tool or a small self-test mode that
+  proves a missing temporary claim returns nonzero and names the claim id.
+
+* Comments
+
+- This is Level 1 of the verifier ladder.
+- Use source claim ids that later tickets can cite, for example
+  =readme-ced-20-20= and =report-fp4-main-kv-scale=.

@@ -1,0 +1,58 @@
+#+TITLE: Faithful DeepSeek V4.1 parity closure
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY: 05-engram-runtime-integration, 06-dspark-mtp-forward-spec, 07-deepseek-v4-csa-contrast
+#+PARENT: ../spec.org
+
+* Context
+
+The final kata ticket should close the gap between helper-level fixture coverage
+and a defensible runtime claim for DeepSeek V4.1 text/Engram/CSA2/DSpark
+behavior.
+
+* Requirements
+
+- Run the full CPU correctness ladder for DeepSeek V4.1:
+  - source claims,
+  - config and HF index parsing,
+  - math fixtures,
+  - model/runtime fixtures,
+  - text compatibility script where local dependencies permit.
+- Run DSpark compatibility with a Rust output path, not only fixture generation.
+- Record any GPU/performance-only checks that remain deferred, including exact
+  command lines and the reason they were not run in this CPU closure.
+- Update this effort's tickets to =done= only after the corresponding tests pass
+  or to a clear non-done status with the blocker documented.
+- Add a short resolution note to =../spec.org= summarizing what is faithful,
+  what is still scoped out, and which commands proved it.
+
+* Out of scope
+
+- Git commit, push, or merge.
+- Full production serving benchmark.
+
+* Verification
+
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_sources.sh=
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests=
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh= when the local HF/reference dependencies are present.
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_dspark_compat.sh= after ticket 06 adds Rust-output comparison.
+
+* Answer
+
+Completed 2026-09-20.
+
+CPU closure evidence:
+
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_sources.sh= passed and
+  checked 30 DeepSeek V4.1 source claims, including CED, Engram, CSA2, DeepSeek
+  V4 CSA contrast, V3.2-origin indexer naming plus V4.1 indexer behavior, SWA,
+  and DSpark MTP.
+- =bazel test //ferric_continuum/tnsr:deepseek_v41_config_tests //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests= passed.
+- =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh= passed with =P0-comparator-selftest=, =P0-sources-selftest=, =L1-sources=, =L2-config=, =L3-ops=, =L4-model+loader=, and =L6-tiny-parity= all PASS. =L6-real-parity= was an honest SKIP because no =DEEPSEEK_V41_MODEL_DIR= / =MODEL_DIR= was configured.
+- =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_dspark_compat.sh= passed with =P0-comparator-selftest=, =P0-sources-selftest=, =L1-sources=, =L2-config=, =L3-ops=, =L4-model+loader=, and =L6-tiny-parity= all PASS. =L6-real-parity= was an honest SKIP because no =DEEPSEEK_V41_MODEL_DIR= / =MODEL_DIR= was configured.
+
+Deferred checks:
+
+- =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_perf_compat.sh= was not run as part of this CPU closure because it contains the GPU/CUDA forward-agreement tier and is outside the CPU correctness gate.
+- Real-checkpoint parity in the text and DSpark compatibility scripts remains deferred until =DEEPSEEK_V41_MODEL_DIR= or =MODEL_DIR= points at local DeepSeek V4.1 weights.

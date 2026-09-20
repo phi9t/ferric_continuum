@@ -1,0 +1,47 @@
+#+TITLE: DeepSeek V4.1 real text and multimodal parity disposition
+#+TYPE: receipt
+#+STATUS: ready-for-human
+#+PARENT: ../issues/03-real-text-and-multimodal-parity.org
+
+* Candidate
+
+- Context commit: =f58239798719ddf9350aa5e7db7f514459073c15=
+- Execution branch: =deepseek-v41-remaining-exec=
+
+* Local Evidence
+
+- Text verifier:
+  - Command:
+    =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh=
+  - Log: =logs/10-text-compat.log=
+  - Exit: 0
+  - Tiny parity: PASS, =max_abs_diff 3.95895e-07=,
+    =cosine_sim 1.00000000=, top-1 match, top-5 overlap 5/5.
+  - Real parity: SKIP, no =DEEPSEEK_V41_MODEL_DIR= / =MODEL_DIR= set.
+- Multimodal verifier:
+  - Command:
+    =BAZEL=bazel ferric_continuum/tnsr/tools/verify_deepseek_v41_multimodal_compat.sh=
+  - Log: =logs/10-multimodal-compat.log=
+  - Exit: 0
+  - Tiny multimodal parity: PASS, =max_abs_diff 2.10007e-07=,
+    =cosine_sim 1.00000000=, top-1 match, top-5 overlap 5/5.
+  - B200 GPU parity: SKIP, no CUDA torch runtime on this host.
+  - Real parity: SKIP, no =DEEPSEEK_V41_MODEL_DIR= / =MODEL_DIR= set.
+
+* Fix Captured
+
+The multimodal tiny parity verifier originally failed because the Python
+reference helper used one fallback sparse index for long prompts, while Rust
+correctly generated sliding-window top-k indices once the prompt exceeded the
+tiny window. The reference now has a multimodal-specific attention helper that
+injects =fallback_window_topk= for the same windowed prefill path used by the
+Rust model.
+
+This closes the tiny multimodal reference mismatch. It does not convert the
+real released-weight parity gate into a PASS.
+
+* Required Human Action
+
+Admit a real checkpoint through ticket 02, then rerun both verifiers with that
+model directory and a faithful reference runtime. The real text and multimodal
+claims remain unproven until those numeric comparisons pass.

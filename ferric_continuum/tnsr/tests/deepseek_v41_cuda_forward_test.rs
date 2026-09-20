@@ -16,7 +16,7 @@
 //! deliberately out of Wave-4 scope (deferred; see the Wave 4 tickets).  This
 //! test uses the f32 CPU-dequantized weights the loader already produces.
 
-use tnsr::deepseek_v41::attention::DeepSeekV41Attention;
+use tnsr::deepseek_v41::attention::{Csa2Mode, DeepSeekV41Attention};
 use tnsr::deepseek_v41::model::{DeepSeekV41Block, DeepSeekV41TextModel};
 use tnsr::deepseek_v41::moe::{DeepSeekV41Expert, DeepSeekV41Gate, DeepSeekV41MoE};
 use tnsr::tensor::{Shape, Tensor, TensorValue};
@@ -91,6 +91,10 @@ fn tiny_block() -> DeepSeekV41Block {
                 ramp(O_GROUPS * O_LORA * DIM, 7, 3.0, 5.0),
             ),
             attn_sink: param(&[N_HEADS], vec![0.25, -0.1]),
+            layer_id: 0,
+            kv_source_layer_id: None,
+            index_source_layer_id: None,
+            csa2_mode: Csa2Mode::SlidingWindow,
             compressor: None,
             indexer: None,
         },
@@ -128,10 +132,13 @@ fn tiny_model() -> DeepSeekV41TextModel {
         hidden_size: DIM,
         hc_mult: HC_MULT,
         image_token_id: 4,
+        causal_encoder_layers: 1,
+        decoder_layers: 0,
         embed_tokens: param(&[VOCAB, DIM], ramp(VOCAB * DIM, 11, 5.0, 7.0)),
         layers: vec![tiny_block()],
         final_norm: param(&[DIM], vec![1.0, 0.875, 1.125, 0.75]),
         lm_head: param(&[DIM, VOCAB], ramp(DIM * VOCAB, 13, 6.0, 8.0)),
+        engram_runtime: None,
         vision: None,
         image_start: None,
         image_end: None,

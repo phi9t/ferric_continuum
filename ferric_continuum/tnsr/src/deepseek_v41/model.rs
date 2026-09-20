@@ -1,15 +1,20 @@
-//! DeepSeek V4.1 text-only block and tiny model skeleton.
+//! DeepSeek V4.1 block, text model, multimodal, and DSpark wiring.
 //!
-//! This module wires the already verified DeepSeek V4.1 layer seams in the
-//! upstream text order. Real checkpoint loading, quantized kernels, vision, and
-//! DSpark speculative decoding are later tickets.
+//! This module keeps the runtime assembly close to the upstream execution
+//! order: token embeddings, optional image-span replacement, Engram updates,
+//! CED/CSA2 attention, MoE blocks, final logits, and the DSpark `forward_spec`
+//! path. The implementation is intentionally CPU-readable and fixture-driven;
+//! real-weight, native-quantized, and tensor-parallel claims are made only by
+//! the verifier scripts and receipts that name those environments.
+
+use std::cell::RefCell;
 
 use crate::ops::{embedding, linear, norm};
 use crate::tensor::{Shape, Tensor, TensorValue};
 
 use super::attention::{AttentionLayerInput, DeepSeekV41Attention, SharedAttentionState};
-use super::dspark::{argmax, main_proj_norm, markov_head_forward};
-use super::engram::DeepSeekV41Engram;
+use super::dspark::{argmax, decode_topk_indices, main_proj_norm, markov_head_forward};
+use super::engram::{ngram_hashes_batched, DeepSeekV41Engram, EngramLayout, NgramHashState};
 use super::hc_tensor::{expand_hc, shape_of, to_flat, HcShape};
 use super::hyper::hc_pre;
 use super::moe::DeepSeekV41MoE;
@@ -41,6 +46,11 @@ pub struct DeepSeekV41Block {
     pub engram_value: Option<Tensor>,
 }
 
+pub struct EngramRuntimeState {
+    pub layout: EngramLayout,
+    pub hash_state: NgramHashState,
+}
+
 impl DeepSeekV41Block {
     pub fn forward(
         &self,
@@ -49,7 +59,7 @@ impl DeepSeekV41Block {
         shared: &mut SharedAttentionState,
         token_mask: Option<&[bool]>,
     ) {
-        self.forward_with_masks(stream, start_pos, shared, token_mask, None)
+        self.forward_with_masks(stream, start_pos, shared, token_mask, None, None)
     }
 
     /// Block forward with distinct engram and image masks. `engram_mask`
@@ -62,18 +72,90 @@ impl DeepSeekV41Block {
         shared: &mut SharedAttentionState,
         engram_mask: Option<&[bool]>,
         image_mask: Option<&[bool]>,
+        engram_hash_ids: Option<&[usize]>,
+    ) {
+        self.forward_inner(
+            stream,
+            start_pos,
+            shared,
+            engram_mask,
+            image_mask,
+            engram_hash_ids,
+            None,
+        )
+    }
+
+    pub fn forward_dspark(
+        &self,
+        stream: &mut ResidualStream,
+        start_pos: usize,
+        shared: &mut SharedAttentionState,
+        main_x: &Tensor,
+    ) {
+        let main_prefix = if start_pos > 0 {
+            Some(dspark_window_prefix(
+                main_x,
+                self.attn.window_size,
+                start_pos,
+            ))
+        } else {
+            None
+        };
+        self.forward_inner(
+            stream,
+            start_pos,
+            shared,
+            None,
+            None,
+            None,
+            main_prefix.as_ref(),
+        )
+    }
+
+    pub fn forward_dspark_with_prefix(
+        &self,
+        stream: &mut ResidualStream,
+        start_pos: usize,
+        shared: &mut SharedAttentionState,
+        main_prefix: &Tensor,
+    ) {
+        self.forward_inner(
+            stream,
+            start_pos,
+            shared,
+            None,
+            None,
+            None,
+            Some(main_prefix),
+        )
+    }
+
+    fn forward_inner(
+        &self,
+        stream: &mut ResidualStream,
+        start_pos: usize,
+        shared: &mut SharedAttentionState,
+        engram_mask: Option<&[bool]>,
+        image_mask: Option<&[bool]>,
+        engram_hash_ids: Option<&[usize]>,
+        dspark_main_x: Option<&Tensor>,
     ) {
         if let Some(engram) = &self.engram {
-            let updated = engram.forward_layer(
-                &stream.collapse_hc(),
-                self.engram_key
-                    .as_ref()
-                    .expect("engram_key is required when engram is present"),
-                self.engram_value
-                    .as_ref()
-                    .expect("engram_value is required when engram is present"),
-                engram_mask,
-            );
+            let x = stream.collapse_hc();
+            let updated = if let Some(hash_ids) = engram_hash_ids {
+                engram.forward_hashes(&x, hash_ids, engram_mask)
+            } else {
+                engram.forward_layer(
+                    &x,
+                    self.engram_key
+                        .as_ref()
+                        .expect("engram_key is required when engram is present"),
+                    self.engram_value
+                        .as_ref()
+                        .expect("engram_value is required when engram is present"),
+                    engram_mask,
+                )
+            };
             stream.replace_buffer(&updated);
         }
 
@@ -91,11 +173,22 @@ impl DeepSeekV41Block {
             },
             |attn_in| {
                 let attn_in = norm::rms_norm(attn_in, &self.attn_norm, "deepseek.block.attn_norm");
-                self.attn.forward_layer(AttentionLayerInput {
-                    x: &attn_in,
-                    start_pos,
-                    shared,
-                })
+                if let Some(main_x) = dspark_main_x {
+                    self.attn.forward_layer_with_kv_source(
+                        AttentionLayerInput {
+                            x: &attn_in,
+                            start_pos,
+                            shared,
+                        },
+                        Some(main_x),
+                    )
+                } else {
+                    self.attn.forward_layer(AttentionLayerInput {
+                        x: &attn_in,
+                        start_pos,
+                        shared,
+                    })
+                }
             },
         );
 
@@ -120,10 +213,13 @@ pub struct DeepSeekV41TextModel {
     pub hidden_size: usize,
     pub hc_mult: usize,
     pub image_token_id: usize,
+    pub causal_encoder_layers: usize,
+    pub decoder_layers: usize,
     pub embed_tokens: Tensor,
     pub layers: Vec<DeepSeekV41Block>,
     pub final_norm: Tensor,
     pub lm_head: Tensor,
+    pub engram_runtime: Option<EngramRuntimeState>,
 
     /// Vision tower + aligner, present only for a vision-enabled checkpoint.
     pub vision: Option<OwnedVisionModel>,
@@ -232,13 +328,12 @@ impl DeepSeekV41TextModel {
         if ids.iter().any(|&id| id >= self.vocab_size) {
             return Err(format!("token id must be < vocab_size {}", self.vocab_size));
         }
+        self.require_engram_runtime()?;
 
         let h = embedding::embedding(ids, b, s, &self.embed_tokens, "deepseek.embed_tokens");
         let mut stream = ResidualStream::from_embedding(&h, self.hc_mult);
         let mut shared = SharedAttentionState::default();
-        for layer in &self.layers {
-            layer.forward(&mut stream, 0, &mut shared, None);
-        }
+        self.run_ced_layers(&mut stream, ids, b, s, 0, &mut shared, None, None);
         let collapsed = stream.collapse();
         let collapsed = norm::rms_norm(&collapsed, &self.final_norm, "deepseek.final_norm");
         Ok(linear::linear(
@@ -286,6 +381,7 @@ impl DeepSeekV41TextModel {
         if ids.iter().any(|&id| id >= self.vocab_size) {
             return Err(format!("token id must be < vocab_size {}", self.vocab_size));
         }
+        self.require_engram_runtime()?;
 
         let dim = self.hidden_size;
         // Embed, then overwrite image spans BEFORE the HC expansion (upstream
@@ -302,15 +398,16 @@ impl DeepSeekV41TextModel {
 
         let mut stream = ResidualStream::from_embedding(&merged, self.hc_mult);
         let mut shared = SharedAttentionState::default();
-        for layer in &self.layers {
-            layer.forward_with_masks(
-                &mut stream,
-                0,
-                &mut shared,
-                Some(&engram_mask),
-                Some(&image_mask),
-            );
-        }
+        self.run_ced_layers(
+            &mut stream,
+            ids,
+            b,
+            s,
+            0,
+            &mut shared,
+            Some(&engram_mask),
+            Some(&image_mask),
+        );
         let collapsed = stream.collapse();
         let collapsed = norm::rms_norm(&collapsed, &self.final_norm, "deepseek.final_norm");
         Ok(linear::linear(
@@ -319,6 +416,123 @@ impl DeepSeekV41TextModel {
             "deepseek.lm_head",
         ))
     }
+
+    pub fn encoder_decoder_split(&self) -> (usize, usize) {
+        (self.causal_encoder_layers, self.decoder_layers)
+    }
+
+    fn require_engram_runtime(&self) -> Result<(), String> {
+        if self.layers.iter().any(|layer| layer.engram.is_some()) && self.engram_runtime.is_none() {
+            return Err(
+                "DeepSeekV41TextModel requires engram_runtime when Engram layers are present"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+
+    fn run_ced_layers(
+        &self,
+        stream: &mut ResidualStream,
+        ids: &[usize],
+        b: usize,
+        s: usize,
+        start_pos: usize,
+        shared: &mut SharedAttentionState,
+        engram_mask: Option<&[bool]>,
+        image_mask: Option<&[bool]>,
+    ) {
+        let engram_hashes = self.engram_runtime.as_ref().map(|runtime| {
+            let mut state = runtime.hash_state.clone();
+            ngram_hashes_batched(
+                ids,
+                b,
+                s,
+                start_pos,
+                engram_mask,
+                &runtime.layout,
+                &mut state,
+            )
+        });
+        let n_hash_cols = self
+            .engram_runtime
+            .as_ref()
+            .map(|runtime| (runtime.layout.max_ngram_size - 1) * runtime.layout.n_heads)
+            .unwrap_or(0);
+
+        let split = self.causal_encoder_layers.min(self.layers.len());
+        let (encoder, decoder) = self.layers.split_at(split);
+        for layer in encoder {
+            let layer_hash = engram_hash_slice(
+                &self.engram_runtime,
+                engram_hashes.as_deref(),
+                n_hash_cols,
+                b,
+                s,
+                layer.layer_id,
+            );
+            layer.forward_with_masks(
+                stream,
+                start_pos,
+                shared,
+                engram_mask,
+                image_mask,
+                layer_hash.as_deref(),
+            );
+        }
+        if !decoder.is_empty() {
+            shared.decoder_encoder_hidden = Some(stream.collapse());
+        }
+        for layer in decoder {
+            let layer_hash = engram_hash_slice(
+                &self.engram_runtime,
+                engram_hashes.as_deref(),
+                n_hash_cols,
+                b,
+                s,
+                layer.layer_id,
+            );
+            layer.forward_with_masks(
+                stream,
+                start_pos,
+                shared,
+                engram_mask,
+                image_mask,
+                layer_hash.as_deref(),
+            );
+        }
+    }
+}
+
+fn engram_hash_slice(
+    runtime: &Option<EngramRuntimeState>,
+    hashes: Option<&[usize]>,
+    n_hash_cols: usize,
+    batch: usize,
+    seqlen: usize,
+    layer_id: usize,
+) -> Option<Vec<usize>> {
+    let runtime = runtime.as_ref()?;
+    let hashes = hashes?;
+    let layer_index = runtime
+        .layout
+        .layer_ids
+        .iter()
+        .position(|&id| id == layer_id)?;
+    let n_layers = runtime.layout.layer_ids.len();
+    let rows = batch * seqlen;
+    assert_eq!(
+        hashes.len(),
+        rows * n_layers * n_hash_cols,
+        "Engram hash tensor shape mismatch"
+    );
+    let start = layer_index * n_hash_cols;
+    let mut out = Vec::with_capacity(rows * n_hash_cols);
+    for row in 0..rows {
+        let row_base = row * n_layers * n_hash_cols;
+        out.extend_from_slice(&hashes[row_base + start..row_base + start + n_hash_cols]);
+    }
+    Some(out)
 }
 
 /// One DSpark MTP stage, stored under the `mtp.N.*` checkpoint namespace.
@@ -369,6 +583,7 @@ pub struct DeepSeekV41DsparkHead {
     pub lm_head: Tensor,
 
     pub stages: Vec<DeepSeekV41DsparkStage>,
+    pub stage_swa_caches: RefCell<Vec<Option<Tensor>>>,
 }
 
 /// The output of one DSpark speculative step, mirroring
@@ -580,8 +795,9 @@ impl DeepSeekV41DsparkHead {
             return Err("forward_spec needs at least one accepted id".to_string());
         }
         let (embedded, main_x) = self.forward_embed(main_hidden, input_ids)?;
-        // main_x seeds the sliding-window KV cache in the full decode path
-        // (start_pos > 0 only); the tiny parity harness runs one prefill step.
+        // Compatibility path for the tracked tiny fixture generated before the
+        // start_pos-aware decode API. `try_forward_spec_at` below is the faithful
+        // upstream runtime surface.
         let _ = main_x;
         let expanded = expand_hc(&embedded, self.hc_mult);
         let hc = shape_of(&expanded);
@@ -594,6 +810,78 @@ impl DeepSeekV41DsparkHead {
         self.forward_head(&stream, input_ids)
     }
 
+    pub fn try_forward_spec_at(
+        &self,
+        input_ids: &[usize],
+        main_hidden: &[f32],
+        start_pos: usize,
+    ) -> Result<Option<DsparkSpecOutput>, String> {
+        if input_ids.is_empty() {
+            return Err("forward_spec needs at least one accepted id".to_string());
+        }
+        let (embedded, main_x) = self.forward_embed(main_hidden, input_ids)?;
+        let batch = input_ids.len();
+        let main_x = Tensor::from_value_no_grad(TensorValue::from_vec(
+            Shape(vec![batch, 1, self.dim]),
+            main_x,
+        ));
+        if start_pos == 0 {
+            let mut caches = Vec::with_capacity(self.stages.len());
+            for stage in &self.stages {
+                caches.push(Some(dspark_window_prefix(
+                    &main_x,
+                    stage.block.attn.window_size,
+                    start_pos,
+                )));
+            }
+            *self.stage_swa_caches.borrow_mut() = caches;
+            return Ok(None);
+        }
+
+        let expanded = expand_hc(&embedded, self.hc_mult);
+        let hc = shape_of(&expanded);
+        let pre_mix = identity_pre_mix(hc.batch, hc.seqlen, hc.hc_mult);
+        let mut stream = ResidualStream::from_hc_tensor(&expanded, pre_mix);
+        let mut shared = SharedAttentionState::default();
+        for (stage_id, stage) in self.stages.iter().enumerate() {
+            shared.topk_indices = Some(
+                decode_topk_indices(
+                    stage.block.attn.window_size,
+                    input_ids.len(),
+                    self.block_size,
+                    start_pos,
+                )
+                .into_iter()
+                .map(|idx| usize::try_from(idx).unwrap_or(usize::MAX))
+                .collect(),
+            );
+            let cached_prefix = self
+                .stage_swa_caches
+                .borrow()
+                .get(stage_id)
+                .and_then(Clone::clone)
+                .unwrap_or_else(|| {
+                    dspark_window_prefix(&main_x, stage.block.attn.window_size, start_pos)
+                });
+            stage.block.forward_dspark_with_prefix(
+                &mut stream,
+                start_pos,
+                &mut shared,
+                &cached_prefix,
+            );
+            if let Some(cache) = shared.swa_cache.as_ref() {
+                let tensor = Tensor::from_value_no_grad(TensorValue::from_vec(
+                    Shape(vec![cache.batch, cache.window_size, cache.head_dim]),
+                    cache.data.clone(),
+                ));
+                if let Some(slot) = self.stage_swa_caches.borrow_mut().get_mut(stage_id) {
+                    *slot = Some(tensor);
+                }
+            }
+        }
+        self.forward_head(&stream, input_ids).map(Some)
+    }
+
     /// Panicking convenience wrapper over [`Self::try_forward_spec`] for tests
     /// and callers that treat a misconfigured head as a programmer error.
     pub fn forward_spec(&self, input_ids: &[usize], main_hidden: &[f32]) -> DsparkSpecOutput {
@@ -602,10 +890,269 @@ impl DeepSeekV41DsparkHead {
     }
 }
 
+fn dspark_window_prefix(main_x: &Tensor, window_size: usize, start_pos: usize) -> Tensor {
+    let value = main_x.inner.borrow().value.clone();
+    let shape = value.shape.0;
+    assert_eq!(shape.len(), 3, "DSpark main_x must be [B,1,D]");
+    assert_eq!(shape[1], 1, "DSpark main_x must have one accepted token");
+    let batch = shape[0];
+    let dim = shape[2];
+    let mut out = vec![0.0f32; batch * window_size * dim];
+    let slot = start_pos % window_size;
+    for b in 0..batch {
+        let src = (b * dim)..((b + 1) * dim);
+        let dst = (b * window_size + slot) * dim..(b * window_size + slot + 1) * dim;
+        out[dst].copy_from_slice(&value.data.as_ref()[src]);
+    }
+    Tensor::from_value_no_grad(TensorValue::from_vec(
+        Shape(vec![batch, window_size, dim]),
+        out,
+    ))
+}
+
 /// Wrap an RMSNorm gamma slice as a no-grad `[dim]` tensor for [`norm::rms_norm`].
 fn param_gamma(gamma: &[f32]) -> Tensor {
     Tensor::from_value_no_grad(TensorValue::from_vec(
         Shape(vec![gamma.len()]),
         gamma.to_vec(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::deepseek_v41::attention::Csa2Mode;
+    use crate::deepseek_v41::moe::{DeepSeekV41Expert, DeepSeekV41Gate};
+    use crate::tensor::{Shape, TensorValue};
+
+    fn param(shape: &[usize], data: Vec<f32>) -> Tensor {
+        Tensor::from_value_no_grad(TensorValue::from_vec(Shape(shape.to_vec()), data))
+    }
+
+    fn tiny_block(layer_id: usize) -> DeepSeekV41Block {
+        fn zero_expert() -> DeepSeekV41Expert {
+            DeepSeekV41Expert {
+                w1: vec![0.0, 0.0],
+                w2: vec![0.0, 0.0],
+                w3: vec![0.0, 0.0],
+                dim: 2,
+                inter_dim: 1,
+                swiglu_limit: 0.0,
+            }
+        }
+        let expert = zero_expert();
+        let shared_expert = zero_expert();
+        DeepSeekV41Block {
+            layer_id,
+            dim: 2,
+            hc_mult: 1,
+            hc_sinkhorn_iters: 0,
+            hc_eps: 1e-6,
+            attn_norm: param(&[2], vec![1.0, 1.0]),
+            ffn_norm: param(&[2], vec![1.0, 1.0]),
+            attn: DeepSeekV41Attention {
+                n_heads: 1,
+                head_dim: 2,
+                rope_head_dim: 0,
+                q_lora_rank: 2,
+                o_lora_rank: 2,
+                o_groups: 1,
+                compress_ratio: 1,
+                window_size: 4,
+                rms_norm_eps: 1e-6,
+                wq_a: param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0]),
+                q_norm: param(&[2], vec![1.0, 1.0]),
+                wq_b: param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0]),
+                wkv: param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0]),
+                kv_norm: param(&[2], vec![1.0, 1.0]),
+                wo_a: param(&[1, 2, 2], vec![1.0, 0.0, 0.0, 1.0]),
+                wo_b: param(&[2, 2], vec![0.0, 0.0, 0.0, 0.0]),
+                attn_sink: param(&[1], vec![0.0]),
+                layer_id,
+                kv_source_layer_id: None,
+                index_source_layer_id: None,
+                csa2_mode: Csa2Mode::SlidingWindow,
+                compressor: None,
+                indexer: None,
+            },
+            ffn: DeepSeekV41MoE {
+                gate: DeepSeekV41Gate {
+                    weight: vec![0.0, 0.0],
+                    correction_bias: vec![0.0],
+                    bias_vl: None,
+                    tokens: 2,
+                    dim: 2,
+                    experts: 1,
+                    topk: 1,
+                    gate_temp: 1.0,
+                    norm_topk_prob: false,
+                    route_scale: 1.0,
+                },
+                experts: vec![expert],
+                shared_experts: shared_expert,
+            },
+            hc_attn_fn: vec![0.0; 6],
+            hc_attn_base: vec![0.0; 3],
+            hc_attn_scale: vec![1.0, 1.0, 1.0],
+            hc_ffn_fn: vec![0.0; 6],
+            hc_ffn_base: vec![0.0; 3],
+            hc_ffn_scale: vec![1.0, 1.0, 1.0],
+            engram: None,
+            engram_key: None,
+            engram_value: None,
+        }
+    }
+
+    #[test]
+    fn run_ced_layers_publishes_final_encoder_hidden_before_decoder() {
+        let model = DeepSeekV41TextModel {
+            vocab_size: 8,
+            hidden_size: 2,
+            hc_mult: 1,
+            image_token_id: 7,
+            causal_encoder_layers: 1,
+            decoder_layers: 1,
+            embed_tokens: param(&[8, 2], vec![0.0; 16]),
+            layers: vec![tiny_block(0), tiny_block(1)],
+            final_norm: param(&[2], vec![1.0, 1.0]),
+            lm_head: param(&[2, 8], vec![0.0; 16]),
+            engram_runtime: None,
+            vision: None,
+            image_start: None,
+            image_end: None,
+            image_newline: None,
+        };
+        let embed = param(&[1, 2, 2], vec![1.0, 2.0, 3.0, 4.0]);
+        let mut stream = ResidualStream::from_embedding(&embed, 1);
+        let mut shared = SharedAttentionState::default();
+
+        model.run_ced_layers(&mut stream, &[0, 0], 1, 2, 0, &mut shared, None, None);
+
+        let hidden = shared
+            .decoder_encoder_hidden
+            .as_ref()
+            .expect("CED boundary should publish final encoder hidden");
+        let value = hidden.inner.borrow().value.clone();
+        assert_eq!(value.shape.0, vec![1, 2, 2]);
+        assert_eq!(
+            value.data.as_ref(),
+            &[0.50000006, 1.0000001, 1.5000001, 2.0000002]
+        );
+        assert!(shared.consumed_decoder_encoder_hidden);
+    }
+
+    #[test]
+    fn text_forward_uses_engram_hash_runtime_lookup() {
+        fn embed_tokens() -> Tensor {
+            param(
+                &[8, 2],
+                vec![
+                    0.0, 0.0, 1.0, 1.0, 2.0, 0.5, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                ],
+            )
+        }
+
+        let mut engram_block = tiny_block(0);
+        engram_block.attn.attn_sink = param(&[1], vec![-8.0]);
+        engram_block.engram = Some(DeepSeekV41Engram {
+            q_weight: vec![1.0, 1.0],
+            k_weight: vec![1.0, 1.0],
+            embed_weight: Some(param(&[4, 1], vec![1.0, 2.0, 3.0, 4.0])),
+            wkv_weight: Some(param(&[1, 4], vec![0.25, 0.5, 0.75, 1.0])),
+            eps: 1e-6,
+        });
+        let mut hash_state = NgramHashState::new(vec![0, 1, 2, 3, 0, 0, 0, 0], 0, 1, 8);
+        hash_state.set_multipliers(vec![1, 0]);
+        let with_engram = DeepSeekV41TextModel {
+            vocab_size: 8,
+            hidden_size: 2,
+            hc_mult: 1,
+            image_token_id: 7,
+            causal_encoder_layers: 1,
+            decoder_layers: 0,
+            embed_tokens: embed_tokens(),
+            layers: vec![engram_block],
+            final_norm: param(&[2], vec![1.0, 1.0]),
+            lm_head: param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0]),
+            engram_runtime: Some(EngramRuntimeState {
+                layout: EngramLayout {
+                    max_ngram_size: 2,
+                    layer_ids: vec![0],
+                    num_embeddings: vec![4],
+                    primes: vec![5],
+                    offsets: vec![0],
+                    n_heads: 1,
+                    head_dim: 1,
+                },
+                hash_state,
+            }),
+            vision: None,
+            image_start: None,
+            image_end: None,
+            image_newline: None,
+        };
+        let without_engram = DeepSeekV41TextModel {
+            vocab_size: 8,
+            hidden_size: 2,
+            hc_mult: 1,
+            image_token_id: 7,
+            causal_encoder_layers: 1,
+            decoder_layers: 0,
+            embed_tokens: embed_tokens(),
+            layers: vec![tiny_block(0)],
+            final_norm: param(&[2], vec![1.0, 1.0]),
+            lm_head: param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0]),
+            engram_runtime: None,
+            vision: None,
+            image_start: None,
+            image_end: None,
+            image_newline: None,
+        };
+
+        let logits = with_engram.forward_token_ids(&[1, 2], 1, 2);
+        let base_logits = without_engram.forward_token_ids(&[1, 2], 1, 2);
+
+        assert_ne!(
+            logits.inner.borrow().value.data.as_ref(),
+            base_logits.inner.borrow().value.data.as_ref(),
+            "text model must apply Engram hash lookup in the forward path"
+        );
+    }
+
+    #[test]
+    fn text_forward_errors_when_engram_runtime_is_missing() {
+        let mut block = tiny_block(0);
+        block.engram = Some(DeepSeekV41Engram {
+            q_weight: vec![1.0, 1.0],
+            k_weight: vec![1.0, 1.0],
+            embed_weight: Some(param(&[4, 1], vec![1.0, 2.0, 3.0, 4.0])),
+            wkv_weight: Some(param(&[1, 4], vec![0.25, 0.5, 0.75, 1.0])),
+            eps: 1e-6,
+        });
+        let model = DeepSeekV41TextModel {
+            vocab_size: 8,
+            hidden_size: 2,
+            hc_mult: 1,
+            image_token_id: 7,
+            causal_encoder_layers: 1,
+            decoder_layers: 0,
+            embed_tokens: param(&[8, 2], vec![0.0; 16]),
+            layers: vec![block],
+            final_norm: param(&[2], vec![1.0, 1.0]),
+            lm_head: param(&[2, 2], vec![1.0, 0.0, 0.0, 1.0]),
+            engram_runtime: None,
+            vision: None,
+            image_start: None,
+            image_end: None,
+            image_newline: None,
+        };
+        let err = match model.try_forward_token_ids(&[1, 2], 1, 2) {
+            Ok(_) => panic!("Engram layers need hash runtime state"),
+            Err(err) => err,
+        };
+        assert!(
+            err.contains("requires engram_runtime"),
+            "unexpected err: {err}"
+        );
+    }
 }
