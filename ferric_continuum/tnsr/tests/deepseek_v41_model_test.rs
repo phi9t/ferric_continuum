@@ -1301,6 +1301,37 @@ fn dspark_forward_spec_prefill_returns_none() {
 }
 
 #[test]
+fn dspark_prefill_seeds_stage_swa_caches() {
+    let fixture = fixture("dspark_tiny_model_fixture.json");
+    let input = &fixture["input"];
+    let head = dspark_head_from_fixture(&fixture);
+    let input_ids = usize_array(input, "input_ids");
+    let main_hidden = f32_array(input, "main_hidden");
+
+    let out = head
+        .try_forward_spec_at(&input_ids, &main_hidden, 0)
+        .expect("prefill should seed and return no draft");
+
+    assert!(out.is_none(), "prefill should not emit draft tokens");
+    let caches = head.stage_swa_caches.borrow();
+    assert_eq!(caches.len(), head.stages.len());
+    for (stage_id, cache) in caches.iter().enumerate() {
+        let cache = cache
+            .as_ref()
+            .unwrap_or_else(|| panic!("stage {stage_id} should own a seeded SWA cache"));
+        assert_eq!(
+            cache.shape().0,
+            vec![
+                input_ids.len(),
+                head.stages[stage_id].block.attn.window_size,
+                head.dim
+            ],
+            "stage {stage_id} SWA cache shape"
+        );
+    }
+}
+
+#[test]
 fn dspark_decode_uses_main_hidden_and_start_pos() {
     let fixture = fixture("dspark_tiny_model_fixture.json");
     let input = &fixture["input"];
@@ -1850,4 +1881,43 @@ fn merge_image_embeddings_overwrites_span() {
         0.0,
         "merged",
     );
+}
+
+#[test]
+fn merge_image_embeddings_rejects_bad_span_layouts() {
+    use tnsr::deepseek_v41::model::{merge_image_embeddings, ImageDelimiters, ImageSpan};
+
+    let mut embed = vec![0.0; 2 * 3 * 2];
+    let delims = ImageDelimiters {
+        image_start: &[1.0, 1.0],
+        image_end: &[2.0, 2.0],
+        image_newline: &[3.0, 3.0],
+    };
+
+    let overflowing_token_types = [0, 3];
+    let overflowing_aligner_rows = [4.0, 4.0];
+    let overflowing_images = vec![
+        vec![ImageSpan {
+            start: 2,
+            token_types: &overflowing_token_types,
+            aligner_rows: &overflowing_aligner_rows,
+        }],
+        vec![],
+    ];
+    let err = merge_image_embeddings(&mut embed, 2, 3, 2, &overflowing_images, &delims)
+        .expect_err("overflowing span should fail cleanly");
+    assert!(err.contains("image span position"), "err: {err}");
+
+    let bad_token_types = [99];
+    let bad_images = vec![
+        vec![],
+        vec![ImageSpan {
+            start: 1,
+            token_types: &bad_token_types,
+            aligner_rows: &[],
+        }],
+    ];
+    let err = merge_image_embeddings(&mut embed, 2, 3, 2, &bad_images, &delims)
+        .expect_err("unknown token type should fail cleanly");
+    assert!(err.contains("unexpected image token type"), "err: {err}");
 }

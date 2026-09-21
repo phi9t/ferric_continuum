@@ -1,6 +1,6 @@
 #+TITLE: DeepSeek V4.1 Flash tnsr implementation spec
 #+TYPE: spec
-#+STATUS: ready-for-agent
+#+STATUS: done
 #+PARENT: intent.org
 
 * Goal
@@ -440,3 +440,30 @@ Wave 1 is complete only when:
 - Do not reuse Qwen3's RoPE permutation unless a future upstream
   Transformers-class verifier proves the HF class differs from the released
   DeepSeek inference code.
+
+* Resolution (2026-09-21)
+
+This scratch spec is closed as historical scaffolding. The canonical DeepSeek
+V4.1 tracker lives under =ferric_continuum/tnsr/docs/deepseek_v41/= and records
+the shipped state:
+
+- Wave 1 text implementation: canonical issues 01-09 are done or resolved.
+- Wave 2 multimodal implementation: canonical issues 13-20 are done.
+- Wave 3 DSpark =forward_spec=: canonical issues 21-25 are done.
+- Wave 4 cost accounting and CUDA-gated tiny parity: canonical issues 26-28
+  are done.
+- Production-readiness hardening: canonical issue 29 is done.
+
+Recent local history also contains the corresponding commits:
+
+- =bd99c48= text Wave 1 and residual/HC deepening;
+- =ebc0842= multimodal Wave 2;
+- =fdb1c41= DSpark Wave 3;
+- =768cb29= Wave 4 cost accounting and CUDA-gated parity;
+- =5a2b5cb= loader/forward hardening;
+- =b31ab34= conformance evidence.
+
+Remaining work is not a fresh Flash implementation queue. It is human-gated
+release-grade evidence under =.scratch/deepseek-v41-remaining-evidence/=:
+admitted release weights, real text/multimodal/DSpark parity, native FP8/FP4
+execution, tensor-parallel serving parity, and publication authority.

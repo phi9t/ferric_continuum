@@ -1,6 +1,6 @@
 #+TITLE: DeepSeek V4.1 checkpoint loader
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: done
 #+BLOCKED_BY: 05-text-model-skeleton-and-forward
 #+PARENT: ../spec.org
 
@@ -90,3 +90,12 @@ Read first:
 - Linear checkpoint weights are PyTorch-style =[out,in]= unless a specific
   converted tensor has a documented grouped layout. Rust =tnsr= linear math
   should store ordinary linears as =[in,out]= after transpose.
+
+* Answer
+
+Closed by canonical DeepSeek V4.1 issue
+=ferric_continuum/tnsr/docs/deepseek_v41/issues/06-deepseek-checkpoint-loader.org=.
+That issue records the text checkpoint loader, shape errors, and dequantized
+FP8/FP4 fixture loading as done, with =lib_tests= and the focused DeepSeek
+tests passing. Native FP8/FP4 execution remains a separate human-gated
+remaining-evidence item, not part of this Wave 1 loader ticket.

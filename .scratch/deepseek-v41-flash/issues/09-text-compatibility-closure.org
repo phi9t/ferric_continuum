@@ -1,6 +1,6 @@
 #+TITLE: Text compatibility closure and review
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: done
 #+BLOCKED_BY: 08-text-logits-parity-harness
 #+PARENT: ../spec.org
 
@@ -75,3 +75,12 @@ Expected:
 
 - This ticket is the handoff point before any human-authorized commit or branch
   finish.
+
+* Answer
+
+Closed by canonical DeepSeek V4.1 issue
+=ferric_continuum/tnsr/docs/deepseek_v41/issues/09-text-compatibility-closure.org=.
+That issue records the Wave 1 closure review and verifier ladder. Tiny/source
+levels passed; real checkpoint parity remained an honest SKIP without admitted
+local weights. This scratch ticket is historical scaffolding and should not be
+reopened as executable work.

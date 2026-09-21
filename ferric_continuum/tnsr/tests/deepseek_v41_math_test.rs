@@ -576,6 +576,28 @@ fn candidate_block_selection_rejects_negative_lens() {
 }
 
 #[test]
+#[should_panic(expected = "compress_lens length must match batch*seqlen")]
+fn candidate_block_selection_rejects_per_query_lens_length_mismatch() {
+    select_candidate_blocks(
+        &[0.0, 1.0, 2.0, 3.0],
+        CandidateShape {
+            batch: 2,
+            seqlen: 2,
+            positions: 1,
+        },
+        CandidateLens::PerQuery(vec![1, 1, 1]),
+        1,
+        1,
+    );
+}
+
+#[test]
+#[should_panic(expected = "DSpark decode requires start_pos > 0")]
+fn dspark_topk_indices_rejects_prefill_start_pos() {
+    let _ = decode_topk_indices(4, 1, 2, 0);
+}
+
+#[test]
 fn moe_sqrtsoftplus_routing_uses_bias_for_indices_but_not_weights() {
     let fixture = fixture("moe_gate_fixture.json");
     assert_fixture_meta(&fixture, "Gate.forward");
