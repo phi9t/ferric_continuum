@@ -1,0 +1,65 @@
+#+TITLE: Build the pending-workstream estate ledger
+#+TYPE: scout
+#+STATUS: ready-for-agent
+#+BLOCKED_BY:
+#+PARENT: ../spec.org
+
+* Context
+
+Ferric already has multiple `.scratch/` workstreams with mixed states:
+completed specs, active agent-ready ticket chains, human-blocked release gates,
+and one claimed wayfinder ticket. Before task automation can safely operate on
+them, the estate needs a durable ledger that distinguishes executable work from
+human-owned decisions and completed history.
+
+The draft ledger starts at:
+
+- `../pending-workstreams.org`
+
+* Questions
+
+- Which `.scratch/` efforts are live, complete, human-blocked, or stale?
+- Which tickets can become evidence-bound Engineering Tasks immediately?
+- Which tickets need a supervision packet instead of an implementation run?
+- Which completed efforts have enough retained evidence for closure receipts?
+- Which current branch-local commits are part of the candidate estate?
+
+* Requirements
+
+- Inspect current org metadata in every `.scratch/*/spec.org`,
+  `.scratch/*/map.org`, and `.scratch/*/issues/*.org` file relevant to
+  Ferric's pending engineering work.
+- Update `../pending-workstreams.org` so every listed effort has:
+  - source path;
+  - current status;
+  - evidence-bound mode;
+  - blocker classification;
+  - next action;
+  - human-authority gates.
+- Identify stale or ambiguous claims, especially the distributed-training TLA+
+  issue marked `claimed`.
+- Classify work into the four migration buckets:
+  - Task Contract needed;
+  - closure receipt needed;
+  - supervision packet needed;
+  - no action after citation.
+- Do not change source effort ticket statuses unless the evidence proves the
+  status is stale and the action is explicitly allowed by this ticket.
+
+* Out of scope
+
+- Implementing task runtime commands.
+- Starting or recovering any Task Run.
+- Running expensive Bazel, CUDA, B200, or rootfs verification.
+- Making archive, deletion, push, merge, release, or publication decisions.
+
+* Verification
+
+- The ledger cites every live or human-blocked effort found in `.scratch/`.
+- The ledger contains no `TODO` or placeholder next action.
+- A metadata scan confirms no `ready-for-agent`, `ready-for-human`,
+  `needs-info`, `claimed`, or `open` effort was omitted without an explicit
+  reason.
+- Human-blocked tickets are not listed as executable implementation work.
+
+* Comments

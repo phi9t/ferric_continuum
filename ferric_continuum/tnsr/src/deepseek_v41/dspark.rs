@@ -36,11 +36,11 @@ pub fn markov_head_forward(
 
     let markov_embed = embed[token_id * rank..(token_id + 1) * rank].to_vec();
     let mut logits = vec![0.0f32; vocab_size];
-    for (v, logit) in logits.iter_mut().enumerate() {
+    for (vocab_id, logit) in logits.iter_mut().enumerate() {
         let mut acc = 0.0f32;
-        let w = &head[v * rank..(v + 1) * rank];
-        for r in 0..rank {
-            acc += markov_embed[r] * w[r];
+        let vocab_row = &head[vocab_id * rank..(vocab_id + 1) * rank];
+        for rank_feature in 0..rank {
+            acc += markov_embed[rank_feature] * vocab_row[rank_feature];
         }
         *logit = acc;
     }
@@ -58,13 +58,13 @@ pub fn confidence_head_forward(hidden: &[f32], markov_embed: &[f32], proj: &[f32
         "confidence proj shape must be [1, dim + rank]"
     );
     let mut acc = 0.0f32;
-    for (i, &w) in proj.iter().enumerate() {
-        let x = if i < hidden.len() {
-            hidden[i]
+    for (feature, &weight) in proj.iter().enumerate() {
+        let activation = if feature < hidden.len() {
+            hidden[feature]
         } else {
-            markov_embed[i - hidden.len()]
+            markov_embed[feature - hidden.len()]
         };
-        acc += x * w;
+        acc += activation * weight;
     }
     acc
 }
@@ -81,8 +81,8 @@ pub fn draft_input_ids(
     assert_eq!(input_ids.len(), batch, "one input id per batch row");
     assert!(block_size > 0, "block_size must be positive");
     let mut out = vec![noise_token_id; batch * block_size];
-    for (b, &id) in input_ids.iter().enumerate() {
-        out[b * block_size] = id;
+    for (batch_index, &accepted_token_id) in input_ids.iter().enumerate() {
+        out[batch_index * block_size] = accepted_token_id;
     }
     out
 }
@@ -114,14 +114,14 @@ pub fn main_proj_norm(
     );
     let rows = main_hidden.len() / in_dim;
     let mut out = Vec::with_capacity(rows * dim);
-    for row in 0..rows {
-        let x = &main_hidden[row * in_dim..(row + 1) * in_dim];
+    for row_index in 0..rows {
+        let hidden_row = &main_hidden[row_index * in_dim..(row_index + 1) * in_dim];
         let mut projected = vec![0.0f32; dim];
-        for (o, proj_out) in projected.iter_mut().enumerate() {
-            let w = &proj[o * in_dim..(o + 1) * in_dim];
+        for (output_feature, proj_out) in projected.iter_mut().enumerate() {
+            let projection_row = &proj[output_feature * in_dim..(output_feature + 1) * in_dim];
             let mut acc = 0.0f32;
-            for i in 0..in_dim {
-                acc += x[i] * w[i];
+            for input_feature in 0..in_dim {
+                acc += hidden_row[input_feature] * projection_row[input_feature];
             }
             *proj_out = acc;
         }
@@ -138,15 +138,15 @@ pub fn main_proj_norm(
 /// (the DSpark draft loop forces greedy acceptance in the parity harness).
 pub fn argmax(logits: &[f32]) -> usize {
     assert!(!logits.is_empty(), "argmax over empty logits");
-    let mut best = 0usize;
-    let mut best_v = logits[0];
-    for (i, &v) in logits.iter().enumerate().skip(1) {
-        if v > best_v {
-            best_v = v;
-            best = i;
+    let mut best_index = 0usize;
+    let mut best_logit = logits[0];
+    for (candidate_index, &candidate_logit) in logits.iter().enumerate().skip(1) {
+        if candidate_logit > best_logit {
+            best_logit = candidate_logit;
+            best_index = candidate_index;
         }
     }
-    best
+    best_index
 }
 
 /// One DSpark `forward_head` draft loop over `block_size` positions. Mirrors the
@@ -190,27 +190,31 @@ pub fn draft_loop(
     output_ids[0] = input_id;
     let mut markov_embeds: Vec<f32> = Vec::with_capacity(block_size * rank);
 
-    for i in 0..block_size {
+    for draft_position in 0..block_size {
         let (bias, embed) = markov_head_forward(
-            output_ids[i],
+            output_ids[draft_position],
             markov_embed,
             markov_head_weight,
             vocab_size,
             rank,
         );
-        let row = &mut logits[i * vocab_size..(i + 1) * vocab_size];
-        for (l, b) in row.iter_mut().zip(&bias) {
-            *l += b;
+        let vocab_row = &mut logits[draft_position * vocab_size..(draft_position + 1) * vocab_size];
+        for (logit, bias_value) in vocab_row.iter_mut().zip(&bias) {
+            *logit += bias_value;
         }
         markov_embeds.extend_from_slice(&embed);
-        output_ids[i + 1] = argmax(row);
+        output_ids[draft_position + 1] = argmax(vocab_row);
     }
 
     let mut confidence = Vec::with_capacity(block_size);
-    for i in 0..block_size {
-        let h = &hidden[i * dim..(i + 1) * dim];
-        let m = &markov_embeds[i * rank..(i + 1) * rank];
-        confidence.push(confidence_head_forward(h, m, confidence_proj));
+    for draft_position in 0..block_size {
+        let hidden_row = &hidden[draft_position * dim..(draft_position + 1) * dim];
+        let markov_row = &markov_embeds[draft_position * rank..(draft_position + 1) * rank];
+        confidence.push(confidence_head_forward(
+            hidden_row,
+            markov_row,
+            confidence_proj,
+        ));
     }
 
     DraftLoopOutput {
