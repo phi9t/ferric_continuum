@@ -266,6 +266,23 @@ fn test_pipeline_bubble_shrinks_with_more_microbatches() {
     assert!(many.bubble_fraction < few.bubble_fraction);
 }
 
+#[test]
+fn test_pipeline_handoff_uses_largest_uneven_microbatch() {
+    let cfg = TransformerConfig {
+        batch: 5,
+        seq: 7,
+        d_model: 29,
+        d_ff: 116,
+        n_heads: 1,
+    };
+
+    let s = pipeline_schedule(&cfg, 3, 2);
+
+    assert_eq!(s.num_microbatches, 2);
+    // ceil(5 / 2) * seq * d_model * sizeof(f32)
+    assert_eq!(s.activation_handoff_bytes, 3 * 7 * 29 * 4);
+}
+
 // ---------------------------------------------------------------------------
 // Aggregate report
 // ---------------------------------------------------------------------------
@@ -288,4 +305,64 @@ fn test_format_distributed_report_headers() {
     assert!(table.contains("Mesh: dp=2 tp=2"));
     assert!(table.contains("DDP grad all-reduce"));
     assert!(table.contains("Bottleneck:"));
+}
+
+#[test]
+fn test_distributed_report_summarizes_hybrid_parallelism() {
+    let mesh = DeviceMesh {
+        shape: vec![2, 2, 3, 4],
+        axis_names: vec!["dp".into(), "tp".into(), "pp".into(), "sp".into()],
+    };
+
+    let r = distributed_report(&tiny(), 4, &mesh, ZeroStage::Stage3, &a100_bf16());
+
+    assert_eq!(r.dp, 2);
+    assert_eq!(r.tp, 2);
+    assert_eq!(r.pp, 3);
+    assert_eq!(r.sequence_parallel, 4);
+    assert_eq!(r.num_pipeline_microbatches, 3);
+    assert_eq!(r.pipeline_microbatch_size, 2);
+    assert_eq!(r.activation_shard_factor, 8);
+    assert_eq!(r.pipeline.num_stages, 3);
+    assert_eq!(r.pipeline.num_microbatches, 3);
+    assert_eq!(
+        r.pipeline_step_handoff_bytes,
+        r.pipeline.activation_handoff_bytes * r.num_pipeline_microbatches as u64 * 2
+    );
+    assert_eq!(
+        r.total_comm_bytes_per_device,
+        r.data_parallel.grad_allreduce_bytes_per_device
+            + r.fsdp.extra_comm_bytes_per_device
+            + r.tensor_parallel.allreduce_bytes() * r.num_layers as u64
+            + r.pipeline_step_handoff_bytes
+    );
+
+    let names: Vec<&str> = r
+        .symbolic_collectives
+        .iter()
+        .map(|collective| collective.name)
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            "DDP gradient all-reduce",
+            "FSDP parameter all-gather",
+            "FSDP gradient reduce-scatter",
+            "TP row-parallel all-reduce",
+            "PP activation send/recv",
+            "context-parallel K/V exchange",
+        ]
+    );
+    assert_eq!(r.symbolic_collectives[0].participants, 2);
+    assert_eq!(r.symbolic_collectives[3].participants, 2);
+    assert_eq!(r.symbolic_collectives[4].participants, 3);
+    assert_eq!(r.symbolic_collectives[5].participants, 4);
+
+    let table = format_distributed_report(&r);
+    assert!(table.contains("Mesh: dp=2 tp=2 pp=3 sp=4"));
+    assert!(table.contains("Pipeline microbatches:"));
+    assert!(table.contains("Pipeline microbatch size:"));
+    assert!(table.contains("Activation shard factor:"));
+    assert!(table.contains("Pipeline handoff"));
+    assert!(table.contains("context-parallel K/V exchange"));
 }

@@ -1,0 +1,77 @@
+#+TITLE: Archive and delete standalone tnsr
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 17-remove-tnsr-from-ultron-tracking
+#+PARENT: ../spec.org
+
+* Context
+
+After Ferric Continuum becomes the sole maintained `tnsr` implementation, the standalone checkout audit is resolved, and Ultron no longer tracks `tnsr`, retire `/data02/home/philip.yang/workspace/tnsr` from the active workspace. The chosen policy is archive-first, then delete.
+
+The archive must preserve both Git refs and working-tree contents. Use a Git bundle for refs/history and a separate content tarball for the exact checkout contents, including untracked files only if the pre-archive audit explicitly allows them.
+
+* Requirements
+
+- Confirm ticket 17 is resolved and Ultron no longer tracks `tnsr`.
+- Confirm `/data02/home/philip.yang/workspace/tnsr` is clean immediately before archiving.
+- Create an archive directory outside active `~/workspace`, such as `/data02/home/philip.yang/archive/tnsr-retired-<date>/`.
+- Create a Git bundle with all refs from the standalone checkout.
+- Create a content tarball of the standalone checkout that includes `.git` and does not follow symlinks.
+- Record the archive directory, exact commands, byte sizes, and SHA-256 digests for both archive artifacts under `* Answer`.
+- Verify the bundle and list refs from the bundle before deletion.
+- Verify the content tarball contains `.git/HEAD` and representative project files before deletion.
+- Re-check both archive digests immediately before deletion.
+- Delete `/data02/home/philip.yang/workspace/tnsr` only after the user gives explicit final deletion authority in the trusted request stream.
+- Record the deletion command and post-delete absence check under `* Answer`.
+
+* Out of scope
+
+- Deleting the standalone checkout before archive evidence is recorded.
+- Deleting the standalone checkout without explicit final deletion authority.
+- Removing Ferric Continuum's `ferric_continuum/tnsr` module.
+- Changing `tnsr` remotes or pushing `tnsr` commits.
+- Repairing unrelated Ultron sync drift.
+
+* Verification
+
+Pre-archive:
+
+#+begin_src sh
+git -C /data02/home/philip.yang/workspace/tnsr status --short
+#+end_src
+
+Archive creation:
+
+#+begin_src sh
+archive_dir=/data02/home/philip.yang/archive/tnsr-retired-$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p "$archive_dir"
+git -C /data02/home/philip.yang/workspace/tnsr bundle create "$archive_dir/tnsr-all-refs.bundle" --all
+tar -C /data02/home/philip.yang/workspace -czf "$archive_dir/tnsr-working-tree.tar.gz" tnsr
+wc -c "$archive_dir/tnsr-all-refs.bundle" "$archive_dir/tnsr-working-tree.tar.gz"
+(
+  cd "$archive_dir"
+  sha256sum tnsr-all-refs.bundle tnsr-working-tree.tar.gz > SHA256SUMS
+  cat SHA256SUMS
+)
+#+end_src
+
+Archive verification:
+
+#+begin_src sh
+git bundle verify "$archive_dir/tnsr-all-refs.bundle"
+git ls-remote "$archive_dir/tnsr-all-refs.bundle"
+tar -tf "$archive_dir/tnsr-working-tree.tar.gz" | rg '^(tnsr/\.git/HEAD|tnsr/Cargo.toml|tnsr/src/)'
+(
+  cd "$archive_dir"
+  sha256sum -c SHA256SUMS
+)
+#+end_src
+
+Post-delete:
+
+#+begin_src sh
+rm -rf /data02/home/philip.yang/workspace/tnsr
+test ! -e /data02/home/philip.yang/workspace/tnsr
+#+end_src
+
+* Comments

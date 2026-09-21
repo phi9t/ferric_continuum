@@ -1,0 +1,48 @@
+#+TITLE: Remove tnsr from Ultron tracking
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 16-audit-standalone-tnsr-before-retirement
+#+PARENT: ../spec.org
+
+* Context
+
+After Ferric Continuum is verified as the sole maintained `tnsr` implementation and ticket 16 classifies all standalone-only work, remove the standalone `tnsr` checkout from Ultron's active managed-repository set. This is a cross-repository metadata change, not deletion of the local checkout.
+
+Ultron's sync tool verifies managed files for the repositories listed in its manifest. It does not prove that a removed repository is absent from the manifest, so this ticket needs an explicit manifest assertion.
+
+* Requirements
+
+- Confirm ticket 16 is resolved and lists no unclassified retirement blockers.
+- Remove the `tnsr` entry from `/data02/home/philip.yang/workspace/ultron/docs/agents/agentic-workflow-repos.json`.
+- Confirm whether Ultron's sync-manifest regression tests contain an active `tnsr` assertion. Update or remove such an assertion only if it exists.
+- Add or retain a focused manifest assertion that proves `tnsr` is absent from the active repository list after this ticket.
+- Review the Ultron diff and confirm it is limited to the intended tracking removal and any corresponding test update.
+- Do not repair unrelated Ultron sync drift as part of this ticket.
+- Record command results under `* Answer`.
+
+* Out of scope
+
+- Archiving or deleting `/data02/home/philip.yang/workspace/tnsr`.
+- Editing Ferric Continuum's `ferric_continuum/tnsr` implementation.
+- Repairing unrelated Ultron managed-file drift in other repositories.
+- Pushing branches or changing remotes.
+
+* Verification
+
+#+begin_src sh
+cd /data02/home/philip.yang/workspace/ultron
+python3 - <<'PY'
+import json
+from pathlib import Path
+manifest = json.loads(Path("docs/agents/agentic-workflow-repos.json").read_text())
+names = [repository["name"] for repository in manifest["repositories"]]
+assert "tnsr" not in names, names
+PY
+git diff -- docs/agents/agentic-workflow-repos.json tests/test_sync_agentic_workflow.py
+python3 -m unittest tests.test_sync_agentic_workflow
+python3 tools/sync_agentic_workflow.py --check
+#+end_src
+
+If `tools/sync_agentic_workflow.py --check` reports unrelated pre-existing drift, record the exact drift and verify that `tnsr` is absent from the drift list.
+
+* Comments

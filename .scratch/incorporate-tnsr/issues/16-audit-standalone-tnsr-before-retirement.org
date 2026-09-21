@@ -1,0 +1,56 @@
+#+TITLE: Audit standalone tnsr before retirement
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 15-run-final-incorporation-verification
+#+PARENT: ../spec.org
+
+* Context
+
+The standalone `/data02/home/philip.yang/workspace/tnsr` checkout is no longer intended to remain an active sibling repository after incorporation finishes. Before it can be archived and deleted, prove that Ferric Continuum either contains every selected artifact or has an explicit reason to omit it.
+
+The standalone checkout was observed clean and ahead of `origin/master` by three commits during planning. Treat any standalone commits or files not represented in Ferric Continuum as retirement blockers until they are classified.
+
+* Requirements
+
+- Confirm `ferric_continuum/tnsr` passed final incorporation verification in ticket 15.
+- Capture standalone `tnsr` repository state: branch, clean/dirty status, remotes, recent commits, and commits ahead of upstream.
+- Audit the standalone repository against `ferric_continuum/tnsr` by artifact class:
+  - Rust library source.
+  - Scaling and reporting modules.
+  - CLI/demo/playground source.
+  - Tests and examples.
+  - Documentation.
+  - Web/viewer assets that were previously out of scope.
+  - Build and tooling metadata.
+- For every standalone-only artifact or commit, record one disposition:
+  - incorporated into Ferric Continuum, with destination path or commit;
+  - intentionally skipped, with reason;
+  - preserved only in the archive, with reason.
+- Treat unclassified standalone-only work as blocking.
+- Record the audit result under `* Answer`.
+
+* Out of scope
+
+- Implementing additional feature ports in this ticket. If the audit finds required missing behavior, create or reopen an implementation ticket and leave this ticket unresolved.
+- Removing `tnsr` from Ultron tracking.
+- Archiving or deleting `/data02/home/philip.yang/workspace/tnsr`.
+- Pushing standalone `tnsr` commits or changing its remotes.
+
+* Verification
+
+#+begin_src sh
+git -C /data02/home/philip.yang/workspace/tnsr fetch --prune origin
+git -C /data02/home/philip.yang/workspace/tnsr status --short
+git -C /data02/home/philip.yang/workspace/tnsr branch --show-current
+git -C /data02/home/philip.yang/workspace/tnsr remote -v
+git -C /data02/home/philip.yang/workspace/tnsr log --oneline --decorate --all -n 20
+git -C /data02/home/philip.yang/workspace/tnsr log --oneline origin/master..HEAD
+git -C /data02/home/philip.yang/workspace/tnsr diff --stat origin/master..HEAD
+#+end_src
+
+If network access is unavailable, record that fact under `* Answer` and treat
+`origin/master` as a stale comparison point until a later agent can refresh it.
+
+Run additional file comparison commands as needed and include their outputs or summaries in `* Answer`.
+
+* Comments

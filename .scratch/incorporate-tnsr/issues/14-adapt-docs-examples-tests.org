@@ -1,6 +1,6 @@
 #+TITLE: Adapt docs examples and tests
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: resolved
 #+BLOCKED_BY: 09-stabilize-debug-trace-json, 10-add-cpu-inference-primitives, 11-add-scaling-memory-reports, 12-reconcile-parallelism-reports, 13-add-bazel-playground-cli
 #+PARENT: ../spec.org
 
@@ -44,3 +44,114 @@ bazel test //ferric_continuum/tnsr:tnsr_tests \
 #+end_src
 
 * Comments
+
+* Answer
+
+Adapted the useful standalone docs, example, and behavior-test material into
+current Ferric Continuum artifacts without importing stale Cargo-first or web
+viewer workflow.
+
+Files changed for this ticket:
+
+- `ferric_continuum/tnsr/README.md`
+- `ferric_continuum/tnsr/docs/debugging.md`
+- `ferric_continuum/tnsr/SCALING_BOOK_MAP.md`
+- `ferric_continuum/tnsr/src/lib.rs`
+- `ferric_continuum/tnsr/src/debug.rs`
+- `ferric_continuum/tnsr/src/scaling/roofline.rs`
+- `ferric_continuum/tnsr/src/scaling/sharding.rs`
+- `ferric_continuum/tnsr/src/scaling/distributed/mod.rs`
+- `ferric_continuum/tnsr/src/scaling/distributed/collectives.rs`
+- `ferric_continuum/tnsr/tests/playground_cli_test.rs`
+- `ferric_continuum/tnsr/BUILD.bazel`
+
+Doc/example decisions:
+
+- Added a module-local `README.md` as the Bazel-first replacement for the
+  standalone README. It documents current monorepo APIs: stable
+  `tnsr.debug_trace` JSON, CPU inference primitives, scaling memory reports,
+  distributed symbolic reports, Qwen3 binaries, and the existing
+  `//ferric_continuum/tnsr:tnsr_demo` artifact flags.
+- Added `docs/debugging.md` as the Bazel-first debugging guide, with Bazel
+  build/test/run commands before supplementary Cargo tooling and LLDB examples
+  against `bazel-bin`.
+- Kept external `examples/tiny_block.rs` represented by the maintained
+  `tnsr_demo --dot ... --trace-json ...` path rather than adding a second demo
+  binary.
+- Did not import web viewer docs, generated DOT/JSON artifacts, frontend
+  tooling, or stale Cargo subcommands.
+- Corrected local docs/rustdoc comments that described `tnsr` as globally
+  CPU-only. The docs now distinguish the default CPU build, symbolic
+  distributed reports, and the opt-in Bazel CUDA forward path.
+
+Behavior test adaptation:
+
+- Extended `//ferric_continuum/tnsr:playground_cli_tests` to run the Bazel
+  runfiles copy of `tnsr_demo`, write caller-selected DOT and JSON artifacts,
+  parse the JSON, and assert the stable `tnsr.debug_trace` schema.
+- Added `@crates//:serde_json` only to that test target because the new behavior
+  assertion parses the generated JSON artifact.
+
+TDD evidence:
+
+#+begin_src text
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:playground_cli_tests
+error[E0433]: failed to resolve: use of undeclared crate or module `serde_json`
+#+end_src
+
+After adding the test dependency, the test reached behavior and failed because
+the monorepo DOT contract is `digraph Autograd`, not the standalone example's
+older `digraph tnsr` expectation:
+
+#+begin_src text
+test writes_requested_dot_and_trace_json_artifacts ... FAILED
+assertion failed: dot.contains("digraph tnsr")
+#+end_src
+
+The test and debugging guide were adapted to the current monorepo DOT contract.
+
+Verification:
+
+#+begin_src text
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr
+Build completed successfully.
+
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:lib_tests
+//ferric_continuum/tnsr:lib_tests PASSED
+
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr_doc
+Build completed successfully.
+Rustdoc still reports the pre-existing warnings in autograd.rs and qwen3_load.rs.
+
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:tnsr_tests //ferric_continuum/tnsr:debug_trace_tests //ferric_continuum/tnsr:inference_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:scaling_memory_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:qwen3_tests //ferric_continuum/tnsr:playground_cli_tests //ferric_continuum/tnsr:lib_tests
+Executed 7 out of 9 tests: 9 tests pass.
+
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --help
+Help output includes Usage: tnsr_demo [--dot PATH] [--trace-json PATH].
+
+/data02/home/philip.yang/.local/bin/bazel-9.2.0 run //ferric_continuum/tnsr:tnsr_demo -- --dot "$tmpdir/block.dot" --trace-json "$tmpdir/trace.json"
+head -n 1 "$tmpdir/block.dot"
+python3 -m json.tool "$tmpdir/trace.json" >/dev/null
+rg -q '"schema": "tnsr.debug_trace"' "$tmpdir/trace.json"
+DOT began with digraph Autograd; JSON parsed and had schema tnsr.debug_trace.
+
+cd ferric_continuum/tnsr && cargo check
+Finished dev profile successfully.
+#+end_src
+
+Self-review:
+
+- The adapted docs start with Bazel commands and keep Cargo explicitly
+  supplementary.
+- The docs avoid claiming the whole module is CPU-only and mention opt-in CUDA
+  forward support where relevant.
+- No web viewer docs, generated artifacts, or frontend checks were imported.
+- The new behavior test verifies the maintained Bazel demo artifact path rather
+  than testing source text.
+
+Concerns:
+
+- `tnsr_doc` still emits pre-existing rustdoc warnings in `autograd.rs` and
+  `qwen3_load.rs`; this ticket did not broaden scope to repair them.
+- The worktree still contains uncommitted prerequisite ticket 11-13 changes,
+  which were preserved.
