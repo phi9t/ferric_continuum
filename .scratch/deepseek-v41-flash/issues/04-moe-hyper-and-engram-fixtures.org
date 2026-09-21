@@ -1,6 +1,6 @@
 #+TITLE: MoE, Hyper-Connection, and Engram unit verifiers
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: done
 #+BLOCKED_BY: 03-rope-sparse-and-compressor-fixtures
 #+PARENT: ../spec.org
 
@@ -95,3 +95,11 @@ Unit verifier requirements:
   across model operations and layers for MoE, HC, and Engram.
 - Keep pure math helpers separate from parameter-owning structs so later block
   tests can call the same logic directly.
+
+* Answer
+
+Closed by canonical DeepSeek V4.1 issue
+=ferric_continuum/tnsr/docs/deepseek_v41/issues/04-moe-hyper-and-engram-fixtures.org=.
+That issue records MoE, Hyper-Connection, and Engram fixture coverage as done,
+with =deepseek_v41_math_tests= passing. This scratch ticket is historical
+scaffolding and should not be reopened as executable work.

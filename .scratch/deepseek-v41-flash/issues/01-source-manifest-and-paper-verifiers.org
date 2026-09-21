@@ -1,6 +1,6 @@
 #+TITLE: Source manifest and paper claim verifiers
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: done
 #+BLOCKED_BY:
 #+PARENT: ../spec.org
 
@@ -69,3 +69,11 @@ Read first:
 - This is Level 1 of the verifier ladder.
 - Use source claim ids that later tickets can cite, for example
   =readme-ced-20-20= and =report-fp4-main-kv-scale=.
+
+* Answer
+
+Closed by canonical DeepSeek V4.1 issue
+=ferric_continuum/tnsr/docs/deepseek_v41/issues/01-source-manifest-and-paper-verifiers.org=.
+That issue records the source-manifest verifier as done, with
+=verify_deepseek_v41_sources.sh= passing. This scratch ticket is historical
+scaffolding and should not be reopened as executable work.

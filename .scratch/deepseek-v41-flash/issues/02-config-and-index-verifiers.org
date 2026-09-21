@@ -1,6 +1,6 @@
 #+TITLE: Config and safetensors index verifiers
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: done
 #+BLOCKED_BY: 01-source-manifest-and-paper-verifiers
 #+PARENT: ../spec.org
 
@@ -78,3 +78,11 @@ Read first:
 - This is Level 2 of the verifier ladder.
 - Keep parsing code independent from the future model structs so config drift
   remains testable even when model implementation changes.
+
+* Answer
+
+Closed by canonical DeepSeek V4.1 issue
+=ferric_continuum/tnsr/docs/deepseek_v41/issues/02-config-and-index-verifiers.org=.
+That issue records typed config and release-index verification as done, with
+=deepseek_v41_config_tests= passing. This scratch ticket is historical
+scaffolding and should not be reopened as executable work.
