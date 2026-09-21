@@ -210,7 +210,7 @@ impl DeepSeekV41Attention {
         input: AttentionLayerInput<'_>,
         kv_prefix_source: Option<&Tensor>,
     ) -> Tensor {
-        let (b, s, _d) = shape3(input.x, "DeepSeekV41Attention input");
+        let (batch, query_tokens, _hidden_dim) = shape3(input.x, "DeepSeekV41Attention input");
         assert!(self.n_heads > 0, "n_heads must be positive");
         assert!(self.head_dim > 0, "head_dim must be positive");
         assert!(
@@ -234,14 +234,21 @@ impl DeepSeekV41Attention {
         };
         let kv_source = input.x;
         let (kv_b, _kv_s, _kv_d) = shape3(kv_source, "DeepSeekV41 attention KV source");
-        assert_eq!(kv_b, b, "attention KV source batch mismatch");
+        assert_eq!(kv_b, batch, "attention KV source batch mismatch");
         if let Some(prefix) = encoder_prefix.as_ref() {
             let (prefix_b, _prefix_s, _prefix_d) =
                 shape3(prefix, "DeepSeekV41 decoder encoder hidden");
-            assert_eq!(prefix_b, b, "decoder encoder hidden batch mismatch");
+            assert_eq!(prefix_b, batch, "decoder encoder hidden batch mismatch");
             input.shared.consumed_decoder_encoder_hidden = true;
         }
 
+        // Build one flat KV coordinate system before attention:
+        //
+        //   `[batch, prefix_len + local_positions + compressed_positions, head_dim]`
+        //
+        // `topk` rows below are expressed in this final coordinate system. CED
+        // and DSpark prefixes occupy the first positions, local SWA rows follow,
+        // and compressed CSA2 rows are appended last.
         let local_kv = linear::linear(kv_source, &self.wkv, "deepseek.attn.wkv");
         let local_kv = norm::rms_norm(&local_kv, &self.kv_norm, "deepseek.attn.kv_norm");
         let local_kv_data = if kv_prefix_source.is_some() {
@@ -250,17 +257,17 @@ impl DeepSeekV41Attention {
             windowed_local_kv(
                 input.shared,
                 &local_kv,
-                b,
-                s,
+                batch,
+                query_tokens,
                 input.start_pos,
                 self.window_size,
             )
         };
-        let local_positions = local_kv_data.len() / (b * self.head_dim);
+        let local_positions = local_kv_data.len() / (batch * self.head_dim);
         let mut kv_data = Vec::new();
         let mut prefix_len = if let Some(prefix) = kv_prefix_source {
             let (prefix_b, prefix_s, _prefix_d) = shape3(prefix, "DeepSeekV41 attention KV prefix");
-            assert_eq!(prefix_b, b, "attention KV prefix batch mismatch");
+            assert_eq!(prefix_b, batch, "attention KV prefix batch mismatch");
             let prefix_kv = linear::linear(prefix, &self.wkv, "deepseek.attn.prefix_wkv");
             let prefix_kv =
                 norm::rms_norm(&prefix_kv, &self.kv_norm, "deepseek.attn.prefix_kv_norm");
@@ -268,7 +275,7 @@ impl DeepSeekV41Attention {
                 publish_swa_cache(
                     input.shared,
                     &to_flat(&prefix_kv),
-                    b,
+                    batch,
                     prefix_s,
                     self.window_size,
                 );
@@ -284,7 +291,7 @@ impl DeepSeekV41Attention {
         if let Some(prefix) = encoder_prefix.as_ref() {
             let (prefix_b, prefix_s, _prefix_d) =
                 shape3(prefix, "DeepSeekV41 attention CED prefix");
-            assert_eq!(prefix_b, b, "attention CED prefix batch mismatch");
+            assert_eq!(prefix_b, batch, "attention CED prefix batch mismatch");
             let prefix_kv = linear::linear(prefix, &self.wkv, "deepseek.attn.ced_wkv");
             let prefix_kv = norm::rms_norm(&prefix_kv, &self.kv_norm, "deepseek.attn.ced_kv_norm");
             kv_data.extend_from_slice(&to_flat(&prefix_kv));
@@ -296,8 +303,8 @@ impl DeepSeekV41Attention {
         self.update_csa2_state(
             input.x,
             &qr,
-            b,
-            s,
+            batch,
+            query_tokens,
             input.start_pos,
             local_positions,
             input.shared,
@@ -305,7 +312,7 @@ impl DeepSeekV41Attention {
 
         if let Some(compressed) = input.shared.compressed_kv.as_deref() {
             assert_eq!(
-                compressed.len() % (b * self.head_dim),
+                compressed.len() % (batch * self.head_dim),
                 0,
                 "compressed KV length must be batch*positions*head_dim"
             );
@@ -317,7 +324,7 @@ impl DeepSeekV41Attention {
         let topk = if let Some(indices) = input.shared.topk_indices.as_deref() {
             input.shared.consumed_sparse_indices = true;
             if has_encoder_prefix {
-                shifted_topk = with_prefix_global_topk(prefix_len, b, s, indices);
+                shifted_topk = with_prefix_global_topk(prefix_len, batch, query_tokens, indices);
                 Some(shifted_topk.as_slice())
             } else {
                 Some(indices)
@@ -325,13 +332,14 @@ impl DeepSeekV41Attention {
         } else if has_encoder_prefix {
             generated_topk = with_prefix_global_topk(
                 prefix_len,
-                b,
-                s,
-                &window_indices_usize(self.window_size, b, s, input.start_pos),
+                batch,
+                query_tokens,
+                &window_indices_usize(self.window_size, batch, query_tokens, input.start_pos),
             );
             Some(generated_topk.as_slice())
-        } else if self.window_size < s || input.start_pos > 0 {
-            generated_topk = window_indices_usize(self.window_size, b, s, input.start_pos);
+        } else if self.window_size < query_tokens || input.start_pos > 0 {
+            generated_topk =
+                window_indices_usize(self.window_size, batch, query_tokens, input.start_pos);
             Some(generated_topk.as_slice())
         } else {
             None
@@ -340,23 +348,23 @@ impl DeepSeekV41Attention {
             &q,
             &kv_data,
             topk,
-            b,
-            s,
+            batch,
+            query_tokens,
             prefix_len
                 + local_positions
                 + input
                     .shared
                     .compressed_kv
                     .as_ref()
-                    .map_or(0, |kv| kv.len() / (b * self.head_dim)),
+                    .map_or(0, |kv| kv.len() / (batch * self.head_dim)),
             self.n_heads,
             self.head_dim,
             self.attn_sink.inner.borrow().value.data.as_ref(),
         );
         let low_rank = grouped_wo_a(
             &attended,
-            b,
-            s,
+            batch,
+            query_tokens,
             self.n_heads,
             self.head_dim,
             self.o_groups,
@@ -364,12 +372,16 @@ impl DeepSeekV41Attention {
             self.wo_a.inner.borrow().value.data.as_ref(),
         );
         let low_rank_tensor = Tensor::from_value_no_grad(TensorValue::from_vec(
-            Shape(vec![b, s, self.o_groups * self.o_lora_rank]),
+            Shape(vec![batch, query_tokens, self.o_groups * self.o_lora_rank]),
             low_rank,
         ));
         shape_ops::reshape(
             &linear::linear(&low_rank_tensor, &self.wo_b, "deepseek.attn.wo_b"),
-            &[b, s, self.wo_b.inner.borrow().value.shape.0[1]],
+            &[
+                batch,
+                query_tokens,
+                self.wo_b.inner.borrow().value.shape.0[1],
+            ],
             "deepseek.attn.out",
         )
     }
@@ -558,97 +570,171 @@ fn shape3(x: &Tensor, label: &str) -> (usize, usize, usize) {
 }
 
 fn sparse_attention(
-    q: &[f32],
-    kv: &[f32],
+    query_by_token_head: &[f32],
+    kv_by_token: &[f32],
     topk_indices: Option<&[usize]>,
     batch: usize,
-    seqlen: usize,
-    kv_seqlen: usize,
-    n_heads: usize,
+    query_tokens: usize,
+    kv_tokens: usize,
+    heads: usize,
     head_dim: usize,
     attn_sink: &[f32],
 ) -> Vec<f32> {
-    assert_eq!(q.len(), batch * seqlen * n_heads * head_dim);
-    assert_eq!(kv.len(), batch * kv_seqlen * head_dim);
-    assert_eq!(attn_sink.len(), n_heads);
+    let layout = SparseAttentionLayout {
+        batch,
+        query_tokens,
+        kv_tokens,
+        heads,
+        head_dim,
+    };
+    assert_eq!(query_by_token_head.len(), layout.query_numel());
+    assert_eq!(kv_by_token.len(), layout.kv_numel());
+    assert_eq!(attn_sink.len(), heads);
     let topk = topk_indices.map(|idx| {
         assert_eq!(
-            idx.len() % (batch * seqlen),
+            idx.len() % layout.query_rows(),
             0,
             "sparse index count must be a multiple of batch*seqlen"
         );
         idx
     });
-    let sparse_width = topk.map(|idx| idx.len() / (batch * seqlen)).unwrap_or(1);
+    let sparse_width = topk.map(|idx| idx.len() / layout.query_rows()).unwrap_or(1);
     let scale = (head_dim as f32).powf(-0.5);
-    let mut out = vec![0.0f32; batch * seqlen * n_heads * head_dim];
+    let mut out = vec![0.0f32; layout.query_numel()];
 
-    for bi in 0..batch {
-        for qi in 0..seqlen {
-            for h in 0..n_heads {
-                let row = bi * seqlen + qi;
-                let fallback = qi.saturating_sub(1).min(qi);
+    for batch_index in 0..layout.batch {
+        for query_position in 0..layout.query_tokens {
+            for head in 0..layout.heads {
+                let row = layout.row(batch_index, query_position);
+                let fallback = query_position.saturating_sub(1).min(query_position);
                 let candidates = topk
                     .map(|idx| &idx[row * sparse_width..(row + 1) * sparse_width])
                     .unwrap_or(std::slice::from_ref(&fallback));
+                // Width 1 is the tracked sliding-window fixture path: the
+                // single chosen KV row is gated by `attn_sink` with a sigmoid.
                 if sparse_width == 1 {
-                    let src = candidates[0];
-                    if src == usize::MAX {
+                    let source_position = candidates[0];
+                    if source_position == usize::MAX {
                         continue;
                     }
-                    assert!(src < kv_seqlen, "sparse index out of bounds");
-                    let mut score = attn_sink[h];
-                    for d in 0..head_dim {
-                        let q_idx = ((bi * seqlen + qi) * n_heads + h) * head_dim + d;
-                        let k_idx = (bi * kv_seqlen + src) * head_dim + d;
-                        score += q[q_idx] * kv[k_idx] * scale;
+                    assert!(
+                        source_position < layout.kv_tokens,
+                        "sparse index out of bounds"
+                    );
+                    let mut score = attn_sink[head];
+                    for head_feature in 0..layout.head_dim {
+                        score += query_by_token_head
+                            [layout.query_offset(batch_index, query_position, head, head_feature)]
+                            * kv_by_token
+                                [layout.kv_offset(batch_index, source_position, head_feature)]
+                            * scale;
                     }
                     let gate = 1.0 / (1.0 + (-score).exp());
-                    for d in 0..head_dim {
-                        let out_idx = ((bi * seqlen + qi) * n_heads + h) * head_dim + d;
-                        let v_idx = (bi * kv_seqlen + src) * head_dim + d;
-                        out[out_idx] = gate * kv[v_idx];
+                    for head_feature in 0..layout.head_dim {
+                        out[layout.query_offset(batch_index, query_position, head, head_feature)] =
+                            gate * kv_by_token
+                                [layout.kv_offset(batch_index, source_position, head_feature)];
                     }
                     continue;
                 }
-                let mut scores = Vec::with_capacity(candidates.len() + 1);
-                scores.push((usize::MAX, attn_sink[h]));
-                for &src in candidates {
-                    if src == usize::MAX {
+                // Wider sparse rows model CSA2: `usize::MAX` is the sink row,
+                // real candidates compete by softmax, and only real KV rows
+                // contribute values.
+                let mut scores_by_source = Vec::with_capacity(candidates.len() + 1);
+                scores_by_source.push((usize::MAX, attn_sink[head]));
+                for &source_position in candidates {
+                    if source_position == usize::MAX {
                         continue;
                     }
-                    assert!(src < kv_seqlen, "sparse index out of bounds");
+                    assert!(
+                        source_position < layout.kv_tokens,
+                        "sparse index out of bounds"
+                    );
                     let mut score = 0.0;
-                    for d in 0..head_dim {
-                        let q_idx = ((bi * seqlen + qi) * n_heads + h) * head_dim + d;
-                        let k_idx = (bi * kv_seqlen + src) * head_dim + d;
-                        score += q[q_idx] * kv[k_idx] * scale;
+                    for head_feature in 0..layout.head_dim {
+                        score += query_by_token_head
+                            [layout.query_offset(batch_index, query_position, head, head_feature)]
+                            * kv_by_token
+                                [layout.kv_offset(batch_index, source_position, head_feature)]
+                            * scale;
                     }
-                    scores.push((src, score));
+                    scores_by_source.push((source_position, score));
                 }
-                let max_score = scores
+                let max_score = scores_by_source
                     .iter()
                     .map(|(_, score)| *score)
                     .fold(f32::NEG_INFINITY, f32::max);
-                let denom: f32 = scores
+                let denom: f32 = scores_by_source
                     .iter()
                     .map(|(_, score)| (*score - max_score).exp())
                     .sum();
-                for &(src, score) in &scores {
-                    if src == usize::MAX {
+                for &(source_position, score) in &scores_by_source {
+                    if source_position == usize::MAX {
                         continue;
                     }
                     let weight = (score - max_score).exp() / denom;
-                    for d in 0..head_dim {
-                        let out_idx = ((bi * seqlen + qi) * n_heads + h) * head_dim + d;
-                        let v_idx = (bi * kv_seqlen + src) * head_dim + d;
-                        out[out_idx] += weight * kv[v_idx];
+                    for head_feature in 0..layout.head_dim {
+                        out[layout.query_offset(
+                            batch_index,
+                            query_position,
+                            head,
+                            head_feature,
+                        )] += weight
+                            * kv_by_token
+                                [layout.kv_offset(batch_index, source_position, head_feature)];
                     }
                 }
             }
         }
     }
     out
+}
+
+/// Row-major layouts used by the educational sparse-attention skeleton.
+///
+/// - Query/output: `[batch, query_tokens, heads, head_dim]`.
+/// - Key/value: `[batch, kv_tokens, head_dim]`; the same KV row is read by
+///   every query head in this tiny CPU path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SparseAttentionLayout {
+    batch: usize,
+    query_tokens: usize,
+    kv_tokens: usize,
+    heads: usize,
+    head_dim: usize,
+}
+
+impl SparseAttentionLayout {
+    fn query_rows(self) -> usize {
+        self.batch * self.query_tokens
+    }
+
+    fn query_numel(self) -> usize {
+        self.query_rows() * self.heads * self.head_dim
+    }
+
+    fn kv_numel(self) -> usize {
+        self.batch * self.kv_tokens * self.head_dim
+    }
+
+    fn row(self, batch_index: usize, query_position: usize) -> usize {
+        batch_index * self.query_tokens + query_position
+    }
+
+    fn query_offset(
+        self,
+        batch_index: usize,
+        query_position: usize,
+        head: usize,
+        head_feature: usize,
+    ) -> usize {
+        ((batch_index * self.query_tokens + query_position) * self.heads + head) * self.head_dim
+            + head_feature
+    }
+
+    fn kv_offset(self, batch_index: usize, source_position: usize, head_feature: usize) -> usize {
+        (batch_index * self.kv_tokens + source_position) * self.head_dim + head_feature
+    }
 }
 
 fn default_sparse_indices(batch: usize, seqlen: usize) -> Vec<usize> {
@@ -1004,4 +1090,79 @@ fn grouped_wo_a(
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sparse_attention_layout_names_query_and_kv_offsets() {
+        let layout = SparseAttentionLayout {
+            batch: 2,
+            query_tokens: 3,
+            kv_tokens: 5,
+            heads: 7,
+            head_dim: 11,
+        };
+
+        assert_eq!(
+            layout.query_offset(1, 2, 3, 4),
+            ((1 * 3 + 2) * 7 + 3) * 11 + 4
+        );
+        assert_eq!(layout.kv_offset(1, 4, 10), (1 * 5 + 4) * 11 + 10);
+        assert_eq!(layout.query_rows(), 6);
+        assert_eq!(layout.query_numel(), 462);
+        assert_eq!(layout.kv_numel(), 110);
+    }
+
+    #[test]
+    fn with_prefix_global_topk_shifts_real_indices_and_preserves_sink() {
+        let got = with_prefix_global_topk(2, 1, 2, &[usize::MAX, 1, 0, 1]);
+
+        assert_eq!(got, vec![0, 1, usize::MAX, 3, 0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn with_local_window_topk_concatenates_rows_without_reordering() {
+        let got = with_local_window_topk(2, 1, 3, 0, &[2, usize::MAX, 3]);
+
+        assert_eq!(got, vec![0, usize::MAX, 2, 0, 1, usize::MAX, 1, 2, 3]);
+    }
+
+    #[test]
+    fn visible_compressed_positions_keeps_incomplete_groups_invisible() {
+        let visible = (0..5)
+            .map(|query_offset| visible_compressed_positions(0, query_offset, 2, 4))
+            .collect::<Vec<_>>();
+
+        assert_eq!(visible, vec![0, 1, 1, 2, 2]);
+        assert_eq!(visible_compressed_positions(8, 0, 2, 4), 4);
+    }
+
+    #[test]
+    #[should_panic(expected = "sparse index count must be a multiple of batch*seqlen")]
+    fn sparse_attention_rejects_topk_rows_not_divisible_by_batch_seqlen() {
+        let _ = sparse_attention(
+            &[1.0, 2.0],
+            &[3.0, 4.0],
+            Some(&[0, 1, 0]),
+            1,
+            2,
+            2,
+            1,
+            1,
+            &[0.0],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "decode attention expects one token per step")]
+    fn windowed_local_kv_rejects_multi_token_decode() {
+        let mut shared = SharedAttentionState::default();
+        let local_kv =
+            Tensor::from_value_no_grad(TensorValue::from_vec(Shape(vec![1, 2, 1]), vec![1.0, 2.0]));
+
+        let _ = windowed_local_kv(&mut shared, &local_kv, 1, 2, 3, 2);
+    }
 }

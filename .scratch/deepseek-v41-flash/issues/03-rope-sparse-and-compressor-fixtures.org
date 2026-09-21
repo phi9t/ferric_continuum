@@ -1,6 +1,6 @@
 #+TITLE: RoPE, sparse attention, and compressor op verifiers
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: done
 #+BLOCKED_BY: 02-config-and-index-verifiers
 #+PARENT: ../spec.org
 
@@ -89,3 +89,11 @@ Unit verifier requirements:
 
 - This is Level 3 / op verifier coverage for attention support.
 - Keep functions deterministic and side-effect free where possible; cache mutation belongs to later layer/block tickets.
+
+* Answer
+
+Closed by canonical DeepSeek V4.1 issue
+=ferric_continuum/tnsr/docs/deepseek_v41/issues/03-rope-sparse-and-compressor-fixtures.org=.
+That issue records RoPE, sparse-window, candidate-block, and compressor
+fixtures as done, with =deepseek_v41_math_tests= passing. This scratch ticket is
+historical scaffolding and should not be reopened as executable work.

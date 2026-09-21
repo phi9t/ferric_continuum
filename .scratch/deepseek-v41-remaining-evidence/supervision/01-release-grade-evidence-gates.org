@@ -1,0 +1,171 @@
+#+TITLE: DeepSeek V4.1 release-grade evidence gates
+#+TYPE: supervision
+#+STATUS: ready-for-human
+#+PARENT: ../spec.org
+
+* Decision Needed
+
+Decide whether to move DeepSeek V4.1 from source-backed local implementation
+evidence to release-grade evidence, and if so, authorize the exact gated work:
+
+- admit or provide a local DeepSeek V4.1 release checkpoint directory;
+- run real released-weight text, multimodal, and DSpark parity;
+- decide whether native FP8/FP4 execution is required for the next promotion;
+- decide whether tensor-parallel serving parity is required for the next
+  promotion;
+- authorize any high-cost GPU/B200 run and any release-candidate publication.
+
+* Why Agent Execution Is Paused
+
+The current contract cannot decide these gates automatically:
+
+- no =DEEPSEEK_V41_MODEL_DIR= or =MODEL_DIR= is admitted as the release
+  checkpoint;
+- downloading the release checkpoint is a large external side effect;
+- high-cost GPU/B200 work needs explicit runtime and budget authority;
+- release publication changes external state and needs human approval;
+- native quantized execution and tensor-parallel serving are separate product
+  decisions, not implicit requirements of the source/tiny implementation.
+
+* Evidence Already Available
+
+- =../receipts/01-baseline-evidence.org= records source and focused Bazel
+  baseline evidence.
+- =../receipts/03-real-text-and-multimodal-parity.org= records text and
+  multimodal tiny parity, with real released-weight parity skipped for missing
+  assets.
+- =../receipts/04-real-dspark-mtp-parity.org= records DSpark tiny
+  =forward_spec= parity, with real released-weight parity skipped for missing
+  assets.
+- =../receipts/05-dspark-acceptance-loop-decision.org= records the accepted
+  boundary: deterministic =forward_spec= parity, not a speculative acceptance
+  loop.
+- =../receipts/06-long-context-cache-indexer-stress.org= records reduced
+  long-context/cache/indexer evidence and the remaining release-scale boundary.
+- =../receipts/07-native-quantized-fp8-fp4-execution.org= records current CUDA
+  tiny forward evidence and defers native FP8/FP4 kernels.
+- =../receipts/08-tensor-parallel-serving-parity.org= records that TP serving
+  parity is not claimed.
+- =../receipts/10-release-candidate-evidence-packet.org= summarizes the current
+  PASS-WITH-SKIPS packet.
+
+* Options
+
+** A: Documentation closure only
+
+Accept the current state as an implementation/evidence closure, with no release
+promotion. Keep real weights, native quantization, TP serving, and publication
+as explicit future gates.
+
+Unblock effect:
+
+- no new compute runs;
+- tracker remains honest and closed for completed implementation waves;
+- release-grade claims remain unpromoted.
+
+** B: Admit existing local checkpoint assets
+
+Provide the exact model directory path and permit read-only asset admission.
+
+Unblock effect:
+
+- issue 02 can verify config/index/shard identity;
+- issues 03 and 04 can run real released-weight parity if the reference runtime
+  is available;
+- receipts can bind later evidence to the admitted asset identity.
+
+Required input:
+
+- =DEEPSEEK_V41_MODEL_DIR=/absolute/path/to/model= or equivalent;
+- maximum allowed hashing/stat budget if full shard hashing is expensive.
+
+** C: Authorize checkpoint acquisition
+
+Authorize the agent to download or materialize the release checkpoint locally.
+
+Unblock effect:
+
+- issue 02 can move from missing-asset SKIP to asset admission;
+- real text/multimodal/DSpark parity can proceed after admission.
+
+Required input:
+
+- approved source location;
+- storage path;
+- network/storage budget;
+- whether partial or full shard hashing is required.
+
+** D: Authorize B200/native runtime qualification
+
+Authorize bounded GPU work for CUDA, native FP8/FP4, long-context, or B200
+qualification.
+
+Unblock effect:
+
+- issue 07 can become an implementation or experiment run;
+- CUDA-gated receipt can move beyond tiny forward parity if the requested
+  candidate is implemented and verified.
+
+Required input:
+
+- GPU host/runtime identity;
+- maximum runtime budget;
+- exact claim to test;
+- pass thresholds.
+
+** E: Authorize tensor-parallel serving parity
+
+Authorize a local TP serving experiment after real assets are admitted.
+
+Unblock effect:
+
+- issue 08 can define and run a local multi-rank serving candidate;
+- release packet can include or reject TP serving parity based on evidence.
+
+Required input:
+
+- world size;
+- launch method;
+- baseline candidate;
+- comparator thresholds.
+
+** F: Authorize publication
+
+Authorize release-candidate publication after deciding which skipped claims are
+acceptable.
+
+Unblock effect:
+
+- issue 10 can become a promotion action rather than an evidence packet only.
+
+Required input:
+
+- target branch/tag/release channel;
+- accepted residual risks;
+- exact push/merge/publication authority.
+
+* Recommendation
+
+Use option A unless the next objective is a real release claim. If the next
+objective is release-grade parity, start with option B; only use option C if no
+local checkpoint exists and the storage/network cost is explicitly acceptable.
+
+Do not authorize options D, E, or F until asset admission and real released-
+weight parity have a clean receipt, unless the goal is explicitly a separate
+experiment rather than release promotion.
+
+* Paused Work
+
+- =../issues/02-real-checkpoint-asset-admission.org=
+- =../issues/03-real-text-and-multimodal-parity.org=
+- =../issues/04-real-dspark-mtp-parity.org=
+- =../issues/07-native-quantized-fp8-fp4-execution.org=
+- =../issues/08-tensor-parallel-serving-parity.org=
+- =../issues/10-release-candidate-evidence-packet.org=
+
+* Unblock Criteria
+
+This packet is unblocked when the human records one of the options above with
+the required inputs and any budget limits. Until then, source-backed DeepSeek
+V4.1 work is complete for tracker purposes, but release-grade claims remain
+unpromoted.
