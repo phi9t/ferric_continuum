@@ -1,6 +1,6 @@
 #+TITLE: Text tokenizer, prompt fixtures, and inference CLI
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: done
 #+BLOCKED_BY: 06-deepseek-checkpoint-loader
 #+PARENT: ../spec.org
 
@@ -85,3 +85,11 @@ Read first:
 - This ticket implements Level 5 verifier coverage and the Rust side of Level 6.
 - Preserve the Qwen3 =--token-ids= isolation pattern; it is essential for
   separating tokenizer mismatch from model math mismatch.
+
+* Answer
+
+Closed by canonical DeepSeek V4.1 issue
+=ferric_continuum/tnsr/docs/deepseek_v41/issues/07-tokenizer-prompt-and-cli.org=.
+That issue records tokenizer, prompt fixture, and CLI support as done, including
+=deepseek_v41_model_tests= and =deepseek_v41_infer= build evidence. This scratch
+ticket is historical scaffolding and should not be reopened as executable work.

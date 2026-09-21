@@ -1,6 +1,6 @@
 #+TITLE: W3-04 DSpark checkpoint loader (mtp.* namespace)
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: done
 #+BLOCKED_BY: W3-03-dspark-head-model-forward_spec
 #+PARENT: ../spec.org
 
@@ -42,3 +42,11 @@ names), and the existing =src/deepseek_v41/load.rs=.
   tensor errors and names it; a text-only config yields =None=.
 
 * Comments
+
+* Answer
+
+Closed by canonical DeepSeek V4.1 issue
+=ferric_continuum/tnsr/docs/deepseek_v41/issues/24-dspark-checkpoint-loader.org=.
+That issue records the =mtp.*= namespace loader as done, with =lib_tests= and
+=deepseek_v41_model_tests= passing. Real released-weight DSpark parity remains
+human-gated under the remaining-evidence effort, not this loader ticket.
