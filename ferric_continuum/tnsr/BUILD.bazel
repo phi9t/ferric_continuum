@@ -40,7 +40,9 @@ _TNSR_SRCS = [
     "src/ops/norm.rs",
     "src/ops/rope.rs",
     "src/ops/shape.rs",
+    "src/playground.rs",
     "src/scaling/mod.rs",
+    "src/scaling/memory.rs",
     "src/scaling/model_stats.rs",
     "src/scaling/op_cost.rs",
     "src/scaling/report.rs",
@@ -195,6 +197,25 @@ rust_test(
     name = "scaling_tests",
     srcs = ["tests/scaling_test.rs"],
     crate_name = "scaling_test",
+    edition = "2021",
+    deps = [":tnsr"],
+)
+
+# Golden-value tests for training memory accounting.
+rust_test(
+    name = "scaling_memory_tests",
+    srcs = ["tests/scaling_memory_test.rs"],
+    crate_name = "scaling_memory_test",
+    edition = "2021",
+    deps = [":tnsr"],
+)
+
+# Focused CLI parser tests for caller-selected playground artifact paths.
+rust_test(
+    name = "playground_cli_tests",
+    srcs = ["tests/playground_cli_test.rs"],
+    crate_name = "playground_cli_test",
+    data = [":tnsr_demo"],
     edition = "2021",
     deps = [":tnsr"],
 )

@@ -25,6 +25,7 @@ pub mod dtensor;
 pub mod grad_mode;
 pub mod inference;
 pub mod ops;
+pub mod playground;
 pub mod qwen3;
 pub mod qwen3_load;
 pub mod saved;

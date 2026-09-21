@@ -359,4 +359,9 @@ impl Engine {
     pub fn write_dot(&self, path: &str) {
         self.debug.write_dot(&self.topo, path);
     }
+
+    /// Render the DAG as Graphviz DOT for callers that need fallible I/O.
+    pub fn dot_string(&self) -> String {
+        self.debug.dot_string(&self.topo)
+    }
 }

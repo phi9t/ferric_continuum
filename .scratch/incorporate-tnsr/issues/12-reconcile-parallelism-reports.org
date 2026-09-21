@@ -1,6 +1,6 @@
 #+TITLE: Reconcile selected parallelism reports
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: resolved
 #+BLOCKED_BY: 11-add-scaling-memory-reports
 #+PARENT: ../spec.org
 
@@ -41,3 +41,23 @@ bazel build //ferric_continuum/tnsr:tnsr_doc
 #+end_src
 
 * Comments
+
+* Answer
+
+- Implemented in `ferric_continuum/tnsr/src/scaling/distributed/report.rs` without adding a new `scaling/parallelism.rs`.
+- Folded the external aggregate concepts into the existing distributed report:
+  - DDP gradient all-reduce was already covered by `data_parallel`.
+  - FSDP / ZeRO parameter all-gather and gradient reduce-scatter were already covered by `fsdp`.
+  - Tensor-parallel row all-reduce was already covered by `tensor_parallel`.
+  - Pipeline-parallel scheduling remains owned by `distributed::pipeline`; the aggregate report now exposes both schedule microbatch count and derived microbatch size instead of overloading the external `microbatch_per_pipeline_stage` summary.
+  - Pipeline handoff byte totals are reported as step-level logical bytes across adjacent stage boundaries and schedule microbatches.
+  - Sequence/context parallel degree is summarized as an activation shard factor and symbolic K/V exchange without adding a byte model.
+- Added `test_distributed_report_summarizes_hybrid_parallelism` to `distributed_tests`.
+- Added `test_pipeline_handoff_uses_largest_uneven_microbatch` to keep `pipeline_schedule` conservative for uneven batch splits.
+- Verification in `/data02/home/philip.yang/workspace/ferric_continuum/.worktrees/incorporate-tnsr-12`:
+  - `/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr`
+  - `/data02/home/philip.yang/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:lib_tests //ferric_continuum/tnsr:scaling_tests //ferric_continuum/tnsr:distributed_tests //ferric_continuum/tnsr:scaling_memory_tests`
+  - `/data02/home/philip.yang/.local/bin/bazel-9.2.0 build //ferric_continuum/tnsr:tnsr_doc`
+  - `git diff --check`
+- Independent review by separate-context `openrouter-3o` reviewer found no blockers after the pipeline handoff accounting fix.
+- Verification repeated in the primary checkout with the same commands; all passed. `tnsr_doc` still reports pre-existing rustdoc warnings in `autograd.rs` and `qwen3_load.rs`.
