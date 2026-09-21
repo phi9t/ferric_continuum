@@ -1,6 +1,6 @@
 #+TITLE: W3-05 DSpark forward_spec parity harness + closure
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: done
 #+BLOCKED_BY: W3-04-dspark-checkpoint-loader
 #+PARENT: ../spec.org
 
@@ -52,3 +52,13 @@ Read first: =../spec.org=, =../issues/D1-parity-contract.org=,
 - =python3 -m py_compile= on changed tools; =rustfmt= on changed Rust.
 
 * Comments
+
+* Answer
+
+Closed by canonical DeepSeek V4.1 issue
+=ferric_continuum/tnsr/docs/deepseek_v41/issues/25-dspark-parity-harness-and-closure.org=.
+That issue records the DSpark parity harness and closure as done:
+P0/source/config/op/model levels PASS, tiny =forward_spec= parity PASS, and
+real released-weight parity SKIP when no local checkpoint is admitted. This
+scratch ticket is historical scaffolding and should not be reopened as
+executable work.

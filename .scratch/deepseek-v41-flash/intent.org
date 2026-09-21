@@ -1,6 +1,6 @@
 #+TITLE: DeepSeek V4.1 Flash tnsr implementation intent
 #+TYPE: task
-#+STATUS: needs-design-approval
+#+STATUS: done
 #+BLOCKED_BY:
 
 * Route
@@ -60,3 +60,24 @@ intent file.
 - Created from the user request: "deep dive this new dsv4.1 model arch ... and
   implement then in the tnsr module | create sufficient amount of verifiers to
   ensure the tnsr impl is compatible with the upstream inference code".
+
+* Answer
+
+Resolved by the canonical DeepSeek V4.1 tracker under
+=ferric_continuum/tnsr/docs/deepseek_v41/=. The source-backed implementation
+waves have landed and are no longer awaiting design approval in this scratch
+intent.
+
+Canonical evidence:
+
+- =ferric_continuum/tnsr/docs/deepseek_v41/spec.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/01-source-manifest-and-paper-verifiers.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/09-text-compatibility-closure.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/20-multimodal-parity-harness-and-closure.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/25-dspark-parity-harness-and-closure.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/28-perf-device-closure.org=
+- =.scratch/deepseek-v41-remaining-evidence/receipts/10-release-candidate-evidence-packet.org=
+
+Remaining real-checkpoint, native FP8/FP4, tensor-parallel serving, and
+publication decisions stay human-gated under
+=.scratch/deepseek-v41-remaining-evidence/=.

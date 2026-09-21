@@ -1,0 +1,112 @@
+#+TITLE: DeepSeek V4.1 tracker reconciliation receipt
+#+TYPE: receipt
+#+STATUS: done
+#+PARENT: ../pending-workstreams.org
+
+* Summary
+
+The DeepSeek V4.1 source-backed implementation streams are closed for tracker
+purposes. The stale scratch queues under =.scratch/deepseek-v41-flash/= and
+=.scratch/deepseek-v41-dspark/= now point to the canonical tracker under
+=ferric_continuum/tnsr/docs/deepseek_v41/= instead of advertising already-landed
+work as executable.
+
+This receipt does not promote release-grade DeepSeek V4.1 claims. Real
+released-weight parity, native FP8/FP4 execution, tensor-parallel serving
+parity, and publication remain human-gated under
+=.scratch/deepseek-v41-remaining-evidence/=.
+
+* Candidate
+
+- Current checkout branch: =hook-scrub-gates=
+- Current HEAD observed during reconciliation: =2ff3974 Add scrub gates to hooks and PR checks=
+- DeepSeek implementation/evidence commits in local history:
+  - =bd99c48= text Wave 1 and residual/HC deepening;
+  - =ebc0842= multimodal Wave 2;
+  - =fdb1c41= DSpark Wave 3;
+  - =768cb29= Wave 4 cost accounting and CUDA-gated parity;
+  - =5a2b5cb= loader/forward hardening;
+  - =b31ab34= conformance evidence.
+
+* Reconciliation Map
+
+| Stale scratch artifact | Reconciled state | Canonical evidence |
+|------------------------+------------------+--------------------|
+| =.scratch/deepseek-v41-flash/intent.org= | =done= | =ferric_continuum/tnsr/docs/deepseek_v41/spec.org= |
+| =.scratch/deepseek-v41-flash/spec.org= | =done= | canonical issues 01-29 |
+| Flash issues 01-09 | =done= | canonical issues 01-09 |
+| Flash issue 10 | already =resolved= | canonical issues 13-20 |
+| Flash issue 11 | =superseded= | canonical issues 21-25 |
+| =.scratch/deepseek-v41-dspark/intent.org= | =resolved= | DSpark decisions D1-D4 and canonical issues 21-25 |
+| =.scratch/deepseek-v41-dspark/spec.org= | =done= | canonical issues 21-25 |
+| DSpark W3-01 through W3-05 | =done= | canonical issues 21-25 |
+| =ferric_continuum/tnsr/docs/deepseek_v41/spec.org= | =ready-for-human= | remaining-evidence effort |
+
+* Accepted Claims
+
+- DeepSeek V4.1 text implementation work is closed at the source/tiny-fixture
+  evidence level.
+- DeepSeek V4.1 multimodal implementation work is closed at the source/tiny
+  evidence level.
+- DeepSeek V4.1 DSpark Wave 3 is closed for deterministic =forward_spec= parity.
+- DeepSeek V4.1 Wave 4 cost accounting and CUDA-gated tiny forward parity are
+  represented by canonical issue evidence.
+- Old scratch tickets are historical scaffolding and should not be used as
+  active implementation contracts.
+
+* Evidence Pointers
+
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/09-text-compatibility-closure.org=
+  records Wave 1 closure and tiny text parity evidence.
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/20-multimodal-parity-harness-and-closure.org=
+  records Wave 2 closure and tiny multimodal parity evidence.
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/25-dspark-parity-harness-and-closure.org=
+  records Wave 3 DSpark =forward_spec= parity evidence.
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/28-perf-device-closure.org=
+  records Wave 4 cost and CUDA-gated tiny forward evidence.
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/29-architecture-hardening-production-readiness.org=
+  records hardening follow-up disposition.
+- =.scratch/deepseek-v41-remaining-evidence/receipts/10-release-candidate-evidence-packet.org=
+  records the consolidated evidence packet and explicit skipped release-grade
+  claims.
+
+* Remaining Risks
+
+- No admitted real DeepSeek V4.1 checkpoint directory was available during this
+  reconciliation.
+- Real released-weight text, multimodal, and DSpark numeric parity remain
+  unproven.
+- Native FP8/FP4 execution remains unimplemented; current loader support
+  dequantizes for inspectable execution.
+- Tensor-parallel serving parity remains unproven.
+- Release-candidate promotion and publication remain unauthorized.
+
+* Promotion Status
+
+Administrative tracker reconciliation is complete. Release promotion is not
+complete and requires the supervision packet at
+=.scratch/deepseek-v41-remaining-evidence/supervision/01-release-grade-evidence-gates.org=.
+
+* Verification (2026-09-21)
+
+- =rg= stale-state scan across the reconciled DeepSeek tracker paths found no
+  remaining DeepSeek matches for stale executable states such as
+  =ready-for-agent=, =needs-design-approval=, or old W3 contract-stub prompts.
+- =git diff --check -- .scratch/deepseek-v41-flash .scratch/deepseek-v41-dspark .scratch/evidence-bound-agentic-engineering .scratch/deepseek-v41-remaining-evidence/supervision ferric_continuum/tnsr/docs/deepseek_v41/spec.org=
+  passed.
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_sources.sh= passed:
+  30 source claims checked.
+- =$HOME/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:deepseek_v41_source_tests //ferric_continuum/tnsr:deepseek_v41_config_tests //ferric_continuum/tnsr:deepseek_v41_math_tests //ferric_continuum/tnsr:deepseek_v41_model_tests //ferric_continuum/tnsr:lib_tests=
+  passed: 5 targets, 0 failed.
+- =BAZEL=$HOME/.local/bin/bazel-9.2.0 ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh=
+  returned =RESULT: PASS-WITH-SKIPS=: source/config/op/model/tiny parity PASS,
+  real-checkpoint parity SKIP.
+- =BAZEL=$HOME/.local/bin/bazel-9.2.0 ferric_continuum/tnsr/tools/verify_deepseek_v41_multimodal_compat.sh=
+  returned =RESULT: PASS-WITH-SKIPS=: source/config/op/model/VL prompt/tiny
+  multimodal parity PASS, B200 torch-runtime and real-checkpoint parity SKIP.
+- =BAZEL=$HOME/.local/bin/bazel-9.2.0 ferric_continuum/tnsr/tools/verify_deepseek_v41_dspark_compat.sh=
+  returned =RESULT: PASS-WITH-SKIPS=: source/config/op/model/tiny DSpark
+  =forward_spec= parity PASS, real-checkpoint parity SKIP.
+- =BAZEL=$HOME/.local/bin/bazel-9.2.0 ferric_continuum/tnsr/tools/verify_deepseek_v41_perf_compat.sh=
+  returned =RESULT: PASS-WITH-SKIPS=: cost accounting and CUDA tiny forward
+  parity PASS, real-checkpoint parity SKIP.

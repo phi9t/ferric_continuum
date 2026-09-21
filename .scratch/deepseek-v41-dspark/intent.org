@@ -1,6 +1,6 @@
 #+TITLE: DeepSeek V4.1 Wave 3: DSpark/MTP speculative-draft forward
 #+TYPE: wayfinding
-#+STATUS: open
+#+STATUS: resolved
 #+PARENT: ../deepseek-v41-flash/spec.org
 
 * Idea
@@ -40,3 +40,15 @@ spec: the parity contract fixed, the executed/represented boundary drawn, the
 - No speculative-decoding *generation loop* (upstream doesn't ship one).
 - No production FP8/FP4 kernels (Wave 4).
 - No distributed all-reduce; single-process only.
+
+* Answer
+
+Resolved by the Wave 3 DSpark tracker and the canonical DeepSeek V4.1 docs.
+The decision map was collapsed into =.scratch/deepseek-v41-dspark/spec.org=,
+then landed canonically as issues 21-25 under
+=ferric_continuum/tnsr/docs/deepseek_v41/issues/=.
+
+The accepted boundary is deterministic =forward_spec= parity, not a
+speculative-decoding generation loop. Real released-weight DSpark parity remains
+human-gated under
+=.scratch/deepseek-v41-remaining-evidence/issues/04-real-dspark-mtp-parity.org=.
