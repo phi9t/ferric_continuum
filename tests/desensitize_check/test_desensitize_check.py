@@ -78,6 +78,9 @@ class DetectorTests(unittest.TestCase):
             ),
         )
 
+    def test_github_masked_noreply_email_clean(self):
+        self.assertEqual([], self.find("108351695+phi9t@users.noreply.github.com"))
+
     # -- multiple categories on one line ------------------------------------
     def test_multiple_findings_same_line(self):
         cats = self.cats("owner local.user used /mnt/home/bob mailed x@example.com from 8.8.8.8")
