@@ -1,4 +1,4 @@
-<!-- Skill Orchestration Crosswalk v2026.08.14.1. Canonical source: ultron/docs/agents/skill-orchestration.md. Sibling copies are managed by Ultron. -->
+<!-- Skill Orchestration Crosswalk v2026.08.15.1. Canonical source: ultron/docs/agents/skill-orchestration.md. Sibling copies are managed by Ultron. -->
 # Matt–Superpowers Skill Orchestration
 
 This policy applies whenever skills from both suites cover the same work. Load

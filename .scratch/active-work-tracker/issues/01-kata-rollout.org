@@ -1,0 +1,17 @@
+#+TITLE: Configure Ferric Continuum for the active-work control plane
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: ultron:06-policy-and-synchronization
+#+PARENT: ultron:.scratch/active-work-tracker/spec.md
+
+* Requirements
+
+Receive the managed active-work policy, instruction pointers, manifest binding,
+and `.kata.toml` project configuration while preserving both AGENTS and CLAUDE
+files and the existing org-mode tracker history.
+
+* Evidence
+
+Ultron sync check, exact pointer counts, org tracker preservation, and
+`git diff --check`.
+

@@ -1,4 +1,4 @@
-<!-- Agentic Engineering Workflow v2026.08.14.1. Canonical source: ultron/docs/agents/agentic-engineering.md. Sibling copies are managed by Ultron. -->
+<!-- Agentic Engineering Workflow v2026.08.15.1. Canonical source: ultron/docs/agents/agentic-engineering.md. Sibling copies are managed by Ultron. -->
 # Agentic Engineering Workflow
 
 > Scale agent execution, not agent authority.
@@ -25,14 +25,13 @@ the durable ticket.
 Inspect the working tree and applicable repository guidance, then use
 `ask-matt` to route the work. Before repository exploration, read
 `docs/agents/domain.md`; use its glossary and surface any ADR conflict. Read
-`docs/agents/issue-tracker.md` before tracker operations and
 `docs/agents/triage-labels.md` before triaging incoming work. Put durable intent
-in the configured tracker:
+in Kata according to `docs/agents/active-work.md`. Legacy tracker files remain
+read-only historical inputs after cutover:
 
-- Single-repository work uses that repository's tracker.
-- Cross-repository work starts in Ultron at `.scratch/<effort>/`. Create linked
-  child tickets in every affected repository and point each child back to the
-  Ultron map.
+- Single-repository work uses that repository's Kata project.
+- Cross-repository work uses an Ultron Kata parent with linked child issues in
+  every affected repository project.
 
 The **short path** is available only when every condition holds: one repository,
 one session, reversible, narrowly scoped, and no public API or schema,

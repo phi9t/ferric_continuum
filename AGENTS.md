@@ -56,7 +56,9 @@ Ferric Continuum is a Bazel-built monorepo designed to grow into an agent-driven
 
 ### Issue tracker
 
-Issues and specs are tracked as local org-mode files under `.scratch/`. See `docs/agents/issue-tracker.org`.
+Kata is authoritative for active issues and specs. Existing org-mode files
+under `.scratch/` are read-only cutover history. See
+`docs/agents/active-work.md`.
 
 ### Triage labels
 
@@ -82,5 +84,8 @@ See `README.md` for runnable commands and `ENGINEERING.md` for coding standards.
 **Mandatory:** Read and follow `CONSTITUTION.md` before acting. Before planning,
 building, fixing, or changing code, read and follow
 `docs/agents/agentic-engineering.md`. Direct user instructions and more specific
-repository guidance take precedence.
+repository guidance take precedence. Before selecting, claiming, or tracking
+engineering work, read and follow `docs/agents/active-work.md`.
+For durable intent, Kata supersedes any legacy Local Markdown or org tracker
+guidance; legacy tracker files are read-only history after cutover.
 <!-- ultron-agentic-workflow:end -->

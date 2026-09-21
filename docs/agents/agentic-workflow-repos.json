@@ -1,0 +1,91 @@
+{
+  "version": "2026.08.15.1",
+  "source_repository": "ultron",
+  "managed_policy_files": [
+    "CONSTITUTION.md",
+    "docs/agents/agentic-engineering.md",
+    "docs/agents/skill-orchestration.md",
+    "docs/agents/active-work.md",
+    "docs/agents/agentic-workflow-repos.json",
+    "tools/active_work.py"
+  ],
+  "local_tracker_files": [
+    "docs/agents/issue-tracker.md",
+    "docs/agents/triage-labels.md",
+    "docs/agents/domain.md"
+  ],
+  "required_symlinks": [
+    {
+      "path": "torchtitan/AGENTS.md",
+      "target": ".claude/CLAUDE.md"
+    },
+    {
+      "path": "megatronlm/CLAUDE.md",
+      "target": "AGENTS.md"
+    }
+  ],
+  "required_content": [
+    {
+      "path": "monarch/CLAUDE.md",
+      "snippets": ["@CONSTITUTION.md", "`AGENTS.md`"]
+    }
+  ],
+  "repositories": [
+    {
+      "name": "ultron",
+      "instruction_files": ["AGENTS.md"],
+      "install_local_tracker": false,
+      "mainline": "main",
+      "kata_project": "ultron",
+      "legacy_tracker": "markdown"
+    },
+    {
+      "name": "torchtitan",
+      "instruction_files": [".claude/CLAUDE.md"],
+      "install_local_tracker": true,
+      "mainline": "main",
+      "kata_project": "torchtitan",
+      "legacy_tracker": "markdown"
+    },
+    {
+      "name": "monarch",
+      "instruction_files": ["AGENTS.md"],
+      "install_local_tracker": true,
+      "mainline": "main",
+      "kata_project": "monarch",
+      "legacy_tracker": "markdown"
+    },
+    {
+      "name": "megatronlm",
+      "instruction_files": ["AGENTS.md"],
+      "install_local_tracker": true,
+      "mainline": "main",
+      "kata_project": "megatronlm",
+      "legacy_tracker": "markdown"
+    },
+    {
+      "name": "nccl",
+      "instruction_files": ["AGENTS.md"],
+      "install_local_tracker": false,
+      "mainline": "master",
+      "kata_project": "nccl",
+      "legacy_tracker": "markdown"
+    },
+    {
+      "name": "ferric_continuum",
+      "instruction_files": ["AGENTS.md", "CLAUDE.md"],
+      "install_local_tracker": false,
+      "mainline": "main",
+      "kata_project": "ferric-continuum",
+      "legacy_tracker": "org"
+    },
+    {
+      "name": "tnsr",
+      "instruction_files": ["AGENTS.md"],
+      "install_local_tracker": true,
+      "mainline": "master",
+      "kata_project": "tnsr",
+      "legacy_tracker": "markdown"
+    }
+  ]
+}

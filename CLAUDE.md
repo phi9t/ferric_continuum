@@ -85,5 +85,8 @@ The agent system is documented in `AGENTS.md`, but no `/agents` directory or age
 **Mandatory:** Read and follow `CONSTITUTION.md` before acting. Before planning,
 building, fixing, or changing code, read and follow
 `docs/agents/agentic-engineering.md`. Direct user instructions and more specific
-repository guidance take precedence.
+repository guidance take precedence. Before selecting, claiming, or tracking
+engineering work, read and follow `docs/agents/active-work.md`.
+For durable intent, Kata supersedes any legacy Local Markdown or org tracker
+guidance; legacy tracker files are read-only history after cutover.
 <!-- ultron-agentic-workflow:end -->
