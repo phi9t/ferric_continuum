@@ -1,6 +1,6 @@
 #+TITLE: W3-03 DSpark head model + forward_spec assembly
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: done
 #+BLOCKED_BY: W3-02-dspark-attention-and-heads-fixtures
 #+PARENT: ../spec.org
 
@@ -43,3 +43,11 @@ existing =src/deepseek_v41/model.rs= (Block/ResidualStream seams).
   expected shapes ([block_size, vocab] logits, [block_size] confidence).
 
 * Comments
+
+* Answer
+
+Closed by canonical DeepSeek V4.1 issue
+=ferric_continuum/tnsr/docs/deepseek_v41/issues/23-dspark-head-model-and-forward-spec.org=.
+That issue records the DSpark stage model and deterministic =forward_spec=
+assembly as done, with =deepseek_v41_model_tests= passing. This scratch ticket
+is historical scaffolding and should not be reopened as executable work.

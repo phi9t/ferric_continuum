@@ -71,7 +71,11 @@ class DetectorTests(unittest.TestCase):
 
     def test_allowlisted_emails_clean(self):
         self.assertEqual(
-            [], self.find("Co-authored-by: TRAE CLI <noreply@bytedance.com> git@github.com")
+            [],
+            self.find(
+                "Co-authored-by: TRAE CLI <noreply@bytedance.com> "
+                "git@github.com noreply@github.com support@github.com"
+            ),
         )
 
     # -- multiple categories on one line ------------------------------------
