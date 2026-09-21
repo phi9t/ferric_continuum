@@ -105,6 +105,7 @@ class Allowlist:
             "support@github.com",
         ):
             allow.literals.add(tok)
+        allow.regexes.append(re.compile(r"\b\d+\+[A-Za-z0-9-]+@users\.noreply\.github\.com\b"))
         if ALLOWLIST_PATH.exists():
             for line in ALLOWLIST_PATH.read_text().splitlines():
                 allow.add_line(line)
