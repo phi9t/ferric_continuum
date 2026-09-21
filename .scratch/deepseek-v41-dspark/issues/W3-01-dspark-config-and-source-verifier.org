@@ -1,6 +1,6 @@
 #+TITLE: W3-01 DSpark config activation + source verifier
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: done
 #+BLOCKED_BY:
 #+PARENT: ../spec.org
 
@@ -39,3 +39,12 @@ Read first: =../spec.org=, =../issues/D3-mtp-loader-shape.org=,
 - Config tests assert DSpark fields parse and =dspark_enabled= is correct.
 
 * Comments
+
+* Answer
+
+Closed by canonical DeepSeek V4.1 issue
+=ferric_continuum/tnsr/docs/deepseek_v41/issues/21-dspark-config-and-source-verifier.org=.
+That issue records DSpark config activation and source verifier coverage as
+done, including =verify_deepseek_v41_sources.sh= and
+=deepseek_v41_config_tests= evidence. This scratch ticket is historical
+scaffolding and should not be reopened as executable work.

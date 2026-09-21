@@ -826,6 +826,27 @@ fn multimodal_wrong_vision_shape_returns_err() {
 }
 
 #[test]
+fn multimodal_invalid_vision_attention_geometry_returns_named_error() {
+    let dir = unique_tmp_dir("mm-bad-head-geometry");
+    let config = tiny_vision_config_json().replace("\"vision_dim\": 8", "\"vision_dim\": 7");
+    std::fs::write(dir.join("config.json"), config).unwrap();
+    let mut tensors = tiny_tensor_map();
+    add_vision_tensors(&mut tensors);
+    write_safetensors(&dir, "model.safetensors", tensors);
+
+    let err = match load_multimodal_model(&dir) {
+        Ok(_) => panic!("expected load to fail"),
+        Err(e) => e,
+    };
+
+    assert!(
+        err.contains("vision hidden_size 7 not divisible by num_attention_heads 2"),
+        "err: {err}"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn multimodal_missing_image_start_returns_err() {
     let dir = unique_tmp_dir("mm-missing-delim");
     std::fs::write(dir.join("config.json"), tiny_vision_config_json()).unwrap();
@@ -1038,6 +1059,31 @@ fn dspark_head_is_none_when_disabled() {
     let model = load_text_model(&dir).expect("text backbone loads");
     let head = load_dspark_head(&dir, &model).expect("no error when dspark disabled");
     assert!(head.is_none(), "dspark disabled => None");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn dspark_enabled_with_zero_mtp_layers_returns_named_error() {
+    let dir = unique_tmp_dir("dspark-zero-mtp");
+    let config = TINY_CONFIG_JSON
+        .replace("\"dspark_block_size\": 0", "\"dspark_block_size\": 3")
+        .replace(
+            "\"dspark_target_layer_ids\": []",
+            "\"dspark_target_layer_ids\": [0]",
+        );
+    std::fs::write(dir.join("config.json"), config).unwrap();
+    write_safetensors(&dir, "model.safetensors", tiny_tensor_map());
+    let model = load_text_model(&dir).expect("text backbone loads");
+
+    let err = match load_dspark_head(&dir, &model) {
+        Ok(_) => panic!("expected dspark load to fail"),
+        Err(e) => e,
+    };
+
+    assert!(
+        err.contains("dspark enabled but n_mtp_layers == 0"),
+        "err: {err}"
+    );
     std::fs::remove_dir_all(dir).unwrap();
 }
 
