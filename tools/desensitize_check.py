@@ -154,6 +154,8 @@ def _is_version_like(match: re.Match, text: str) -> bool:
         return True
     if re.search(r"(?i)\b(version|ver|bazel|proto|v|release|rev|tag)\s*$", prefix):
         return True
+    if re.search(r"(?:==|!=|~=|<=|>=|<|>)\s*$", prefix):
+        return True
     # A dotted-quad that is a path/URL segment (…/1.3.1.2/…) is a version, not
     # an IP: it is delimited by slashes rather than whitespace/punctuation.
     raw_before = text[start - 1] if start > 0 else ""

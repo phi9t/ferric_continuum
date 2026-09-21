@@ -61,6 +61,9 @@ class DetectorTests(unittest.TestCase):
         # x.y.z.w in an obvious version context should not be an IP finding.
         self.assertEqual([], self.find("bazel 9.2.0.0 and proto v1.2.3.4"))
 
+    def test_pep440_specifier_quad_allowlisted(self):
+        self.assertEqual([], self.find("foo==1.0.0.0 and bar ~= 2.0.0.0"))
+
     def test_version_like_path_segment_allowlisted(self):
         # A dotted-quad that is a URL/path segment is a version, not an IP.
         self.assertEqual([], self.find("https://bcr.bazel.build/modules/x/1.3.1.2/MODULE.bazel"))
