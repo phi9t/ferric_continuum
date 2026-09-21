@@ -1,15 +1,26 @@
-#+TITLE: Evidence-bound agentic engineering workflow
+#+TITLE: Evidence-bound agentic engineering consolidation
 #+TYPE: spec
 #+STATUS: ready-for-agent
 #+PARENT:
 
 * Summary
 
-Set up Ferric's agentic workflow around durable tasks that accumulate
-candidate-bound evidence. The repository already distinguishes Engineering
-Task, Task Contract, Task Run, and Agent Attempt in
-~docs/agents/task-runs.md~. This effort adds the working method and the
-implementation queue needed to turn that design into tool behavior.
+Consolidate Ferric's pending local workstreams into the evidence-bound
+agentic-engineering model, then implement the local tooling that makes that
+model enforceable.
+
+This effort has two layers:
+
+- *Consolidation*: inventory existing `.scratch/` efforts, classify their
+  current state, restate live work as evidence-bound Engineering Tasks, and
+  preserve completed work as candidate-bound receipts or closure records.
+- *Automation*: add the contract validation, run journals, task-start,
+  recovery, evidence records, task-finish, command wrappers, and supervision
+  packet design needed for future work to execute under the model.
+
+The repository already defines Engineering Task, Task Contract, Task Run, and
+Agent Attempt in ~docs/agents/task-runs.md~. This spec turns those documents
+into the migration and implementation queue for the current Ferric estate.
 
 The operating loop is:
 
@@ -36,6 +47,92 @@ human-authorized extensions.
 - ~docs/agents/skill-orchestration.md~
 - ~CONSTITUTION.md~
 
+* Consolidation input estate
+
+The initial estate is the set of tracked and local org-mode efforts under
+~.scratch/~ at the time this spec is worked. Each effort is classified by
+current tracker state, not by conversational memory alone.
+
+** Completed or closure-only efforts
+
+These should be represented as historical evidence, closure receipts, or
+archival decisions. They should not be converted into new implementation work
+unless the inventory finds a live blocker.
+
+- ~.scratch/incorporate-tnsr/~: resolved incorporation of selected standalone
+  ~tnsr~ functionality. The remaining human action is
+  ~issues/18-archive-delete-standalone-tnsr.org~.
+- ~.scratch/deepseek-v41-faithful-coverage/~: done faithful-coverage kata with
+  source coverage, indexed checkpoint loading, CSA2/SWA/CED, Engram, DSpark
+  forward-spec parity, V4/V4.1 contrast, and parity closure.
+- ~.scratch/deepen-gqa-semantics/~: resolved GQA semantic deepening intent.
+- ~.scratch/tnsr-architecture-deepening/~: resolved architecture-deepening
+  spec and six implementation tickets.
+- ~.scratch/typed-transformer-math/~: resolved wayfinder/spec plus Wave A
+  typed attention tracer.
+- ~.scratch/desensitize-repo/~: done checker, hook, and CI gate.
+- ~.scratch/ferric-runner/~: approved runner spec with tickets 01-05 resolved;
+  follow-up rootfs ownership belongs to production readiness.
+- ~.scratch/dtensor-mesh-simulation/~: completed experiment lineage, reports,
+  and handoff into distributed-training TLA work.
+
+** Live agent-ready work
+
+These are candidate workstreams for evidence-bound Task Contracts.
+
+- ~.scratch/deepseek-v41-dspark/~: DSpark/MTP Wave 3 spec is
+  ~ready-for-agent~. Decision tickets D1-D4 are resolved. Implementation
+  tickets W3-01 through W3-05 are ready and blocker-linked.
+- ~.scratch/deepseek-v41-flash/~: spec is ~ready-for-agent~, while the older
+  intent remains ~needs-design-approval~. Current branch history indicates much
+  of this work landed, so consolidation must reconcile the tracker status
+  against the candidate before creating fresh work.
+- ~.scratch/distributed-training-tla/~: map remains ~charting~. Issues 04, 06,
+  and 07 are not closed; issue 04 is currently ~claimed~, so consolidation must
+  verify whether that claim is stale before creating a replacement run.
+- ~.scratch/production-release-readiness/~: approved gated release-readiness
+  spec. Tickets 01, 03, 04, 05, and 06 are ~ready-for-agent~ but several are
+  blocked by human decisions or prerequisite tickets.
+
+** Human-blocked work
+
+These need supervision packets, not agent implementation:
+
+- ~.scratch/deepseek-v41-remaining-evidence/~: spec and intent are
+  ~ready-for-human~. Real released-weight parity, native FP8/FP4 execution,
+  tensor-parallel serving parity, and release-candidate evidence packet remain
+  gated on checkpoint asset admission and human decisions.
+- Production readiness ticket 02, complete self-contained rootfs:
+  ~needs-info~, blocked on provenance/publication-root decisions.
+- Production readiness ticket 07, approve publication root:
+  ~ready-for-human~.
+- Production readiness ticket 08, freeze B200 qualification contract:
+  ~needs-info~ until the rootfs/B200 qualification contract is frozen.
+- Incorporation ticket 18, archive/delete standalone ~tnsr~:
+  ~ready-for-human~ because archival/deletion is an authority decision.
+
+* Migration rules
+
+- Preserve source trackers. Do not rewrite existing effort history to make it
+  look like it was born under the evidence-bound model.
+- Add evidence-bound pointers beside the existing work: contract manifests,
+  receipts, candidate identities, acceptance maps, and supervision packets.
+- Completed efforts get closure receipts that cite the final candidate and
+  verification evidence. They do not get reopened unless the receipt inventory
+  finds a missing acceptance claim.
+- Live implementation efforts get one Task Contract per executable ticket or
+  per approved ticket batch when the batch is the true unit of review.
+- Human-blocked efforts get escalation packets that ask for a decision and
+  show the paused work, options, evidence, and recommendation.
+- Claimed tickets are not stolen. Consolidation must inspect whether the claim
+  is active, stale, or already represented by a task run before assigning a new
+  writer.
+- CUDA, B200, rootfs, publication, deletion, branch movement, remote effects,
+  push, merge, release, and destructive cleanup remain explicit
+  human-authorized gates.
+- A task can be marked ready only when its authoritative context is committed
+  or intentionally identified as a local tracker artifact awaiting admission.
+
 * Work modes
 
 Every task contract declares exactly one mode:
@@ -49,12 +146,34 @@ Every task contract declares exactly one mode:
 - ~experiment~: hypothesis, fixed protocol, attempt ledger, and a supported,
   rejected, or inconclusive disposition.
 
+* Output artifacts
+
+Consolidation produces:
+
+- ~.scratch/evidence-bound-agentic-engineering/pending-workstreams.org~:
+  current estate ledger, ownership classification, and next action per
+  workstream.
+- Contract manifests or contract-manifest stubs for live tasks, using the
+  schema implemented by ticket 01 when available.
+- Receipt files for completed efforts where the required evidence can be
+  identified without rerunning expensive work.
+- Supervision packets for every human-blocked decision.
+- Updated org tickets under this effort that make the migration and automation
+  sequence executable by agents.
+
 * Acceptance
 
 This setup is complete when:
 
 - The workflow docs define the evidence-bound method without claiming
   non-existent automation exists.
+- Pending Ferric workstreams are inventoried in one durable ledger with their
+  status, mode, blockers, candidate/evidence state, and next action.
+- Live workstreams have evidence-bound contract stubs or machine-validated
+  contracts, depending on whether the validator has landed.
+- Human-blocked workstreams have decision packets instead of ambiguous
+  "ready" labels.
+- Completed workstreams have closure receipts or an explicit gap list.
 - The task-run architecture captures dirty-worktree recovery, trajectory
   binding, checkpoints, rebinding, and finish gates.
 - The implementation backlog is represented as org-mode tickets under this
@@ -65,13 +184,31 @@ This setup is complete when:
 
 * Tickets
 
-- [[file:issues/01-contract-schema-and-validator.org][01-contract-schema-and-validator]]
-- [[file:issues/02-run-journal-and-checkpoints.org][02-run-journal-and-checkpoints]]
-- [[file:issues/03-task-start-admission.org][03-task-start-admission]]
-- [[file:issues/04-dirty-worktree-recovery.org][04-dirty-worktree-recovery]]
-- [[file:issues/05-evidence-records-and-finish-gate.org][05-evidence-records-and-finish-gate]]
-- [[file:issues/06-task-command-wrappers.org][06-task-command-wrappers]]
-- [[file:issues/07-human-supervision-packets.org][07-human-supervision-packets]]
+** Consolidation tickets
+
+- 08 estate ledger:
+  [[file:issues/08-estate-ledger-and-migration-map.org][ticket]]
+- 09 contract stubs:
+  [[file:issues/09-contract-stubs-for-live-workstreams.org][ticket]]
+- 10 receipts and supervision packets:
+  [[file:issues/10-closure-receipts-and-supervision-packets.org][ticket]]
+
+** Automation tickets
+
+- 01 contract schema:
+  [[file:issues/01-contract-schema-and-validator.org][ticket]]
+- 02 run journal:
+  [[file:issues/02-run-journal-and-checkpoints.org][ticket]]
+- 03 task-start:
+  [[file:issues/03-task-start-admission.org][ticket]]
+- 04 dirty-worktree recovery:
+  [[file:issues/04-dirty-worktree-recovery.org][ticket]]
+- 05 evidence records:
+  [[file:issues/05-evidence-records-and-finish-gate.org][ticket]]
+- 06 command wrappers:
+  [[file:issues/06-task-command-wrappers.org][ticket]]
+- 07 supervision packet design:
+  [[file:issues/07-human-supervision-packets.org][ticket]]
 
 * Non-goals
 
@@ -80,3 +217,4 @@ This setup is complete when:
 - No raw trajectory copy into Kata.
 - No replacement of Kata as the durable issue system.
 - No blanket requirement for large design documents on small tasks.
+- No reclassification of human-owned authority decisions as agent-ready work.

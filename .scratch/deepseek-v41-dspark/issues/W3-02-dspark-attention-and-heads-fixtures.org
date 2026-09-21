@@ -1,6 +1,6 @@
 #+TITLE: W3-02 DSpark attention + Markov/confidence head op fixtures
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: done
 #+BLOCKED_BY: W3-01-dspark-config-and-source-verifier
 #+PARENT: ../spec.org
 
@@ -40,3 +40,11 @@ upstream =DSparkAttention.forward= (model.py 1032-1074),
 - Each op fixture matches reference within Wave-1 tolerances.
 
 * Comments
+
+* Answer
+
+Closed by canonical DeepSeek V4.1 issue
+=ferric_continuum/tnsr/docs/deepseek_v41/issues/22-dspark-attention-and-head-op-fixtures.org=.
+That issue records DSpark attention, Markov head, and confidence head fixture
+coverage as done, with =deepseek_v41_math_tests= passing. This scratch ticket is
+historical scaffolding and should not be reopened as executable work.
