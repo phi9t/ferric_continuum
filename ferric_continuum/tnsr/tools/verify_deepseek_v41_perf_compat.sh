@@ -27,14 +27,14 @@
 #   DEEPSEEK_V41_MODEL_DIR / MODEL_DIR  real checkpoint dir (optional)
 #   FERRIC_TNSR_CUDA  set to 0 to force the CUDA level to SKIP (e.g. on a host
 #                     without a GPU); auto-detected from nvidia-smi otherwise
-#   OUT_DIR     scratch dir (default: $TMPDIR/deepseek-v41-perf-compat)
+#   OUT_DIR     scratch dir (default: /tmp/dsv41_perf_compat)
 #   BAZEL       bazel binary (default: bazel; version pinned by .bazelversion)
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$REPO_ROOT"
 
-OUT_DIR="${OUT_DIR:-${TMPDIR:-/tmp}/deepseek-v41-perf-compat}"
+OUT_DIR="${OUT_DIR:-/tmp/dsv41_perf_compat}"
 BAZEL="${BAZEL:-bazel}"
 TOOLS="$REPO_ROOT/ferric_continuum/tnsr/tools"
 MODEL_DIR="${DEEPSEEK_V41_MODEL_DIR:-${MODEL_DIR:-}}"

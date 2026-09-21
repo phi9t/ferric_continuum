@@ -2,8 +2,8 @@
 """Desensitization checker: fail on PII / machine-identifiable data in tracked files.
 
 Detects, per line:
-  - home_abspath : optional storage prefix plus /home/<user> (except /home/ferric)
-  - username     : a configured real username
+  - home_abspath : /data02/home/<user> or /home/<user> (except /home/ferric)
+  - username     : a configured real username (seed: philip.yang)
   - mac_address  : xx:xx:xx:xx:xx:xx
   - ipv4         : routable IPv4 (excludes loopback/private/version-like/allowed)
   - email        : personal email (excludes allowlisted project emails)
@@ -56,15 +56,7 @@ EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 SANDBOX_USERS = {"ferric"}
 
 # Seed deny-list of real usernames matched as bare tokens (outside abspaths).
-# Extra project-local usernames can be supplied without committing them:
-#   DESENSITIZE_USERNAMES="name.one,name.two" python3 tools/desensitize_check.py
-REAL_USERNAMES = sorted(
-    {
-        u.strip()
-        for u in ("local.user," + os.environ.get("DESENSITIZE_USERNAMES", "")).split(",")
-        if u.strip() and u.strip() not in SANDBOX_USERS
-    }
-)
+REAL_USERNAMES = ["philip.yang"]
 USERNAME_RES = [re.compile(r"(?<![\w.@/-])" + re.escape(u) + r"(?![\w.-])") for u in REAL_USERNAMES]
 
 SKIP_DIRS = {".git", ".worktrees", "node_modules", "__pycache__"}
@@ -292,9 +284,9 @@ def run_self_test() -> int:
     allow = Allowlist.default()
     checks = [
         # (text, expected_category_present, description)
-        ("/mnt/home/local.user/x", "home_abspath", "prefixed home abspath fires"),
-        ("/home/local.user/x", "home_abspath", "plain home abspath fires"),
-        ("author local.user", "username", "bare username fires"),
+        ("/data02/home/philip.yang/x", "home_abspath", "data02 home abspath fires"),
+        ("/home/philip.yang/x", "home_abspath", "plain home abspath fires"),
+        ("author philip.yang", "username", "bare username fires"),
         ("nic 00:1b:44:11:3a:b7", "mac_address", "mac fires"),
         ("connect 8.8.8.8", "ipv4", "public ipv4 fires"),
         ("mail someone@example.com", "email", "personal email fires"),
@@ -320,7 +312,7 @@ def run_self_test() -> int:
             print(f"SELFTEST FAIL: {desc}: {cat} should not fire on {text!r}", file=sys.stderr)
             ok = False
     # --fix must clear a compound bad line and be idempotent.
-    src = "run /mnt/home/local.user/.local/bin/bazel-9.2.0 in /home/local.user/x"
+    src = "run /data02/home/philip.yang/.local/bin/bazel-9.2.0 in /home/philip.yang/x"
     fixed, changed = fix_text(src, allow)
     if not changed or scan_text("selftest", fixed, allow):
         print(f"SELFTEST FAIL: fix did not clean {src!r} -> {fixed!r}", file=sys.stderr)

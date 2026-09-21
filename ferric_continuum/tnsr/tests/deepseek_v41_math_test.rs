@@ -8,8 +8,8 @@ use tnsr::deepseek_v41::{
         markov_head_forward, DraftLoopOutput,
     },
     engram::{
-        compressed_token_map_from_vocab_entries, engram_update, ngram_hashes, ngram_hashes_masked,
-        EngramLayout, NgramHashState,
+        compressed_token_map_from_vocab_entries, engram_update, ngram_hashes,
+        ngram_hashes_masked, EngramLayout, NgramHashState,
     },
     hyper::{hc_mixes, hc_post, hc_pre, HcShape},
     moe::{expert_swiglu, route_weights, select_experts, sqrtsoftplus_scores, GateShape},

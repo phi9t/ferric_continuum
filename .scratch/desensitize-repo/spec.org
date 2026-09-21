@@ -15,12 +15,12 @@ emails anywhere in tracked files.
 
 * Motivation
 
-A survey of tracked files found:
+A survey of the 350 tracked files found:
 
-- user-home absolute paths such as =/mnt/home/<user>= and =/home/<user>=,
+- ~211 user-home absolute paths (=/data02/home/philip.yang=, =/home/philip.yang=),
   dominated by the pinned Bazel launcher path and cross-repo =workspace/<repo>=
   references.
-- additional bare username occurrences.
+- ~30 additional bare =philip.yang= username occurrences.
 - =phi9t= (the GitHub handle matching =origin=) and =noreply@bytedance.com= (the
   intended co-author trailer) — *intended-public*, not PII.
 - No MAC addresses, no routable IPv4 (only version-like tokens and test-local
@@ -31,11 +31,11 @@ also make the docs non-portable (they only work on one machine).
 
 * What counts as a finding (error categories)
 
-1. *Home absolute paths*: optional storage prefixes plus =/home/<user>=,
-   EXCEPT the sandbox identity =/home/ferric= (allowlisted; it is a fabricated
-   container user, not a real person).
-2. *Bare real usernames*: the configured deny-list of real usernames. =phi9t=
-   is allowlisted (public project identity).
+1. *Home absolute paths*: =/data02/home/<user>= and =/home/<user>=, EXCEPT the
+   sandbox identity =/home/ferric= (allowlisted; it is a fabricated container
+   user, not a real person).
+2. *Bare real usernames*: the configured deny-list of real usernames (seed:
+   =philip.yang=). =phi9t= is allowlisted (public project identity).
 3. *MAC addresses*: =xx:xx:xx:xx:xx:xx= hex.
 4. *Routable IPv4 literals*: dotted-quad addresses EXCEPT loopback (=127.0.0.0/8=),
    =0.0.0.0=, and RFC1918 private ranges (=10.0.0.0/8=, =172.16.0.0/12=,
@@ -50,15 +50,15 @@ Allowlisted-and-kept: =phi9t=, =noreply@bytedance.com=, =git@github.com=,
 
 * Remediation policy (how the repo is cleaned)
 
-- *Bazel launcher in docs*: pinned per-user Bazel launcher abspaths are
+- *Bazel launcher in docs*: the pinned =…/.local/bin/bazel-9.2.0= abspath is
   replaced with plain =bazel= (the version is already pinned by =.bazelversion=,
   which =bazelisk=/the launcher honors — do NOT hard-code a per-user path or a
   version string in prose). A one-line note points readers at =.bazelversion=.
-- *Verifier shell scripts*: keep portable =$HOME= or plain =bazel= references
-  and avoid hard-coded storage prefixes in comments or defaults.
+- *Verifier shell scripts*: keep the existing =${BAZEL:-$HOME/.local/bin/bazel-9.2.0}=
+  default (uses =$HOME=, contains no username) — but drop any hard =/data02/…=
+  literals in comments in favor of =$HOME/.local/bin= or plain =bazel=.
 - *Cross-repo abspaths* (e.g. =tools/ferric_run/profiles/*.json= =host:= fields):
-  rewrite host-specific =/home/<user>/workspace/<repo>= forms to
-  =${HOME}/workspace/<repo>=.
+  rewrite =/data02/home/<user>/workspace/<repo>= to =${HOME}/workspace/<repo>=.
 - *=.scratch/= planning docs*: desensitized in place (they are tracked and public,
   so they leak like any other file). Historical command evidence keeps its
   meaning with =bazel=/=$HOME= substitutions.
@@ -73,7 +73,7 @@ Allowlisted-and-kept: =phi9t=, =noreply@bytedance.com=, =git@github.com=,
   - Applies the five detectors above line-by-line, reporting =path:line:col=,
     the category, and the offending token.
   - =--fix= mode applies the safe, deterministic substitutions (bazel-path →
-    =bazel=, and home abspaths → =$HOME= or =${HOME}=)
+    =bazel=, =/data02/home/<user>= and =/home/<user>= → =$HOME= or =${HOME}=)
     and reports anything it cannot auto-fix for manual attention.
   - =--self-test= runs built-in negative controls: each detector must FIRE on a
     known-bad fixture string and must NOT fire on an allowlisted string. Exit

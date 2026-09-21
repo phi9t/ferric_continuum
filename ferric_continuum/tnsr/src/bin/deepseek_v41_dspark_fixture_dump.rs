@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 use tnsr::{
     deepseek_v41::{
-        attention::{Csa2Mode, DeepSeekV41Attention, DeepSeekV41Compressor, DeepSeekV41Indexer},
+        attention::{
+            Csa2Mode, DeepSeekV41Attention, DeepSeekV41Compressor, DeepSeekV41Indexer,
+        },
         engram::DeepSeekV41Engram,
         model::{DeepSeekV41Block, DeepSeekV41DsparkHead, DeepSeekV41DsparkStage},
         moe::{DeepSeekV41Expert, DeepSeekV41Gate, DeepSeekV41MoE},
@@ -144,10 +146,7 @@ fn attention_from_fixture(
                 vec![1.0; usize_field(input, "dim") * usize_field(shape, "n_heads")],
             ),
             wk: Some(param(
-                &[
-                    usize_field(shape, "head_dim"),
-                    usize_field(shape, "head_dim"),
-                ],
+                &[usize_field(shape, "head_dim"), usize_field(shape, "head_dim")],
                 vec![1.0, 0.0, 0.0, 1.0],
             )),
             k_norm: Some(param(
@@ -263,9 +262,10 @@ fn dspark_head_from_fixture(fixture: &Value) -> DeepSeekV41DsparkHead {
 
 fn main() {
     let mut args = env::args().skip(1);
-    let fixture_path = args.next().map(PathBuf::from).unwrap_or_else(|| {
-        runfile("ferric_continuum/tnsr/testdata/deepseek_v41/dspark_tiny_model_fixture.json")
-    });
+    let fixture_path = args
+        .next()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| runfile("ferric_continuum/tnsr/testdata/deepseek_v41/dspark_tiny_model_fixture.json"));
     let text = fs::read_to_string(&fixture_path)
         .unwrap_or_else(|err| panic!("read fixture {}: {err}", fixture_path.display()));
     let fixture: Value = serde_json::from_str(&text)

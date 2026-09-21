@@ -1,7 +1,7 @@
 DeepSeek-V4.1-Flash:
 Pushing the Limits of KV Cache Compression
 DeepSeek-AI
-[upstream contact redacted]
+research@deepseek.com
 
 Abstract
 The widespread adoption of long-horizon agents has made model workloads increasingly inputheavy. Although prior work has substantially reduced the cost of long-context computation,

@@ -34,14 +34,14 @@
 #
 # Env:
 #   BAZEL    bazel binary (default: bazel; version pinned by .bazelversion)
-#   OUT_DIR  scratch dir (default: $TMPDIR/formal-mesh-plan-compat)
+#   OUT_DIR  scratch dir (default: /tmp/dsv41_formal_compat)
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
 BAZEL="${BAZEL:-bazel}"
-OUT_DIR="${OUT_DIR:-${TMPDIR:-/tmp}/formal-mesh-plan-compat}"
+OUT_DIR="${OUT_DIR:-/tmp/dsv41_formal_compat}"
 mkdir -p "$OUT_DIR"
 
 declare -A RESULT

@@ -194,5 +194,4 @@ This repository and the model weights are licensed under the [MIT License](LICEN
 
 ## Contact
 
-If you have any questions, please raise an issue or contact the upstream project
-through its public support channel.
+If you have any questions, please raise an issue or contact us at [service@deepseek.com](mailto:service@deepseek.com).

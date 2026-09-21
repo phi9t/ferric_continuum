@@ -7,3 +7,5 @@
 # The default allowlist (intended-public project identity) is baked into
 # tools/desensitize_check.py: phi9t, noreply@bytedance.com, git@github.com, and
 # the sandbox user /home/ferric. Add reviewed false positives below.
+research@deepseek.com
+service@deepseek.com
