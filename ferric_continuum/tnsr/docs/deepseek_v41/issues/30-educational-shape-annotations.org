@@ -1,0 +1,69 @@
+#+TITLE: DeepSeek V4.1 educational shape annotations
+#+TYPE: task
+#+STATUS: done
+#+BLOCKED_BY:
+#+PARENT: ../spec.org
+
+* Context
+
+The DeepSeek V4.1 implementation is an executable derivation, so the source
+should teach the tensor contracts it implements. Several core paths already do
+this well, especially the hyper-connection tensor conversion seam, but the
+attention and DSpark helper loops still relied on terse local variables and
+flattened offset formulas.
+
+* Requirements
+
+- Preserve behavior and existing public interfaces.
+- Improve educational readability in high-traffic DeepSeek paths by naming
+  semantic dimensions and flattened layouts at the point of use.
+- Prefer small private helpers, comments, and local variable names over broad
+  architectural changes.
+- Add or update focused tests before production edits when a helper captures a
+  shape contract.
+
+* Out of scope
+
+- Real checkpoint admission or download.
+- Native FP8/FP4 execution.
+- Tensor-parallel serving.
+- New DeepSeek model behavior.
+- Publication, branch landing, or merge.
+
+* Verification
+
+- =$HOME/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:lib_tests=
+  first failed because =SparseAttentionLayout= did not exist.
+- =$HOME/.local/bin/bazel-9.2.0 test //ferric_continuum/tnsr:lib_tests
+  //ferric_continuum/tnsr:deepseek_v41_math_tests= passed after the first
+  implementation slice.
+- =$HOME/.local/bin/bazel-9.2.0 test
+  //ferric_continuum/tnsr:deepseek_v41_source_tests
+  //ferric_continuum/tnsr:deepseek_v41_config_tests
+  //ferric_continuum/tnsr:deepseek_v41_math_tests
+  //ferric_continuum/tnsr:deepseek_v41_model_tests
+  //ferric_continuum/tnsr:lib_tests= passed after the final source edits.
+- =ferric_continuum/tnsr/tools/verify_deepseek_v41_sources.sh= passed.
+- =BAZEL=$HOME/.local/bin/bazel-9.2.0
+  ferric_continuum/tnsr/tools/verify_deepseek_v41_text_compat.sh= returned
+  =RESULT: PASS-WITH-SKIPS=; tiny text parity passed and real-checkpoint parity
+  was skipped because no local model directory is configured.
+- =BAZEL=$HOME/.local/bin/bazel-9.2.0
+  ferric_continuum/tnsr/tools/verify_deepseek_v41_multimodal_compat.sh=
+  returned =RESULT: PASS-WITH-SKIPS=; tiny multimodal parity passed, while B200
+  torch-runtime parity and real-checkpoint parity were skipped.
+- =BAZEL=$HOME/.local/bin/bazel-9.2.0
+  ferric_continuum/tnsr/tools/verify_deepseek_v41_dspark_compat.sh= returned
+  =RESULT: PASS-WITH-SKIPS=; tiny DSpark parity passed and real-checkpoint
+  parity was skipped.
+- =BAZEL=$HOME/.local/bin/bazel-9.2.0
+  ferric_continuum/tnsr/tools/verify_deepseek_v41_perf_compat.sh= returned
+  =RESULT: PASS-WITH-SKIPS=; CUDA tiny forward parity passed and
+  real-checkpoint perf parity was skipped.
+- =git diff --check= passed.
+
+* Answer
+
+Implemented as a behavior-preserving educational pass over the attention sparse
+layout and DSpark helper naming. The remaining release-grade DeepSeek gates
+stay human-supervised in =.scratch/deepseek-v41-remaining-evidence/=.

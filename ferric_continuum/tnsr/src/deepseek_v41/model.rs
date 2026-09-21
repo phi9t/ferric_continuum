@@ -1004,6 +1004,19 @@ mod tests {
     }
 
     #[test]
+    fn dspark_window_prefix_places_main_x_at_wrapped_slot() {
+        let main_x = param(&[2, 1, 2], vec![1.0, 2.0, 3.0, 4.0]);
+
+        let prefix = dspark_window_prefix(&main_x, 3, 4);
+
+        assert_eq!(prefix.shape().0, vec![2, 3, 2]);
+        assert_eq!(
+            prefix.inner.borrow().value.data.as_ref(),
+            &[0.0, 0.0, 1.0, 2.0, 0.0, 0.0, 0.0, 0.0, 3.0, 4.0, 0.0, 0.0]
+        );
+    }
+
+    #[test]
     fn run_ced_layers_publishes_final_encoder_hidden_before_decoder() {
         let model = DeepSeekV41TextModel {
             vocab_size: 8,

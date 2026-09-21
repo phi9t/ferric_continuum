@@ -1,0 +1,97 @@
+#+TITLE: Create closure receipts and supervision packets
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 08-estate-ledger-and-migration-map, 09-contract-stubs-for-live-workstreams
+#+PARENT: ../spec.org
+
+* Context
+
+Not all pending work is implementation work. Some efforts are already complete
+and need candidate-bound closure records. Others are paused on decisions about
+assets, rootfs identity, B200 budgets, publication boundaries, archival
+authority, or deletion. Those need supervision packets that ask for the missing
+decision with enough evidence to answer it.
+
+* Requirements
+
+- Define the local file layout for consolidation artifacts, using one of:
+  - ` .scratch/evidence-bound-agentic-engineering/receipts/ `;
+  - ` .scratch/evidence-bound-agentic-engineering/supervision/ `;
+  - source-effort-local `receipts/` and `supervision/` directories when the
+    packet belongs more clearly beside its original spec.
+- Record the selected layout in this ticket's `* Answer` and in
+  `../pending-workstreams.org`.
+- For completed efforts, write closure receipts that include:
+  - source effort path;
+  - final candidate commit or explicit candidate range when known;
+  - acceptance claims;
+  - evidence records or evidence gaps;
+  - remaining risks;
+  - promotion status distinct from completion status.
+- Cover at least these completed efforts unless ticket 08 removes them:
+  - `.scratch/incorporate-tnsr/`;
+  - `.scratch/deepseek-v41-faithful-coverage/`;
+  - `.scratch/tnsr-architecture-deepening/`;
+  - `.scratch/typed-transformer-math/`;
+  - `.scratch/desensitize-repo/`;
+  - `.scratch/ferric-runner/`;
+  - `.scratch/dtensor-mesh-simulation/`.
+- For human-blocked efforts, write supervision packets that include:
+  - decision needed;
+  - why the current contract cannot decide it;
+  - evidence already available;
+  - options;
+  - recommendation;
+  - paused work and exact unblock effect.
+- Cover at least these human-blocked decisions unless ticket 08 changes them:
+  - DeepSeek V4.1 checkpoint asset admission;
+  - DeepSeek V4.1 released-weight parity and final evidence packet;
+  - production publication root approval;
+  - self-contained rootfs information;
+  - B200 qualification contract freeze;
+  - standalone `tnsr` archive/delete authority.
+- Do not copy raw prompts, credentials, full command logs, or unbounded source
+  excerpts into receipts or supervision packets.
+
+* Out of scope
+
+- Resolving the human decisions.
+- Rerunning expensive verification unless a receipt cannot be made truthful
+  without a cheap current check.
+- Deleting, archiving, pushing, merging, releasing, or publishing anything.
+- Building an Emacs UI or task dashboard.
+
+* Verification
+
+- Every completed effort named by the ledger has either a closure receipt or a
+  recorded reason no receipt can be produced yet.
+- Every human-blocked effort named by the ledger has a supervision packet.
+- Each packet separates completion, evidence, and promotion.
+- Packets contain no raw trajectory content, credentials, or full logs.
+- A reviewer can determine the next human decision without reading the full
+  original conversation.
+
+* Comments
+
+* Answer (partial, DeepSeek V4.1)
+
+Selected layout:
+
+- Cross-effort reconciliation receipts live under
+  =.scratch/evidence-bound-agentic-engineering/receipts/=.
+- Source-effort supervision packets live beside their original effort under
+  =.scratch/<effort>/supervision/= when the decision is most useful there.
+
+DeepSeek V4.1 artifacts created:
+
+- =../receipts/deepseek-v41-reconciliation.org= closes stale DeepSeek Flash and
+  DSpark scratch queues by pointing them to the canonical tracker under
+  =ferric_continuum/tnsr/docs/deepseek_v41/=.
+- =../../deepseek-v41-remaining-evidence/supervision/01-release-grade-evidence-gates.org=
+  captures the human decisions required for real checkpoint admission,
+  released-weight parity, native FP8/FP4 execution, tensor-parallel serving
+  parity, high-cost GPU/B200 work, and publication.
+
+This is a partial answer for the user's DeepSeek-specific finish-up request.
+Other workstreams named by this ticket still need receipts or supervision
+packets unless a later consolidation pass removes them from scope.

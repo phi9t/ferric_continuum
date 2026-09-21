@@ -97,7 +97,13 @@ class Allowlist:
     def default(cls) -> "Allowlist":
         allow = cls()
         # Intended-public identity + benign values, always allowlisted.
-        for tok in ("phi9t", "noreply@bytedance.com", "git@github.com"):
+        for tok in (
+            "phi9t",
+            "noreply@bytedance.com",
+            "git@github.com",
+            "noreply@github.com",
+            "support@github.com",
+        ):
             allow.literals.add(tok)
         if ALLOWLIST_PATH.exists():
             for line in ALLOWLIST_PATH.read_text().splitlines():
