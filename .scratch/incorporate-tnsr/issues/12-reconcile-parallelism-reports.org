@@ -41,3 +41,16 @@ bazel build //ferric_continuum/tnsr:tnsr_doc
 #+end_src
 
 * Comments
+
+* Answer
+
+- Implemented in `ferric_continuum/tnsr/src/scaling/distributed/report.rs` without adding a new `scaling/parallelism.rs`.
+- Folded the external aggregate concepts into the existing distributed report:
+  - DDP gradient all-reduce was already covered by `data_parallel`.
+  - FSDP / ZeRO parameter all-gather and gradient reduce-scatter were already covered by `fsdp`.
+  - Tensor-parallel row all-reduce was already covered by `tensor_parallel`.
+  - Pipeline-parallel scheduling remains owned by `distributed::pipeline`; the aggregate report now exposes both schedule microbatch count and derived microbatch size instead of overloading the external `microbatch_per_pipeline_stage` summary.
+  - Pipeline handoff byte totals are reported as step-level logical bytes across adjacent stage boundaries and schedule microbatches.
+  - Sequence/context parallel degree is summarized as an activation shard factor and symbolic K/V exchange without adding a byte model.
+- Added `test_distributed_report_summarizes_hybrid_parallelism` to `distributed_tests`.
+- Added `test_pipeline_handoff_uses_largest_uneven_microbatch` to keep `pipeline_schedule` conservative for uneven batch splits.
