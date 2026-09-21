@@ -1,0 +1,62 @@
+#+TITLE: Create contract stubs for live workstreams
+#+TYPE: task
+#+STATUS: ready-for-agent
+#+BLOCKED_BY: 08-estate-ledger-and-migration-map
+#+PARENT: ../spec.org
+
+* Context
+
+Live Ferric workstreams should be restartable from committed context rather
+than from memory or a chat transcript. Until the contract validator and runtime
+commands are implemented, this ticket creates contract stubs that use the
+field names and rules from `docs/agents/task-runs.md` and can later be promoted
+to machine-validated contracts.
+
+* Requirements
+
+- Choose the contract location policy for this migration batch:
+  - central ` .scratch/contracts/ `, or
+  - colocated `contract.toml` files beside each effort.
+- Record the policy in this ticket's `* Answer` and in the ledger.
+- For each live agent-ready workstream identified by ticket 08, create a Task
+  Contract stub that includes:
+  - `schema_version`;
+  - stable local task reference;
+  - mode: `delivery`, `remediation`, `scout`, or `experiment`;
+  - authoritative context documents;
+  - required outputs;
+  - acceptance map or verification commands;
+  - authorization gates;
+  - recovery policy and checkpoint policy;
+  - dependencies on prerequisite tickets or receipts.
+- Start with these known live candidates unless ticket 08 changes the list:
+  - `.scratch/deepseek-v41-dspark/issues/`
+    `W3-01-dspark-config-and-source-verifier.org`;
+  - remaining DSpark W3 tickets as blocker-linked follow-ons;
+  - distributed-training TLA+ open issues only after the claimed issue is
+    reconciled;
+  - production-release-readiness agent-ready tickets whose human blockers are
+    resolved.
+- Do not create execution contracts for human-blocked tickets; create
+  supervision packets in ticket 10 instead.
+- Do not claim the stubs are machine-enforced until ticket 01 validates the
+  schema.
+
+* Out of scope
+
+- Running implementation work for any live ticket.
+- Creating linked worktrees.
+- Implementing contract validation.
+- Rewriting old tracker history into a new format.
+
+* Verification
+
+- Every contract stub references existing files.
+- Each stub has exactly one mode.
+- Each stub contains an explicit authorization section for push, merge,
+  publication, deletion, rootfs, CUDA/B200, and external effects where relevant.
+- A text scan confirms no human-blocked ticket has been given an executable
+  contract.
+- The ledger links each created stub from the owning workstream entry.
+
+* Comments

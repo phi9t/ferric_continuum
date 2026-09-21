@@ -1,6 +1,6 @@
 #+TITLE: Text logits parity harness against upstream inference
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: done
 #+BLOCKED_BY: 07-tokenizer-prompt-and-cli
 #+PARENT: ../spec.org
 
@@ -86,3 +86,12 @@ Read first:
 - This is Level 6 of the verifier ladder.
 - This ticket is not complete unless the script refuses to present skipped real
   checkpoint parity as success.
+
+* Answer
+
+Closed by canonical DeepSeek V4.1 issue
+=ferric_continuum/tnsr/docs/deepseek_v41/issues/08-text-logits-parity-harness.org=.
+That issue records the text logits parity harness as done. The Wave 1 closure
+records tiny logits parity as PASS and real released-weight parity as an honest
+SKIP when no local checkpoint is admitted. This scratch ticket is historical
+scaffolding and should not be reopened as executable work.

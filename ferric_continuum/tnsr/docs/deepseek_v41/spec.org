@@ -1,6 +1,6 @@
 #+TITLE: DeepSeek V4.1 Flash tnsr implementation spec
 #+TYPE: spec
-#+STATUS: ready-for-agent
+#+STATUS: ready-for-human
 #+PARENT: intent.org
 
 * Goal
@@ -644,3 +644,23 @@ Wave 1 is complete only when:
 - Do not reuse Qwen3's RoPE permutation unless a future upstream
   Transformers-class verifier proves the HF class differs from the released
   DeepSeek inference code.
+
+* Status reconciliation (2026-09-21)
+
+The source-backed implementation waves are closed: Wave 1 text, Wave 2
+multimodal, Wave 3 DSpark =forward_spec=, Wave 4 cost accounting, and the
+CUDA-gated tiny forward parity seam all have done canonical tickets and recorded
+PASS or PASS-WITH-SKIPS evidence.
+
+The remaining state is =ready-for-human= because release-grade promotion still
+depends on decisions and assets that an agent cannot supply:
+
+- admitted DeepSeek V4.1 release checkpoint assets;
+- real released-weight text, multimodal, and DSpark parity runs;
+- native FP8/FP4 execution instead of CPU/f32 dequantized math;
+- tensor-parallel serving parity;
+- release-candidate publication authority.
+
+Those items are tracked under
+=.scratch/deepseek-v41-remaining-evidence/spec.org= and its receipts. A SKIP in
+those receipts is not a PASS.

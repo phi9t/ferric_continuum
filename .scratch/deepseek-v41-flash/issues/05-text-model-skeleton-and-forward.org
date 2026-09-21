@@ -1,6 +1,6 @@
 #+TITLE: Text model skeleton, layers, blocks, and forward path
 #+TYPE: task
-#+STATUS: ready-for-agent
+#+STATUS: done
 #+BLOCKED_BY: 04-moe-hyper-and-engram-fixtures
 #+PARENT: ../spec.org
 
@@ -104,3 +104,12 @@ Block/unit verifier requirements:
   model layers and blocks.
 - Full-model parity is not a substitute for the layer/block tests in this
   ticket.
+
+* Answer
+
+Closed by canonical DeepSeek V4.1 issue
+=ferric_continuum/tnsr/docs/deepseek_v41/issues/05-text-model-skeleton-and-forward.org=.
+That issue records the text model, block, and forward path as resolved. Later
+canonical tickets and the release-candidate evidence packet carry the verifier
+evidence. This scratch ticket is historical scaffolding and should not be
+reopened as executable work.
