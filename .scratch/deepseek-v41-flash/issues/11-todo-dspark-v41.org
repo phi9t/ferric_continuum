@@ -1,6 +1,6 @@
 #+TITLE: TODO DSpark DeepSeek V4.1 wave
 #+TYPE: task
-#+STATUS: ready-for-human
+#+STATUS: superseded
 #+BLOCKED_BY: 09-text-compatibility-closure
 #+PARENT: ../spec.org
 
@@ -47,3 +47,21 @@ forward parity from generation-loop behavior, because the released
 * Comments
 
 - This ticket exists to keep the TODO visible without expanding the first wave.
+
+* Answer
+
+Superseded by the DSpark Wave 3 effort and canonical DeepSeek V4.1 issues
+21-25:
+
+- =.scratch/deepseek-v41-dspark/spec.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/21-dspark-config-and-source-verifier.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/22-dspark-attention-and-head-op-fixtures.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/23-dspark-head-model-and-forward-spec.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/24-dspark-checkpoint-loader.org=
+- =ferric_continuum/tnsr/docs/deepseek_v41/issues/25-dspark-parity-harness-and-closure.org=
+
+The accepted shipped boundary is deterministic =forward_spec= parity. The
+speculative-decoding acceptance loop is not implemented because the released
+upstream =generate.py= does not exercise =forward_spec=. Real released-weight
+DSpark parity remains human-gated under
+=.scratch/deepseek-v41-remaining-evidence/issues/04-real-dspark-mtp-parity.org=.

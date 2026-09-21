@@ -1,6 +1,6 @@
 #+TITLE: DeepSeek V4.1 Wave 3: DSpark/MTP speculative-draft forward
 #+TYPE: spec
-#+STATUS: ready-for-agent
+#+STATUS: done
 #+PARENT: ../deepseek-v41-flash/spec.org
 
 * Summary
@@ -92,3 +92,21 @@ Wave 3 is complete only when:
 - Text/multimodal paths and their tests are unchanged and still reject
   speculative inputs.
 - Focused Bazel tests pass under =bazel=.
+
+* Resolution (2026-09-21)
+
+This scratch Wave 3 spec is closed as historical scaffolding. The canonical
+DeepSeek V4.1 tracker records the landed DSpark work as issues 21-25 under
+=ferric_continuum/tnsr/docs/deepseek_v41/issues/=:
+
+- issue 21: DSpark config activation and source verifier;
+- issue 22: DSpark attention and head op fixtures;
+- issue 23: DSpark head model and =forward_spec=;
+- issue 24: DSpark checkpoint loader for the =mtp.*= namespace;
+- issue 25: DSpark parity harness and closure.
+
+The accepted completed claim is deterministic tiny =forward_spec= parity. Real
+released-weight DSpark MTP parity remains human-gated under
+=.scratch/deepseek-v41-remaining-evidence/issues/04-real-dspark-mtp-parity.org=.
+The speculative-decoding acceptance loop remains out of scope because the
+released upstream =generate.py= does not exercise =forward_spec=.
