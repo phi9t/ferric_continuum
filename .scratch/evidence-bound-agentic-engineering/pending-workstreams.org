@@ -1,0 +1,553 @@
+#+TITLE: Pending workstream consolidation spec
+#+TYPE: spec
+#+STATUS: ready-for-agent
+#+PARENT: spec.org
+
+* Purpose
+
+This spec is the source-grounded bridge between Ferric's existing `.scratch/`
+workstreams and the evidence-bound agentic-engineering model.
+
+It does not replace source effort trackers. It records, in one place, how each
+existing workstream should be represented before new implementation proceeds:
+
+- an Engineering Task with a Task Contract;
+- a completed-work closure receipt;
+- a human supervision packet;
+- a stale-claim recovery question;
+- an archive/deletion authority decision.
+
+The goal is to prevent old tracker state from becoming invisible context while
+the repo moves to Task Contracts, Task Runs, evidence records, and explicit
+human promotion gates.
+
+* Classification rules
+
+- Use each source file's current org metadata as the first source of truth.
+- Treat ~ready-for-agent~ as executable only after blockers are resolved and a
+  Task Contract can name candidate, context, outputs, and evidence.
+- Treat ~ready-for-human~ and ~needs-info~ as supervision states, not hidden
+  implementation permission.
+- Treat ~claimed~ as active until a run journal, branch, process, or human
+  decision proves it is stale.
+- Preserve resolved and done efforts as receipts unless a missing acceptance
+  claim requires a new task.
+- Do not flatten all pending work into one branch. Every executable unit needs
+  its own Task Contract or an explicit batch contract whose review boundary is
+  justified.
+- Do not infer authority from tracker status. Downloading large model assets,
+  launching high-cost GPU/B200 jobs, publishing, deleting, pushing, merging,
+  branch movement, release preparation, and destructive cleanup remain separate
+  human decisions.
+
+* Output model
+
+Every workstream below should end in one of four artifact shapes.
+
+** Live task contract
+
+A live task contract is used when an agent can execute a bounded task without a
+new human decision.
+
+Required fields:
+
+- source tracker path;
+- mode: ~delivery~, ~remediation~, ~scout~, or ~experiment~;
+- authoritative context files;
+- allowed change surfaces;
+- outputs;
+- acceptance map;
+- verification commands or evidence rules;
+- authorization gates;
+- recovery and checkpoint policy;
+- prerequisite receipts or blocking tickets.
+
+** Closure receipt
+
+A closure receipt is used when the implementation work is complete enough that
+the next useful action is evidence preservation, not new code.
+
+Required fields:
+
+- source tracker path;
+- final candidate commit or known candidate range;
+- completed claims;
+- evidence records;
+- evidence gaps;
+- deferred claims;
+- promotion status;
+- next related workstream, if any.
+
+** Supervision packet
+
+A supervision packet is used when the next step is a human decision.
+
+Required fields:
+
+- decision needed;
+- why the existing contract cannot decide it;
+- evidence already available;
+- options;
+- recommendation;
+- paused work;
+- exact unblock effect;
+- operations that remain unauthorized.
+
+** Stale-claim recovery packet
+
+A stale-claim recovery packet is used when a tracker says ~claimed~ but no
+active run is known.
+
+Required fields:
+
+- claimed ticket path;
+- recorded owner/run/session if present;
+- filesystem and branch evidence;
+- whether an active writer is still possible;
+- allowed recovery action;
+- next safe state.
+
+* Workstreams
+
+** Evidence-bound agentic engineering
+
+- Source: ~.scratch/evidence-bound-agentic-engineering/spec.org~
+- Status: ~ready-for-agent~
+- Mode: delivery
+- Role in consolidation: owning effort.
+- Current representation:
+  - parent spec defines the workflow and automation backlog;
+  - tickets 01-07 define runtime automation;
+  - tickets 08-10 define migration of existing workstreams.
+- Candidate/evidence state:
+  - no runtime implementation exists yet under ~scripts/agentic/~;
+  - current work is tracker/spec material only.
+- Migration target:
+  - keep this effort as the control plane for migration;
+  - do not move source workstream tickets here;
+  - create only cross-references, contracts, receipts, and packets.
+- Acceptance claims:
+  - pending streams are visible in this spec;
+  - each stream has a next artifact shape;
+  - human-gated work is not mislabeled as executable;
+  - automation tickets are still separate from migration tickets.
+- Next executable action:
+  - finish ticket 08 by validating this spec against current `.scratch/`
+    metadata;
+  - then use ticket 09 for contract stubs and ticket 10 for receipts/packets.
+- Human gates:
+  - none for local tracker/spec edits;
+  - commit, push, branch movement, merge, publication, and destructive cleanup
+    require separate authorization.
+
+** DeepSeek V4.1 remaining evidence
+
+- Source: ~.scratch/deepseek-v41-remaining-evidence/spec.org~
+- Status: ~ready-for-human~
+- Mode: mixed delivery/experiment/scout, represented as human-blocked closure.
+- Role in consolidation: human-gated evidence closure.
+- Current representation:
+  - contract exists at ~.scratch/deepseek-v41-remaining-evidence/contract.toml~;
+  - receipts exist for issues 01-10;
+  - receipts record PASS-WITH-SKIPS where real assets were unavailable.
+- Candidate/evidence state:
+  - tiny text, multimodal, DSpark, source, CPU, and CUDA-gated checks have
+    recorded evidence;
+  - real released-weight checks are intentionally not claimed.
+- Blockers:
+  - no admitted real DeepSeek V4.1 checkpoint directory;
+  - no authorization for 510GB checkpoint download;
+  - native FP8/FP4 execution needs a separate human-approved run;
+  - tensor-parallel serving parity needs real assets and a serving substrate.
+- Migration target:
+  - preserve existing contract and receipts;
+  - supervision packet:
+    ~.scratch/deepseek-v41-remaining-evidence/supervision/01-release-grade-evidence-gates.org~;
+  - do not open an implementation run until the packet is answered.
+- Acceptance claims:
+  - the packet names the exact asset, command, budget, and threshold decisions;
+  - skipped claims remain visibly skipped;
+  - no real-weight or B200 claim is promoted from tiny/local evidence.
+- Next executable action:
+  - no automatic action; wait for a human answer to the supervision packet.
+- Human gates:
+  - checkpoint asset provisioning or download;
+  - high-cost GPU/B200 execution;
+  - release-candidate publication.
+
+** DeepSeek V4.1 DSpark Wave 3
+
+- Source: ~.scratch/deepseek-v41-dspark/spec.org~
+- Status: ~done~
+- Mode: delivery, now closed as historical scaffolding.
+- Role in consolidation: completed implementation evidence.
+- Current representation:
+  - decision tickets D1-D4 are resolved;
+  - implementation tickets W3-01 through W3-05 have been reconciled to ~done~;
+  - canonical issues 21-25 under
+    ~ferric_continuum/tnsr/docs/deepseek_v41/issues/~ record the shipped
+    implementation and verifier evidence;
+  - spec states that DSpark is represented through deterministic
+    ~forward_spec~ parity, not a full speculative acceptance loop.
+- Candidate/evidence state:
+  - DSpark source/config/op/model/tiny parity evidence appears in canonical
+    issue 25 and remaining-evidence receipts 04, 05, and 10;
+  - real released-weight DSpark parity remains unproven and human-gated.
+- Blockers:
+  - none for the Wave 3 tiny/source implementation closure;
+  - real checkpoint admission blocks release-grade DSpark parity.
+- Migration target:
+  - preserve D1-D4 and W3-01 through W3-05 as historical records;
+  - point future agents to the canonical DeepSeek tracker and the
+    remaining-evidence human gate;
+  - reconciliation receipt:
+    ~.scratch/evidence-bound-agentic-engineering/receipts/deepseek-v41-reconciliation.org~.
+- Acceptance claims:
+  - deterministic tiny ~forward_spec~ parity is closed;
+  - speculative acceptance-loop behavior is not claimed;
+  - real released-weight parity is not claimed without admitted assets.
+- Next executable action:
+  - no implementation contract stub; preserve closure receipt.
+- Human gates:
+  - real released-weight checks;
+  - acceptance-loop semantics beyond recorded ~forward_spec~ parity;
+  - high-cost GPU/B200 execution.
+
+** DeepSeek V4.1 Flash
+
+- Source: ~.scratch/deepseek-v41-flash/spec.org~
+- Status: ~done~
+- Mode: delivery, now closed as historical scaffolding.
+- Role in consolidation: completed implementation evidence.
+- Current representation:
+  - intent and spec have been reconciled to closed states;
+  - issues 01-09 have been reconciled to ~done~;
+  - issue 10 was already resolved by Wave 2 multimodal;
+  - issue 11 is superseded by DSpark Wave 3;
+  - branch history shows DeepSeek V4.1 text, multimodal, DSpark, cost, CUDA
+    parity, conformance, and hardening commits have landed locally.
+- Candidate/evidence state:
+  - canonical issue docs under ~ferric_continuum/tnsr/docs/deepseek_v41/~ record
+    the landed implementation and verifier evidence;
+  - remaining release-grade evidence is owned by
+    ~.scratch/deepseek-v41-remaining-evidence/~.
+- Blockers:
+  - none for the source-backed implementation closure;
+  - real released-weight and B200/publication evidence remain outside automatic
+    scope.
+- Migration target:
+  - reconciliation receipt maps the stale scratch queue to canonical tickets;
+  - no duplicate implementation contracts for completed work;
+  - human-gated gaps remain in the remaining-evidence packet;
+  - reconciliation receipt:
+    ~.scratch/evidence-bound-agentic-engineering/receipts/deepseek-v41-reconciliation.org~.
+- Acceptance claims:
+  - no duplicate implementation tickets are created for already-landed work;
+  - unresolved gaps are named as human-gated supervision decisions;
+  - design-approval drift is recorded explicitly.
+- Next executable action:
+  - no new implementation action; use the remaining-evidence supervision
+    packet when the user authorizes assets or release-grade runs.
+- Human gates:
+  - real released-weight checks;
+  - CUDA/B200 qualification;
+  - publication claims.
+
+** Distributed training TLA+
+
+- Source: ~.scratch/distributed-training-tla/map.org~
+- Status: ~charting~
+- Mode: scout/research plus delivery tickets already completed.
+- Role in consolidation: wayfinder continuation with stale-claim audit.
+- Current representation:
+  - map remains ~charting~;
+  - MeshPlan model, checker tooling, StepTxn, and MeshTrace refinement bridge
+    are resolved;
+  - issue 04 is ~claimed~;
+  - issues 06 and 07 are ~open~ and blocked behind 04/05/06.
+- Candidate/evidence state:
+  - formal model commits exist in current branch history;
+  - not all wayfinder questions are closed.
+- Blockers:
+  - issue 04 claim must be verified before reassignment;
+  - issue 06 depends on issue 04 and StepTxn;
+  - issue 07 depends on StepTxn and issue 06.
+- Migration target:
+  - stale-claim recovery packet for issue 04;
+  - scout Task Contract for issue 06 once 04 is resolved;
+  - scout Task Contract for issue 07 once 06 is resolved.
+- Acceptance claims:
+  - no new writer claims issue 04 without active-writer exclusion;
+  - formal TLA continuation stays separate from runtime automation tickets;
+  - resolved formal receipts are preserved as evidence, not rerun by default.
+- Next executable action:
+  - audit issue 04 claim state and record the decision.
+- Human gates:
+  - only needed if active-writer exclusion cannot be proven.
+
+** Production release readiness
+
+- Source: ~.scratch/production-release-readiness/spec.org~
+- Status: ~approved~
+- Mode: gated delivery
+- Role in consolidation: umbrella release/qualification program.
+- Current representation:
+  - spec is approved;
+  - tickets 01, 03, 04, 05, and 06 are marked ~ready-for-agent~;
+  - tickets 02 and 08 are ~needs-info~;
+  - ticket 07 is ~ready-for-human~.
+- Candidate/evidence state:
+  - current branch contains release-readiness-related commits;
+  - rootfs and B200 qualification are not fully frozen;
+  - publication boundary is not approved.
+- Blockers:
+  - ticket 02 waits for ticket 01 and publication-root approval;
+  - ticket 03 waits for ticket 02;
+  - ticket 04 waits for ticket 03 and ticket 08;
+  - ticket 05 waits for ticket 01;
+  - ticket 06 waits for tickets 03, 04, 05, 07, and 08.
+- Migration target:
+  - delivery Task Contract for ticket 01;
+  - supervision packets for tickets 02, 07, and 08;
+  - defer contracts for tickets 03, 04, and 06 until blockers clear;
+  - delivery Task Contract for ticket 05 after ticket 01 has evidence.
+- Acceptance claims:
+  - release-readiness tasks cannot bypass provenance, rootfs, B200, or
+    publication gates;
+  - current local branch state is not treated as a published candidate;
+  - every high-cost or external-effect command is explicitly human-approved.
+- Next executable action:
+  - write packet for publication/rootfs/B200 decisions and contract stub for
+    ticket 01.
+- Human gates:
+  - publication root approval;
+  - self-contained rootfs source and identity;
+  - exact B200 qualification contract;
+  - commit, push, branch movement, merge, tag, release, and publication.
+
+** Ferric runner
+
+- Source: ~.scratch/ferric-runner/spec.org~
+- Status: ~approved~, with tickets 01-05 resolved.
+- Mode: delivery
+- Role in consolidation: completed execution-substrate slice.
+- Current representation:
+  - local bwrap runner first slice is represented by resolved tickets;
+  - runner uses profiles, bwrap plans, dry runs, CPU execution, and CUDA intent
+    preflight;
+  - self-contained rootfs materialization is deliberately out of this effort.
+- Candidate/evidence state:
+  - implementation appears to be part of current branch history;
+  - rootfs completion is now owned by production release readiness.
+- Blockers:
+  - none for closure receipt;
+  - rootfs expansion belongs elsewhere.
+- Migration target:
+  - closure receipt that records the runner's completed claims and defers
+    rootfs materialization.
+- Acceptance claims:
+  - receipt separates runner execution substrate from rootfs ownership;
+  - receipt points to production-readiness follow-up rather than duplicating it.
+- Next executable action:
+  - create closure receipt.
+- Human gates:
+  - none for receipt creation;
+  - rootfs/B200 execution remains separately gated.
+
+** Incorporate tnsr
+
+- Source: ~.scratch/incorporate-tnsr/spec.org~
+- Status: ~ticketed~, with implementation tickets 01-17 resolved and 18
+  ~ready-for-human~.
+- Mode: delivery plus archive authority decision.
+- Role in consolidation: completed fold-in plus archive decision.
+- Current representation:
+  - resolved map and spec record selective incorporation;
+  - tickets 01-17 are resolved;
+  - ticket 18 waits for human archive/delete authority.
+- Candidate/evidence state:
+  - selected standalone ~tnsr~ functionality is folded into Ferric;
+  - standalone repository retirement is not completed by agent authority.
+- Blockers:
+  - ticket 18 requires a human decision.
+- Migration target:
+  - closure receipt for tickets 01-17;
+  - supervision packet for ticket 18.
+- Acceptance claims:
+  - receipt preserves source-of-truth decisions;
+  - packet does not authorize deletion by implication;
+  - folded ~tnsr~ ownership is consistent with production-readiness wording.
+- Next executable action:
+  - create receipt and archive/delete supervision packet.
+- Human gates:
+  - archive/delete standalone repository;
+  - any remote or destructive cleanup.
+
+** DeepSeek V4.1 faithful coverage
+
+- Source: ~.scratch/deepseek-v41-faithful-coverage/spec.org~
+- Status: ~done~
+- Mode: delivery/evidence closure.
+- Role in consolidation: completed evidence-bearing model work.
+- Current representation:
+  - tickets 01-08 are done;
+  - recent history includes DeepSeek V4.1 conformance evidence.
+- Candidate/evidence state:
+  - source faithfulness and tiny/local parity are represented;
+  - real checkpoint evidence remains in the remaining-evidence effort.
+- Blockers:
+  - none for closure; release-grade claims stay separate.
+- Migration target:
+  - consolidated by the DeepSeek V4.1 reconciliation receipt and
+    remaining-evidence receipt 10:
+    ~.scratch/evidence-bound-agentic-engineering/receipts/deepseek-v41-reconciliation.org~;
+    ~.scratch/deepseek-v41-remaining-evidence/receipts/10-release-candidate-evidence-packet.org~.
+- Acceptance claims:
+  - no overclaim of real released-weight parity;
+  - skipped claims link to remaining-evidence receipts and supervision packet.
+- Next executable action:
+  - no action unless the candidate or receipts change.
+- Human gates:
+  - real checkpoint and release claims remain outside this closure.
+
+** Deepen GQA semantics
+
+- Source: ~.scratch/deepen-gqa-semantics/intent.org~
+- Status: ~resolved~
+- Mode: delivery closure.
+- Role in consolidation: completed architecture-deepening decision trail.
+- Current representation:
+  - ordinary and context-parallel GQA remain separate executable derivations;
+  - named semantic axes and extent evidence were added;
+  - Wave B/C refinements and ring/CUDA/NCCL execution are deferred.
+- Candidate/evidence state:
+  - resolved intent contains the accepted design and final answer;
+  - related code evidence should be tied through tnsr architecture receipts.
+- Blockers:
+  - none for closure receipt.
+- Migration target:
+  - include in the folded ~tnsr~ architecture closure packet.
+- Acceptance claims:
+  - receipt preserves deferred scope;
+  - no CUDA/NCCL or static-extents claim is implied.
+- Next executable action:
+  - create or attach closure receipt.
+- Human gates:
+  - future Wave B/C or CUDA/NCCL expansion requires new spec approval.
+
+** tnsr architecture deepening
+
+- Source: ~.scratch/tnsr-architecture-deepening/spec.org~
+- Status: ~resolved~
+- Mode: delivery
+- Role in consolidation: completed implementation wave.
+- Current representation:
+  - six tickets resolved for shape arithmetic, named dimensions, attention
+    layout, scoped recording, graph observation, and Qwen3 call-state
+    coherence.
+- Candidate/evidence state:
+  - resolved spec contains behavioral proof and review notes.
+- Blockers:
+  - none for closure receipt.
+- Migration target:
+  - closure receipt or combined folded-~tnsr~ architecture receipt.
+- Acceptance claims:
+  - receipt binds the architecture changes to their tests and review evidence;
+  - no follow-up static-extents or interchange work is implied as complete.
+- Next executable action:
+  - create closure receipt.
+- Human gates:
+  - new architecture waves require new approved specs.
+
+** Typed transformer mathematics
+
+- Source: ~.scratch/typed-transformer-math/spec.org~
+- Status: ~resolved~
+- Mode: scout plus delivery
+- Role in consolidation: completed decision map plus Wave A delivery.
+- Current representation:
+  - wayfinder and spec are resolved;
+  - Wave A typed Qwen3 attention tracer is resolved;
+  - Wave B and Wave C are specification-level future work.
+- Candidate/evidence state:
+  - resolved tracker files provide decision evidence;
+  - implementation evidence should be tied through architecture closure.
+- Blockers:
+  - none for Wave A closure receipt.
+- Migration target:
+  - closure receipt or combined folded-~tnsr~ architecture receipt.
+- Acceptance claims:
+  - Wave A is distinguished from deferred Wave B/C;
+  - future type-system work is not silently reopened.
+- Next executable action:
+  - create closure receipt.
+- Human gates:
+  - future Wave B/C work requires separate spec approval.
+
+** Desensitize repo
+
+- Source: ~.scratch/desensitize-repo/spec.org~
+- Status: ~done~
+- Mode: delivery
+- Role in consolidation: completed repository hygiene gate.
+- Current representation:
+  - checker, allowlist, CI gate, and hook gates landed;
+  - current branch history includes hook scrub gates.
+- Candidate/evidence state:
+  - done spec records acceptance;
+  - current release-readiness effort depends on sanitized publication closure.
+- Blockers:
+  - none for closure receipt.
+- Migration target:
+  - closure receipt and production-readiness input.
+- Acceptance claims:
+  - receipt preserves the difference between current-state scan and history
+    rewrite, which is out of scope;
+  - future publication work can cite the gate without re-reading the whole
+    desensitization design.
+- Next executable action:
+  - create closure receipt.
+- Human gates:
+  - history rewriting or publication remains separately authorized.
+
+* Cross-stream execution order
+
+1. Finish this spec by validating every current tracker status in `.scratch/`.
+2. Resolve stale-claim ambiguity for distributed-training TLA+ issue 04.
+3. Create contract stubs for currently executable work:
+   - evidence-bound ticket 01;
+   - evidence-bound ticket 08;
+   - production-release-readiness ticket 01.
+4. Create supervision packets for human-blocked decisions:
+   - DeepSeek real checkpoint asset admission;
+   - DeepSeek remaining real parity and release packet;
+   - production rootfs and B200 contract decisions;
+   - publication root approval;
+   - standalone ~tnsr~ archive/delete authority.
+5. Create closure receipts for completed efforts.
+6. After ticket 01 lands, migrate stubs to validator-clean contracts.
+7. After ticket 02 lands, start recording new work through Task Runs.
+8. After tickets 03-06 land, make task wrappers the normal execution path.
+
+* Ledger gaps to verify during ticket 08
+
+- Whether
+  ~.scratch/distributed-training-tla/issues/04-layout-provenance-boundary.org~
+  has an active writer or only a stale claim.
+- Whether current branch-local commits after ~main~ are intended to be part of
+  the release-readiness candidate.
+- Whether all completed efforts have retained command output or only
+  conversational evidence.
+- Whether contract stubs should live beside each source effort or under a
+  central ~.scratch/contracts/~ directory once ticket 01 fixes the schema.
+
+* Acceptance for this spec
+
+- Every current live, human-blocked, or closure-only `.scratch/` workstream is
+  listed or explicitly ruled out as unrelated.
+- Every workstream has a mode, role, current representation, candidate/evidence
+  state, blockers, migration target, acceptance claims, next action, and human
+  gates.
+- The cross-stream order has no hidden dependency on a human-blocked decision.
+- The document preserves source tracker ownership and does not rewrite history.
+- The document can be used directly by tickets 08, 09, and 10.
