@@ -22,7 +22,7 @@ pytest-cov==7.1.0
 # Type checking
 mypy==2.3.1
 types-PyYAML==6.0.12.20260906
-types-toml==0.10.8.20240310
+types-toml==0.10.8.20260518
 
 # Code quality
 black==24.8.0
