@@ -7,7 +7,7 @@ pyyaml==6.0.1
 toml==0.10.2
 
 # Data processing and metrics
-pandas==2.2.3
+pandas==3.0.6
 numpy==2.1.2
 polars==1.23.0
 
