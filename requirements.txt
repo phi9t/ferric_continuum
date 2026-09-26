@@ -25,6 +25,6 @@ types-PyYAML==6.0.12.20260906
 types-toml==0.10.8.20240310
 
 # Code quality
-black==24.8.0
+black==26.5.1
 ruff==0.16.8
 
