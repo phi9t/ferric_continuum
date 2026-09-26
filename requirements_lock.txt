@@ -542,14 +542,9 @@ pluggy==1.6.0 \
     # via
     #   pytest
     #   pytest-cov
-polars==1.23.0 \
-    --hash=sha256:37ca01c31909ead40f32eb275b578c576bdd2e93730a07f3a38688b1c84f6ca8 \
-    --hash=sha256:3cb0b944ddfc13eefa3b8c244cba39790226fd11c861cbba9db2a1cbe033387a \
-    --hash=sha256:4305e87e4c48bc4ae8401a055fb5431c4c0c4e88855e648927269f31e6d338f0 \
-    --hash=sha256:655d296078c99cd3f5cefc3ec1f1447676a64f0d7dcd2f89d919f19bf84fa53f \
-    --hash=sha256:701df6381665c56da18704305119ce73983b1bead3378fbc8fac7ffd24817e93 \
-    --hash=sha256:b774f04d77ed4153d9539e546db5ad6ff4757c79dfe981e22400eb59299c5493 \
-    --hash=sha256:d9d344958cb9bfe1bd42c1af910cb000c0dfa2892b849f2cd35649e0bcd10fab
+polars==1.44.2 \
+    --hash=sha256:1bb331f17a40d9d931101533dcd33637b66edc61eb377b07020dac16a0f0377b \
+    --hash=sha256:86c8e26b6c2de8c8d344bb910b74dfc47b118ac3fe0f19b44909467990a0b281
     # via -r requirements.txt
 pygments==2.21.0 \
     --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9 \
